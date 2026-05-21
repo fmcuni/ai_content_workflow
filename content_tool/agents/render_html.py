@@ -1,8 +1,13 @@
 import json
 import re
 from dataclasses import dataclass
+from uuid import UUID
 
 from markdown_it import MarkdownIt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from content_tool.db.models import Draft, Render
 
 
 @dataclass
@@ -130,3 +135,22 @@ def render_html(markdown: str) -> RenderResult:
         excerpt_suggestion=excerpt,
         slug_suggestion=slug_suggestion,
     )
+
+
+async def run_render_html(
+    *, session: AsyncSession, draft_id: UUID,
+) -> RenderResult:
+    draft = (await session.execute(select(Draft).where(Draft.draft_id == draft_id))).scalar_one()
+    md = draft.final_markup or draft.markup_raw
+    result = render_html(md)
+    session.add(Render(
+        draft_id=draft_id,
+        seo_title=result.seo_title,
+        meta_description=result.meta_description,
+        html_body=result.html_body,
+        faq_schema_jsonld=result.faq_schema_jsonld,
+        excerpt_suggestion=result.excerpt_suggestion,
+        slug_suggestion=result.slug_suggestion,
+    ))
+    await session.commit()
+    return result
