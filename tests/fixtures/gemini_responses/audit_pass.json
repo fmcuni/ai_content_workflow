@@ -1,0 +1,7 @@
+{
+  "overall_pass": true,
+  "severity_summary": {"high": 0, "medium": 0, "low": 1},
+  "findings": [
+    {"id": "f1", "category": "voice", "severity": "low", "location": "intro", "issue": "可以更口語", "suggested_fix": "首段加一句直接問題", "must_fix": false}
+  ]
+}

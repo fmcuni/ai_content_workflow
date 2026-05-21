@@ -1,0 +1,8 @@
+{
+  "overall_pass": false,
+  "severity_summary": {"high": 1, "medium": 1, "low": 0},
+  "findings": [
+    {"id": "f1", "category": "citation", "severity": "high", "location": "intro", "issue": "引用 bowtie.com.hk", "suggested_fix": "改用 ha.org.hk", "must_fix": true},
+    {"id": "f2", "category": "coverage", "severity": "medium", "location": "section: 治療", "issue": "未提及 MSI-H", "suggested_fix": "新增段落", "must_fix": false}
+  ]
+}

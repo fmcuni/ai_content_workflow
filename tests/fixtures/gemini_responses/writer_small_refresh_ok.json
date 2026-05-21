@@ -1,0 +1,8 @@
+{
+  "diagnose": "本次更新主要為大腸癌存活率與篩查資格的數字刷新，並新增 MSI-H 標靶相關 FAQ。保留 70% 以上原文結構。",
+  "markup": "# 大腸癌：症狀、篩查、治療與保險指南（2026）\n%%meta desc=了解大腸癌的早期症狀、篩查方法與香港保險保障。%%\n\n大腸癌是香港常見的癌症之一...\n\n%%adv_panel id=1%%\n\n## 大腸癌篩查方法\n大便潛血測試...\n\n%%page_widget id=2%%\n\n## 常見問題\n%%acf_faq type=q%%\n篩查資格是什麼？\n%%acf_faq type=a%%\n50 至 75 歲香港居民...\n%%end%%\n",
+  "citation_intents": [
+    {"claim": "篩查資格 50-75 歲", "why_cited": "驗證資格年齡"},
+    {"claim": "第三期五年存活率約 68.7%", "why_cited": "核實 2026 數字"}
+  ]
+}
