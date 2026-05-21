@@ -270,3 +270,67 @@ async def get_latest_audit(run_id: UUID, sf=Depends(get_session_factory)) -> dic
             "llm_findings": audit.llm_findings,
             "deterministic_findings": audit.deterministic_findings,
         }
+
+
+@router.post("/{run_id}/dry-publish")
+async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
+    """Return the exact REST payload we'd send to WP, WITHOUT calling WP."""
+    from content_tool.db.models import FetchedArticle
+
+    target_base = request.app.state.wp_client._base_url  # type: ignore[attr-defined]
+    target_label = request.app.state.wp_target
+    seo_plugin = request.app.state.seo_plugin
+
+    async with sf() as session:
+        run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
+        fa = (await session.execute(
+            select(FetchedArticle).where(FetchedArticle.run_id == run_id)
+        )).scalar_one()
+        draft = (await session.execute(
+            select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+        )).scalar_one()
+        render = (await session.execute(
+            select(Render).where(Render.draft_id == draft.draft_id)
+        )).scalar_one()
+
+    meta_key = (
+        "_yoast_wpseo_metadesc" if seo_plugin == "yoast"
+        else ("rank_math_description" if seo_plugin == "rankmath" else None)
+    )
+    meta = {meta_key: render.meta_description} if meta_key else {}
+
+    body: dict = {
+        "title": render.seo_title,
+        "content": render.html_body,
+        "status": run.wp_publish_status or "draft",
+        "categories": run.wp_category_ids or [],
+        "tags": run.wp_tag_ids or [],
+        "meta": meta,
+    }
+    if run.wp_excerpt or render.excerpt_suggestion:
+        body["excerpt"] = run.wp_excerpt or render.excerpt_suggestion
+    if run.wp_slug:
+        body["slug"] = run.wp_slug
+    if run.wp_author_id:
+        body["author"] = run.wp_author_id
+    if run.wp_featured_media_id:
+        body["featured_media"] = run.wp_featured_media_id
+
+    url = (
+        f"{target_base}/wp-json/wp/v2/posts/{fa.wp_post_id}"
+        if fa.wp_post_id
+        else f"{target_base}/wp-json/wp/v2/posts"
+    )
+    method = "PUT" if fa.wp_post_id else "POST"
+
+    return {
+        "target_base_url": target_base,
+        "target_label": target_label,
+        "request_method": method,
+        "request_url": url,
+        "request_headers": {
+            "authorization": "Basic <redacted>",
+            "content-type": "application/json",
+        },
+        "request_body": body,
+    }

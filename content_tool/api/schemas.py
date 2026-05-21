@@ -45,3 +45,12 @@ class Hitl2Request(BaseModel):
     wp_slug: str | None = None
     wp_excerpt: str | None = None
     wp_publish_at: datetime | None = None
+
+
+class DryPublishResponse(BaseModel):
+    target_base_url: str
+    target_label: str                    # staging | production
+    request_method: Literal["PUT", "POST"]
+    request_url: str
+    request_headers: dict[str, str]
+    request_body: dict
