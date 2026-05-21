@@ -1,0 +1,29 @@
+deny:
+  domains:
+    - bowtie.com.hk
+    - bowtie.com
+    - manulife.com.hk
+    - axa.com.hk
+    - prudential.com.hk
+    - aia.com.hk
+    - china-life.com.hk
+    - blueocean.com.hk
+    - chubb.com.hk
+    - zurich.com.hk
+    - hsbclife.com.hk
+    - fwd.com.hk
+prefer:
+  tlds: [".gov.hk", ".gov", ".edu", ".edu.hk"]
+  domains:
+    - ia.org.hk
+    - ifec.org.hk
+    - hkma.gov.hk
+    - dh.gov.hk
+    - chp.gov.hk
+    - ha.org.hk
+    - mpfa.org.hk
+    - vhis.gov.hk
+    - who.int
+community_exception:
+  topic_categories: [community-response, patient-experience, social-discussion]
+  allowed_domains: [reddit.com, hk.discuss.com, lihkg.com, baby-kingdom.com]
