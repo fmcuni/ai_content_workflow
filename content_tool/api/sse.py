@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from content_tool.gemini.client import GeminiClient
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
+from content_tool.wordpress.client import WordPressClient
 
 
 class RunExecutor:
@@ -21,10 +22,14 @@ class RunExecutor:
         postgres_url: str,
         session_factory: async_sessionmaker[Any],
         gemini: GeminiClient,
+        wp_client: WordPressClient | None = None,
+        seo_plugin: str | None = None,
     ) -> None:
         self._postgres_url = postgres_url
         self._sf = session_factory
         self._gemini = gemini
+        self._wp_client = wp_client
+        self._seo_plugin = seo_plugin
         self._subscribers: dict[UUID, list[asyncio.Queue[str]]] = {}
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
@@ -66,7 +71,8 @@ class RunExecutor:
         try:
             async with make_checkpointer(self._postgres_url) as cp:
                 graph = build_root_graph(
-                    session_factory=self._sf, gemini=self._gemini, checkpointer=cp
+                    session_factory=self._sf, gemini=self._gemini, checkpointer=cp,
+                    wp_client=self._wp_client, seo_plugin=self._seo_plugin,
                 )
                 config = {"configurable": {"thread_id": str(run_id)}}
 

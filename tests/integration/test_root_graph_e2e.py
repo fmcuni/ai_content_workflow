@@ -164,13 +164,13 @@ async def test_root_graph_with_two_hitl_resumes(postgres_url):
             st = await graph.aget_state(config)
             assert "production" in st.next
 
-            # Resume — proceeds into production, then halts before persist.
+            # Resume — proceeds into production, then halts before publish.
             await graph.aupdate_state(config, {"hitl_1_decision": "approve"})
             await graph.ainvoke(None, config=config)
             st = await graph.aget_state(config)
-            assert "persist" in st.next
+            assert "publish" in st.next
 
-            # Resume — final persist.
+            # Resume — final publish (no wp_client → falls back to "persisted").
             await graph.aupdate_state(config, {"hitl_2_decision": "approve"})
             final = await graph.ainvoke(None, config=config)
             assert final["status"] == "persisted"

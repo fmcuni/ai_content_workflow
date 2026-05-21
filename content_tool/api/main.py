@@ -9,6 +9,8 @@ from content_tool.api.sse import RunExecutor
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.gemini.client import RealGeminiClient
+from content_tool.wordpress.client import WordPressClient
+from content_tool.wordpress.seo_plugin import detect_seo_plugin
 
 
 @asynccontextmanager
@@ -21,9 +23,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         model=settings.gemini_model,
         thinking_level=settings.gemini_thinking_level,
     )
-    executor = RunExecutor(postgres_url=settings.postgres_url, session_factory=sf, gemini=gemini)
+    seo_plugin = None
+    if settings.wp_base_url:
+        try:
+            seo_plugin = await detect_seo_plugin(settings.wp_base_url)
+        except Exception:
+            seo_plugin = None
+    wp_client = WordPressClient(
+        settings.wp_base_url,
+        username=settings.wp_username,
+        app_password=settings.wp_app_password,
+        timeout=settings.wp_timeout,
+    )
+    executor = RunExecutor(
+        postgres_url=settings.postgres_url,
+        session_factory=sf,
+        gemini=gemini,
+        wp_client=wp_client,
+        seo_plugin=seo_plugin,
+    )
     app.state.session_factory = sf
     app.state.run_executor = executor
+    app.state.wp_client = wp_client
+    app.state.seo_plugin = seo_plugin
+    app.state.wp_target = settings.wp_target
     try:
         yield
     finally:
