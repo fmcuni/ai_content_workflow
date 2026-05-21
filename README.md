@@ -4,6 +4,8 @@ LangGraph-based content update tool. See `docs/superpowers/specs/2026-05-21-bowt
 
 ## Dev setup
 
+Requires Python 3.13 and [uv](https://docs.astral.sh/uv/).
+
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"

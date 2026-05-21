@@ -1,6 +1,6 @@
 {
   "include": ["content_tool", "tests", "evals"],
-  "pythonVersion": "3.12",
+  "pythonVersion": "3.13",
   "typeCheckingMode": "strict",
   "reportMissingImports": "error",
   "reportMissingTypeStubs": "warning",
