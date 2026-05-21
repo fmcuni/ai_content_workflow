@@ -207,3 +207,29 @@ class AuditRun(Base):
     tokens_in: Mapped[int | None]
     tokens_out: Mapped[int | None]
     latency_ms: Mapped[int | None]
+
+
+class ComplianceLog(Base):
+    __tablename__ = "compliance_log"
+
+    log_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.runs.run_id"),
+        unique=True,
+        nullable=False,
+    )
+    persisted_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
+    persona: Mapped[str] = mapped_column(String, nullable=False)
+    article_url: Mapped[str] = mapped_column(String, nullable=False)
+    wp_pushed_post_id: Mapped[int | None]
+    chosen_route: Mapped[str] = mapped_column(String, nullable=False)
+    sources_cited: Mapped[str] = mapped_column(String, nullable=False)
+    sources_denied: Mapped[str | None] = mapped_column(String)
+    audit_overall_pass: Mapped[bool]
+    audit_severity_summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    approver_email: Mapped[str] = mapped_column(String, nullable=False)
+    iteration_count: Mapped[int]
+    gemini_model: Mapped[str] = mapped_column(String, nullable=False)
+    total_tokens: Mapped[int | None]
+    est_cost_usd_cents: Mapped[int | None]
