@@ -9,6 +9,7 @@ from opentelemetry.instrumentation.fastapi import (
 )
 
 from content_tool.api.routes.compliance import router as compliance_router
+from content_tool.api.routes.costs import router as costs_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.sse import RunExecutor
 from content_tool.config import get_settings
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
 
     app.include_router(runs_router)
     app.include_router(compliance_router)
+    app.include_router(costs_router)
     FastAPIInstrumentor().instrument_app(app)
     return app
 

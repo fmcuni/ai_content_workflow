@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
+import { CostMeter } from "@/components/CostMeter";
 import { useRunEvents } from "@/lib/sse";
 import { api } from "@/lib/api";
 
@@ -23,10 +24,13 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
       <Link href="/" className="text-sm text-neutral-500">← All runs</Link>
       <h1 className="text-xl font-semibold mt-2 mb-1">{run?.topic ?? "…"}</h1>
       <p className="text-neutral-500 text-sm">{run?.article_url}</p>
-      <div className="flex gap-3 mt-3 mb-6">
+      <div className="flex gap-3 mt-3 mb-2">
         {run && <RunStatusBadge status={run.status} />}
         {run?.chosen_route && <span className="text-sm">Route: <b>{run.chosen_route}</b></span>}
         {run && <span className="text-sm">Iteration: {run.iteration_count}</span>}
+      </div>
+      <div className="mb-6">
+        <CostMeter runId={runId} />
       </div>
       <div className="grid grid-cols-2 gap-6">
         <Card className="p-4">

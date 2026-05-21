@@ -1,0 +1,99 @@
+from datetime import date, datetime
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import and_, select
+
+from content_tool.db.models import Draft, GapAnalysisRow, Run
+from content_tool.observability.cost import CostCalculator
+
+router = APIRouter(prefix="/costs", tags=["costs"])
+
+
+def get_session_factory(request: Request) -> Any:  # noqa: ANN401
+    return request.app.state.session_factory
+
+
+@router.get("/run/{run_id}")
+async def cost_for_run(
+    run_id: UUID,
+    sf: Any = Depends(get_session_factory),  # noqa: ANN401, B008
+) -> dict[str, int]:
+    calc = CostCalculator.load_from("config/pricing.yaml")
+    async with sf() as session:
+        ga = (
+            await session.execute(
+                select(GapAnalysisRow).where(GapAnalysisRow.run_id == run_id)
+            )
+        ).scalar_one_or_none()
+        drafts = (
+            await session.execute(select(Draft).where(Draft.run_id == run_id))
+        ).scalars().all()
+        if not ga and not drafts:
+            raise HTTPException(404, "no usage")
+
+        tin = (ga.tokens_in or 0) if ga else 0
+        tout = (ga.tokens_out or 0) if ga else 0
+        tthk = (ga.thinking_tokens or 0) if ga else 0
+        for d in drafts:
+            tin += d.tokens_in or 0
+            tout += d.tokens_out or 0
+            tthk += d.thinking_tokens or 0
+
+        cents = calc.estimate_cents(
+            model="gemini-3.5-flash",
+            tokens_in=tin,
+            tokens_out=tout,
+            thinking_tokens=tthk,
+        )
+        return {
+            "tokens_in": tin,
+            "tokens_out": tout,
+            "thinking_tokens": tthk,
+            "est_usd_cents": cents,
+        }
+
+
+@router.get("/summary")
+async def cost_summary(
+    start: date,
+    end: date,
+    sf: Any = Depends(get_session_factory),  # noqa: ANN401, B008
+) -> dict[str, int]:
+    calc = CostCalculator.load_from("config/pricing.yaml")
+    async with sf() as session:
+        runs = (
+            await session.execute(
+                select(Run).where(
+                    and_(
+                        Run.created_at >= datetime.combine(start, datetime.min.time()),
+                        Run.created_at <= datetime.combine(end, datetime.max.time()),
+                    )
+                )
+            )
+        ).scalars().all()
+        total_cents = 0
+        for r in runs:
+            ga = (
+                await session.execute(
+                    select(GapAnalysisRow).where(GapAnalysisRow.run_id == r.run_id)
+                )
+            ).scalar_one_or_none()
+            drafts = (
+                await session.execute(select(Draft).where(Draft.run_id == r.run_id))
+            ).scalars().all()
+            tin = (ga.tokens_in or 0) if ga else 0
+            tout = (ga.tokens_out or 0) if ga else 0
+            tthk = (ga.thinking_tokens or 0) if ga else 0
+            for d in drafts:
+                tin += d.tokens_in or 0
+                tout += d.tokens_out or 0
+                tthk += d.thinking_tokens or 0
+            total_cents += calc.estimate_cents(
+                model="gemini-3.5-flash",
+                tokens_in=tin,
+                tokens_out=tout,
+                thinking_tokens=tthk,
+            )
+        return {"runs": len(runs), "total_usd_cents": total_cents}
