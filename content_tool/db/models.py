@@ -233,3 +233,17 @@ class ComplianceLog(Base):
     gemini_model: Mapped[str] = mapped_column(String, nullable=False)
     total_tokens: Mapped[int | None]
     est_cost_usd_cents: Mapped[int | None]
+
+
+class Eval(Base):
+    __tablename__ = "evals"
+
+    eval_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ran_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    metric: Mapped[str] = mapped_column(String, nullable=False)
+    fixture_id: Mapped[str] = mapped_column(String, nullable=False)
+    run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    score: Mapped[float | None]
+    pass_: Mapped[bool] = mapped_column("pass", default=False)
+    judge_notes: Mapped[dict | None] = mapped_column(JSONB)
+    commit_sha: Mapped[str] = mapped_column(String, nullable=False)
