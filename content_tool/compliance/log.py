@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import (
@@ -52,26 +53,26 @@ async def write_compliance_log(
         thinking_tokens=sum((d.thinking_tokens or 0) for d in drafts) + (ga.thinking_tokens or 0),
     )
 
-    session.add(
-        ComplianceLog(
-            run_id=run_id,
-            persona=run.persona,
-            article_url=run.article_url,
-            wp_pushed_post_id=run.wp_pushed_post_id,
-            chosen_route=run.chosen_route or "unknown",
-            sources_cited=cited,
-            sources_denied=denied,
-            audit_overall_pass=audit.overall_pass if audit else False,
-            audit_severity_summary={
-                "high": audit.severity_high if audit else 0,
-                "medium": audit.severity_medium if audit else 0,
-                "low": audit.severity_low if audit else 0,
-            },
-            approver_email=run.approved_by or "unknown",
-            iteration_count=run.iteration_count,
-            gemini_model=gemini_model,
-            total_tokens=total_tokens,
-            est_cost_usd_cents=cost_cents,
-        )
-    )
+    stmt = pg_insert(ComplianceLog).values(
+        run_id=run_id,
+        persona=run.persona,
+        article_url=run.article_url,
+        wp_pushed_post_id=run.wp_pushed_post_id,
+        chosen_route=run.chosen_route or "unknown",
+        sources_cited=cited,
+        sources_denied=denied,
+        audit_overall_pass=audit.overall_pass if audit else False,
+        audit_severity_summary={
+            "high": audit.severity_high if audit else 0,
+            "medium": audit.severity_medium if audit else 0,
+            "low": audit.severity_low if audit else 0,
+        },
+        approver_email=run.approved_by or "unknown",
+        iteration_count=run.iteration_count or 0,
+        gemini_model=gemini_model,
+        total_tokens=total_tokens,
+        est_cost_usd_cents=cost_cents,
+    ).on_conflict_do_nothing(index_elements=["run_id"])
+
+    await session.execute(stmt)
     await session.commit()
