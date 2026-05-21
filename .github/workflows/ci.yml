@@ -18,3 +18,28 @@ jobs:
       - run: source .venv/bin/activate && ruff check .
       - run: source .venv/bin/activate && pyright
       - run: source .venv/bin/activate && pytest -v
+
+  judge-evals:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'prompt-change')
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: content_tool
+          POSTGRES_PASSWORD: content_tool
+          POSTGRES_DB: content_tool
+        ports: ["5432:5432"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv && uv pip install -e ".[dev]"
+      - env:
+          POSTGRES_URL: postgresql+asyncpg://content_tool:content_tool@localhost:5432/content_tool
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          source .venv/bin/activate
+          alembic upgrade head
+          # Engineer extends evals/runner.py to support a "sample 5 fixtures with judge" mode.
+          # MVP: just exercise judge_runner against canned fixtures to prove wiring.
+          pytest tests/unit/test_judge_runner.py -v
