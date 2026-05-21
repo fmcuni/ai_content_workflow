@@ -20,7 +20,7 @@ def upgrade() -> None:
         sa.Column("run_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("content_tool.runs.run_id", ondelete="CASCADE"), nullable=False),
         sa.Column("iteration", sa.Integer, nullable=False),
-        sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("diagnose", sa.String, nullable=False),
         sa.Column("markup_raw", sa.String, nullable=False),
         sa.Column("final_markup", sa.String),
@@ -45,9 +45,9 @@ def upgrade() -> None:
         sa.Column("title", sa.String),
         sa.Column("policy_decision", sa.String, nullable=False),
         sa.Column("denied_reason", sa.String),
-        sa.Column("was_displayed", sa.Boolean, server_default=sa.text("false")),
+        sa.Column("was_displayed", sa.Boolean, server_default=sa.text("false"), nullable=False),
         sa.Column("resolution_error", sa.String),
-        sa.Column("resolved_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
+        sa.Column("resolved_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
         schema="content_tool",
     )
     op.create_index("citations_draft_id_idx", "citations", ["draft_id"], schema="content_tool")

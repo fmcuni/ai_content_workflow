@@ -19,7 +19,7 @@ def upgrade() -> None:
         sa.Column("render_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("draft_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("content_tool.drafts.draft_id", ondelete="CASCADE"), nullable=False),
-        sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("seo_title", sa.String, nullable=False),
         sa.Column("meta_description", sa.String, nullable=False),
         sa.Column("html_body", sa.String, nullable=False),
