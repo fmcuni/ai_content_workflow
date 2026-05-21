@@ -1,11 +1,16 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
-from content_tool.api.schemas import CreateRunRequest, CreateRunResponse, ResumeRequest
+from content_tool.api.schemas import (
+    CreateRunRequest,
+    CreateRunResponse,
+    Hitl2Request,
+    ResumeRequest,
+)
 from content_tool.api.sse import sse_stream
 from content_tool.db.models import Run
 
@@ -104,6 +109,41 @@ async def resume_run(
             await session.commit()
     if payload.decision == "override_route" and payload.new_route:
         state_update["chosen_route"] = payload.new_route
+
+    await runner.resume(run_id, state_update)
+    return {"ok": True}
+
+
+@router.post("/{run_id}/hitl-2")
+async def hitl_2(
+    run_id: UUID, payload: Hitl2Request,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    runner=Depends(get_runner),  # noqa: ANN001, B008
+) -> dict:
+    from sqlalchemy import update
+
+    async with sf() as session:
+        await session.execute(
+            update(Run).where(Run.run_id == run_id).values(
+                hitl_2_decision=payload.decision,
+                hitl_2_notes=payload.notes,
+                approved_at=datetime.now(UTC) if payload.decision == "approve" else None,
+                approved_by="placeholder-editor",  # Plan 4 binds real identity
+                wp_publish_status=payload.wp_publish_status,
+                wp_author_id=payload.wp_author_id,
+                wp_category_ids=payload.wp_category_ids,
+                wp_tag_ids=payload.wp_tag_ids,
+                wp_featured_media_id=payload.wp_featured_media_id,
+                wp_slug=payload.wp_slug,
+                wp_excerpt=payload.wp_excerpt,
+                wp_publish_at=payload.wp_publish_at,
+            )
+        )
+        await session.commit()
+
+    state_update: dict = {"hitl_2_decision": payload.decision, "hitl_2_notes": payload.notes}
+    if payload.decision != "approve":
+        state_update["status"] = "rejected" if payload.decision == "reject" else "changes_requested"
 
     await runner.resume(run_id, state_update)
     return {"ok": True}

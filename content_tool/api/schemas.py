@@ -29,3 +29,19 @@ class ResumeRequest(BaseModel):
     edited_outline: dict | None = None
     new_route: Literal["small_refresh", "full_rewrite"] | None = None
     notes: str | None = None
+
+
+class Hitl2Request(BaseModel):
+    decision: Literal["approve", "request_changes", "reject"]
+    notes: str | None = None
+    edited_html_body: str | None = None      # if editor tweaked HTML
+    edited_seo_title: str | None = None
+    edited_meta_description: str | None = None
+    wp_publish_status: Literal["draft", "future", "publish"] = "draft"
+    wp_author_id: int | None = None
+    wp_category_ids: list[int] | None = None
+    wp_tag_ids: list[int] | None = None
+    wp_featured_media_id: int | None = None
+    wp_slug: str | None = None
+    wp_excerpt: str | None = None
+    wp_publish_at: datetime | None = None
