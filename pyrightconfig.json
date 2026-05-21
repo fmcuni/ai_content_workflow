@@ -1,0 +1,9 @@
+{
+  "include": ["content_tool", "tests", "evals"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "warning",
+  "venvPath": ".",
+  "venv": ".venv"
+}
