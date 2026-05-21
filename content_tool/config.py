@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     gemini_thinking_level: str = "high"
     log_level: str = "info"
 
+    # WordPress
+    wp_base_url: str = "https://staging.bowtie.com.hk"
+    wp_target: str = "staging"                # staging | production
+    wp_username: str = ""                     # WP user the editor authenticates as
+    wp_app_password: str = ""                 # Application Password
+    wp_timeout: float = 15.0
+
 
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
