@@ -1,0 +1,13 @@
+{
+  "h1": "大腸癌：症狀、篩查、治療與保險指南（2026）",
+  "meta_description_hint": "了解大腸癌的早期症狀、篩查方法、治療選擇及香港保險保障，附自願醫保比較。",
+  "sections": [
+    {"heading_level": 2, "heading_text": "什麼是大腸癌？", "action": "keep", "intent": "definition", "key_points": ["定義", "成因"], "format_hint": "paragraph", "source_note": null},
+    {"heading_level": 2, "heading_text": "大腸癌篩查方法", "action": "update", "intent": "screening", "key_points": ["大便潛血", "大腸鏡"], "format_hint": "numbered", "source_note": "vhis.gov.hk"},
+    {"heading_level": 2, "heading_text": "標靶與免疫治療 (新增)", "action": "add", "intent": "treatment-advanced", "key_points": ["MSI-H", "KRAS"], "format_hint": "table", "source_note": null}
+  ],
+  "faq_section": [
+    {"question": "篩查資格是什麼？", "answer_intent": "list 50-75 HK residents eligibility", "action": "add"}
+  ],
+  "shortcode_positions": {"adv_panel_after_section_index": 0, "page_widget_before": "faq"}
+}
