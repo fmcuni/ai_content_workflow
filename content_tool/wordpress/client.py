@@ -53,6 +53,10 @@ class WordPressClient:
         self._timeout = timeout
         self._client = client
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
     def _auth_header(self) -> str:
         token = base64.b64encode(f"{self._username}:{self._password}".encode()).decode()
         return f"Basic {token}"

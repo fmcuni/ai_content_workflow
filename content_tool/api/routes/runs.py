@@ -8,6 +8,7 @@ from sse_starlette.sse import EventSourceResponse
 from content_tool.api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
+    DryPublishResponse,
     Hitl2Request,
     ResumeRequest,
 )
@@ -272,12 +273,12 @@ async def get_latest_audit(run_id: UUID, sf=Depends(get_session_factory)) -> dic
         }
 
 
-@router.post("/{run_id}/dry-publish")
+@router.post("/{run_id}/dry-publish", response_model=DryPublishResponse)
 async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
     """Return the exact REST payload we'd send to WP, WITHOUT calling WP."""
     from content_tool.db.models import FetchedArticle
 
-    target_base = request.app.state.wp_client._base_url  # type: ignore[attr-defined]
+    target_base = request.app.state.wp_client.base_url
     target_label = request.app.state.wp_target
     seo_plugin = request.app.state.seo_plugin
 
