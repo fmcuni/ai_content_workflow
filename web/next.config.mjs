@@ -1,9 +1,14 @@
+const apiBase = process.env.NEXT_PUBLIC_API_BASE;
+if (!apiBase) {
+  throw new Error("NEXT_PUBLIC_API_BASE is required (copy web/.env.local.example to web/.env.local)");
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
     return [
-      { source: "/api/runs/:path*", destination: `${process.env.NEXT_PUBLIC_API_BASE}/runs/:path*` },
-      { source: "/api/health", destination: `${process.env.NEXT_PUBLIC_API_BASE}/health` },
+      { source: "/api/runs/:path*", destination: `${apiBase}/runs/:path*` },
+      { source: "/api/health", destination: `${apiBase}/health` },
     ];
   },
 };
