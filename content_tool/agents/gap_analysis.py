@@ -11,7 +11,7 @@ from content_tool.db.models import GapAnalysisRow, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.gap_analysis import GapAnalysis
 
-PROMPT_PATH = Path("prompts/gap_analysis.md")
+PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "gap_analysis.md"
 
 
 def build_system_prompt(today: date) -> str:
