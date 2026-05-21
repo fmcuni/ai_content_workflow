@@ -1,0 +1,58 @@
+import re
+from typing import Any
+
+
+def run_deterministic_checks(
+    html_body: str, *, citations_denied_displayed: bool,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    if not re.search(r'\[adv_panel id="\d+"\]', html_body):
+        findings.append({
+            "id": "det-fmt-adv", "category": "format", "severity": "high",
+            "location": "body", "issue": "缺少 [adv_panel id=...] shortcode",
+            "suggested_fix": "在首段後加入 adv_panel shortcode",
+            "must_fix": True,
+        })
+
+    if not re.search(r'\[page_widget id="\d+"\]', html_body):
+        findings.append({
+            "id": "det-fmt-widget", "category": "format", "severity": "high",
+            "location": "body", "issue": "缺少 [page_widget id=...] shortcode",
+            "suggested_fix": "在常見問題前加入 page_widget shortcode",
+            "must_fix": True,
+        })
+
+    if "<h2>資訊來源</h2>" not in html_body:
+        findings.append({
+            "id": "det-fmt-sources", "category": "format", "severity": "high",
+            "location": "tail", "issue": "缺少 <h2>資訊來源</h2> section",
+            "suggested_fix": "確保 resolve_citations 已產生資訊來源 section",
+            "must_fix": True,
+        })
+
+    if 'class="editor__item editor__faq"' not in html_body:
+        findings.append({
+            "id": "det-fmt-faq", "category": "format", "severity": "high",
+            "location": "tail", "issue": "缺少 Bowtie FAQ widget div",
+            "suggested_fix": "render_html 必須輸出 editor__faq 結構",
+            "must_fix": True,
+        })
+
+    if not re.search(r'<script type="application/ld\+json">', html_body):
+        findings.append({
+            "id": "det-fmt-jsonld", "category": "format", "severity": "high",
+            "location": "head", "issue": "缺少 FAQPage JSON-LD",
+            "suggested_fix": "render_html 必須在 body 頂部注入 application/ld+json",
+            "must_fix": True,
+        })
+
+    if citations_denied_displayed:
+        findings.append({
+            "id": "det-cite-denied", "category": "citation", "severity": "high",
+            "location": "資訊來源", "issue": "顯示了被 policy 拒絕的來源",
+            "suggested_fix": "改用 GOV / EDU 等高可信來源",
+            "must_fix": True,
+        })
+
+    return findings
