@@ -60,6 +60,32 @@ async def create_run(
     )
 
 
+@router.get("")
+async def list_runs(
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    async with sf() as session:
+        q = select(Run).order_by(Run.created_at.desc()).limit(limit)
+        if status:
+            q = q.where(Run.status == status)
+        rows = (await session.execute(q)).scalars().all()
+        return [
+            {
+                "run_id": str(r.run_id),
+                "status": r.status,
+                "topic": r.topic,
+                "article_url": r.article_url,
+                "mode": r.mode,
+                "created_at": r.created_at.isoformat(),
+                "chosen_route": r.chosen_route,
+                "iteration_count": r.iteration_count,
+            }
+            for r in rows
+        ]
+
+
 @router.get("/{run_id}")
 async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
     async with sf() as session:
@@ -157,3 +183,99 @@ async def hitl_2(
 
     await runner.resume(run_id, state_update)
     return {"ok": True}
+
+
+@router.get("/{run_id}/gap-analysis")
+async def get_gap_analysis(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
+    from content_tool.db.models import GapAnalysisRow
+
+    async with sf() as session:
+        row = (
+            await session.execute(select(GapAnalysisRow).where(GapAnalysisRow.run_id == run_id))
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "not found")
+        return row.payload
+
+
+@router.get("/{run_id}/outline")
+async def get_outline(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
+    from content_tool.db.models import OutlineRow
+
+    async with sf() as session:
+        row = (
+            await session.execute(select(OutlineRow).where(OutlineRow.run_id == run_id))
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "not found")
+        return {"payload": row.payload, "edited_by_human": row.edited_by_human}
+
+
+@router.get("/{run_id}/drafts/latest")
+async def get_latest_draft(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
+    from content_tool.db.models import Draft
+
+    async with sf() as session:
+        q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+        row = (await session.execute(q)).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "not found")
+        return {
+            "draft_id": str(row.draft_id),
+            "iteration": row.iteration,
+            "diagnose": row.diagnose,
+            "markup_raw": row.markup_raw,
+            "final_markup": row.final_markup,
+        }
+
+
+@router.get("/{run_id}/render")
+async def get_latest_render(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
+    from content_tool.db.models import Draft, Render
+
+    async with sf() as session:
+        q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+        latest_draft = (await session.execute(q)).scalar_one_or_none()
+        if not latest_draft:
+            raise HTTPException(404, "no draft")
+        render = (
+            await session.execute(
+                select(Render).where(Render.draft_id == latest_draft.draft_id)
+            )
+        ).scalar_one_or_none()
+        if not render:
+            raise HTTPException(404, "no render")
+        return {
+            "seo_title": render.seo_title,
+            "meta_description": render.meta_description,
+            "html_body": render.html_body,
+            "faq_schema_jsonld": render.faq_schema_jsonld,
+            "excerpt_suggestion": render.excerpt_suggestion,
+            "slug_suggestion": render.slug_suggestion,
+        }
+
+
+@router.get("/{run_id}/audit")
+async def get_latest_audit(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
+    from content_tool.db.models import AuditRun, Draft
+
+    async with sf() as session:
+        q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+        latest_draft = (await session.execute(q)).scalar_one_or_none()
+        if not latest_draft:
+            raise HTTPException(404, "no draft")
+        audit = (
+            await session.execute(
+                select(AuditRun).where(AuditRun.draft_id == latest_draft.draft_id)
+            )
+        ).scalar_one_or_none()
+        if not audit:
+            raise HTTPException(404, "no audit")
+        return {
+            "overall_pass": audit.overall_pass,
+            "severity_high": audit.severity_high,
+            "severity_medium": audit.severity_medium,
+            "severity_low": audit.severity_low,
+            "llm_findings": audit.llm_findings,
+            "deterministic_findings": audit.deterministic_findings,
+        }
