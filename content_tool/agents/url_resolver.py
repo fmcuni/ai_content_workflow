@@ -41,7 +41,7 @@ class UrlResolver:
                 resp = await client.head(vertex_uri)
                 final = str(resp.url)
                 ext = tldextract.extract(final)
-                domain = f"{ext.domain}.{ext.suffix}".lower() if ext.suffix else final
+                domain = f"{ext.domain}.{ext.suffix}".lower() if ext.suffix else None
                 error = None
             except Exception as e:
                 final = None

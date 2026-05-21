@@ -34,6 +34,8 @@ async def test_uses_cache_on_second_call(db_session):
     await db_session.commit()
 
     resolver = UrlResolver(session=db_session, timeout=5.0)
-    # No respx mocks — should hit cache only
-    resolved = await resolver.resolve(vertex)
+    with respx.mock(assert_all_called=False) as router:
+        resolved = await resolver.resolve(vertex)
+        assert router.calls.call_count == 0
+
     assert resolved.final_url == "https://cached.gov.hk/x"
