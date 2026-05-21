@@ -109,6 +109,16 @@ async def resume_run(
             await session.commit()
     if payload.decision == "override_route" and payload.new_route:
         state_update["chosen_route"] = payload.new_route
+        # Persist to Run row so writer.py (reads run.chosen_route from DB) honors the override
+        from sqlalchemy import update
+
+        async with sf() as session:
+            await session.execute(
+                update(Run)
+                .where(Run.run_id == run_id)
+                .values(chosen_route=payload.new_route)
+            )
+            await session.commit()
 
     await runner.resume(run_id, state_update)
     return {"ok": True}
