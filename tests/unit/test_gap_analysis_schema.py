@@ -18,7 +18,7 @@ def test_top_pages_must_be_exactly_5():
     data["top_pages"] = data["top_pages"][:3]
     try:
         GapAnalysis.model_validate(data)
-        assert False, "should have raised"
+        raise AssertionError("should have raised")
     except Exception as e:
         assert "5" in str(e) or "exactly 5" in str(e).lower() or "min" in str(e).lower()
 
@@ -29,6 +29,6 @@ def test_chosen_route_is_constrained():
     data["chosen_route"] = "wat"
     try:
         GapAnalysis.model_validate(data)
-        assert False, "should have raised"
-    except Exception:
+        raise AssertionError("should have raised")
+    except Exception:  # noqa: S110
         pass
