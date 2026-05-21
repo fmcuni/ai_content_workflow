@@ -85,3 +85,29 @@ export WP_APP_PASSWORD=<application-password>
 4. **Before pointing at production**: explicitly set `WP_TARGET=production` and `WP_BASE_URL=https://www.bowtie.com.hk`.
    The dry-publish endpoint shows `target_label` — verify it matches expectation
    before approving any HITL_2 against production.
+
+## Ops
+
+### Observability
+
+- Logs: JSON via structlog to stdout. Set `LOG_LEVEL=debug` for verbose.
+- Tracing: OpenTelemetry. If `OTEL_EXPORTER_OTLP_ENDPOINT` is set, spans go to that OTLP HTTP receiver.
+  Local Jaeger: `docker run -d --name jaeger -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one`
+  then `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` and visit http://localhost:16686.
+
+### Costs
+
+- Per-run estimate: `GET /costs/run/{run_id}`
+- Date-range summary: `GET /costs/summary?start=2026-05-01&end=2026-05-31`
+- Update prices: edit `config/pricing.yaml`. No restart needed (loaded on demand).
+
+### Compliance audit log
+
+- Auto-written on every `published` run.
+- Export: `GET /compliance/export.csv?start=2026-05-01&end=2026-05-31`
+
+### Evals
+
+- Nightly cron runs reference evals against last 30 published runs → `content_tool.evals`.
+- Manual: `python -m evals.runner`
+- LLM-judge: triggered on PRs labeled `prompt-change`.
