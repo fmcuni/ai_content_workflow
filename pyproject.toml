@@ -22,6 +22,7 @@ dependencies = [
   "markdownify>=0.13",
   "beautifulsoup4>=4.12",
   "sse-starlette>=2.1",
+  "markdown-it-py>=4.2.0",
 ]
 
 [project.optional-dependencies]
