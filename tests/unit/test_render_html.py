@@ -78,3 +78,32 @@ def test_no_raw_html_passthrough():
     bad = SAMPLE.replace("大腸癌是香港", "<script>alert(1)</script>大腸癌是香港")
     with pytest.raises(ValueError, match="sanitization"):
         render_html(bad)
+
+
+def test_missing_h1_raises():
+    with pytest.raises(ValueError, match="H1"):
+        render_html("no H1 here\n%%meta desc=x%%\nbody\n")
+
+
+def test_missing_meta_raises():
+    with pytest.raises(ValueError, match="meta desc"):
+        render_html("# Title\n\nbody without meta\n")
+
+
+def test_no_faq_means_no_jsonld():
+    no_faq = """\
+# 標題
+%%meta desc=說明%%
+
+正文段落。
+
+%%adv_panel id=1%%
+
+## 章節
+另一段。
+
+%%page_widget id=2%%
+"""
+    r = render_html(no_faq)
+    assert r.faq_schema_jsonld is None
+    assert not r.html_body.startswith('<script type="application/ld+json">')
