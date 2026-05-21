@@ -3,8 +3,10 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
+from sse_starlette.sse import EventSourceResponse
 
-from content_tool.api.schemas import CreateRunRequest, CreateRunResponse
+from content_tool.api.schemas import CreateRunRequest, CreateRunResponse, ResumeRequest
+from content_tool.api.sse import sse_stream
 from content_tool.db.models import Run
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -68,3 +70,40 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             "chosen_route": row.chosen_route,
             "iteration_count": row.iteration_count,
         }
+
+
+@router.get("/{run_id}/events")
+async def events(
+    run_id: UUID,
+    runner=Depends(get_runner),  # noqa: ANN001, B008
+) -> EventSourceResponse:
+    return EventSourceResponse(sse_stream(runner, run_id))
+
+
+@router.post("/{run_id}/resume")
+async def resume_run(
+    run_id: UUID,
+    payload: ResumeRequest,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    runner=Depends(get_runner),  # noqa: ANN001, B008
+) -> dict:
+    state_update: dict = {"hitl_1_decision": payload.decision}
+    if payload.decision == "edit_outline" and payload.edited_outline:
+        state_update["outline"] = payload.edited_outline
+        # Also persist to outlines.human_edits
+        from sqlalchemy import update
+
+        from content_tool.db.models import OutlineRow
+
+        async with sf() as session:
+            await session.execute(
+                update(OutlineRow)
+                .where(OutlineRow.run_id == run_id)
+                .values(edited_by_human=True, human_edits=payload.edited_outline)
+            )
+            await session.commit()
+    if payload.decision == "override_route" and payload.new_route:
+        state_update["chosen_route"] = payload.new_route
+
+    await runner.resume(run_id, state_update)
+    return {"ok": True}
