@@ -1,14 +1,20 @@
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.fastapi import (
+    FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
+)
 
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.sse import RunExecutor
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.gemini.client import RealGeminiClient
+from content_tool.observability.logging import configure_logging
+from content_tool.observability.tracing import configure_tracing
 from content_tool.wordpress.client import WordPressClient
 from content_tool.wordpress.seo_plugin import detect_seo_plugin
 
@@ -54,6 +60,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    configure_logging(os.getenv("LOG_LEVEL", "info"))
+    configure_tracing()
     app = FastAPI(title="Bowtie AI Content Tool", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
@@ -68,6 +76,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(runs_router)
+    FastAPIInstrumentor().instrument_app(app)
     return app
 
 
