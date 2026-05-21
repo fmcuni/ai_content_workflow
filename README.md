@@ -53,3 +53,15 @@ curl -N localhost:8000/runs/<run_id>/events
 curl -X POST localhost:8000/runs/<run_id>/resume \
   -H 'content-type: application/json' -d '{"decision":"approve"}'
 ```
+
+## Web UI
+
+```bash
+cd web
+cp .env.local.example .env.local
+npm install
+npm run dev
+# → http://localhost:3000
+```
+
+Backend must be running on http://localhost:8000.
