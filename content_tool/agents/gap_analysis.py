@@ -21,9 +21,7 @@ def build_user_prompt(
     edit_note: str | None,
 ) -> str:
     route_label = (
-        "Auto (follow existing logic)"
-        if mode == "auto"
-        else f"{mode} (override existing logic)"
+        "Auto (follow existing logic)" if mode == "auto" else f"{mode} (override existing logic)"
     )
     en = edit_note if edit_note else "N/A"
     keywords_joined = ", ".join(keywords)
