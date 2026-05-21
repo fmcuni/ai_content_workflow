@@ -28,6 +28,13 @@ def apply_migrations(postgres_url):
     subprocess.run(["alembic", "upgrade", "head"], check=True, env=env)  # noqa: S607
 
 
+# get_settings() reads env; set dummies so tests using FakeGeminiClient can construct Settings.
+@pytest.fixture(scope="session", autouse=True)
+def set_test_env(postgres_url):
+    os.environ["GEMINI_API_KEY"] = "test-dummy"
+    os.environ["POSTGRES_URL"] = postgres_url
+
+
 @pytest_asyncio.fixture
 async def db_session(postgres_url) -> AsyncGenerator[AsyncSession]:
     engine = make_engine(postgres_url)

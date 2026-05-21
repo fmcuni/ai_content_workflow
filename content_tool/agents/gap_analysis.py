@@ -1,6 +1,15 @@
 from datetime import date
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
+
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from content_tool.config import Settings, get_settings
+from content_tool.db.models import GapAnalysisRow, Run
+from content_tool.gemini.client import GeminiClient
+from content_tool.models.gap_analysis import GapAnalysis
 
 PROMPT_PATH = Path("prompts/gap_analysis.md")
 
@@ -34,3 +43,64 @@ def build_user_prompt(
         f"route: {route_label}\n"
         f"article_edit_note: {en}"
     )
+
+
+async def run_gap_analysis(
+    *,
+    session: AsyncSession,
+    gemini: GeminiClient,
+    run_id: UUID,
+    today: date,
+    settings: Settings | None = None,
+) -> GapAnalysis:
+    settings = settings or get_settings()
+
+    run = (
+        (await session.execute(Run.__table__.select().where(Run.__table__.c.run_id == run_id)))
+        .mappings()
+        .one()
+    )
+
+    sys_prompt = build_system_prompt(today)
+    user_prompt = build_user_prompt(
+        topic=run["topic"],
+        keywords=run["keywords"],
+        article_url=run["article_url"],
+        acf_adv_id=run["acf_adv_id"],
+        acf_widget_id=run["acf_widget_id"],
+        mode=run["mode"],
+        edit_note=run["edit_note"],
+    )
+
+    result = await gemini.generate(
+        agent="gap_analysis",
+        system_prompt=sys_prompt,
+        user_prompt=user_prompt,
+        response_schema=GapAnalysis.model_json_schema(),
+        tools=["googleSearch", "urlContext"],
+    )
+
+    ga = GapAnalysis.model_validate(result.parsed)
+
+    # Apply override
+    if run["mode"] != "auto":
+        ga = ga.model_copy(update={"chosen_route": run["mode"]})
+
+    session.add(
+        GapAnalysisRow(
+            run_id=run_id,
+            model=settings.gemini_model,
+            thinking_level=settings.gemini_thinking_level,
+            payload=ga.model_dump(),
+            tokens_in=result.tokens_in,
+            tokens_out=result.tokens_out,
+            thinking_tokens=result.thinking_tokens,
+            latency_ms=result.latency_ms,
+            raw_response=None,
+        )
+    )
+    await session.execute(
+        update(Run).where(Run.run_id == run_id).values(chosen_route=ga.chosen_route)
+    )
+    await session.commit()
+    return ga
