@@ -65,3 +65,23 @@ npm run dev
 ```
 
 Backend must be running on http://localhost:8000.
+
+## WordPress smoke test (staging)
+
+1. Set up an Application Password for your WP user at:
+   `https://staging.bowtie.com.hk/wp-admin/profile.php` → "Application Passwords"
+
+2. Export env:
+```bash
+export WP_BASE_URL=https://staging.bowtie.com.hk
+export WP_TARGET=staging
+export WP_USERNAME=<your-wp-username>
+export WP_APP_PASSWORD=<application-password>
+```
+
+3. Run a full end-to-end via UI. After approving HITL_2 (status = Draft),
+   confirm the post appears in `/wp-admin/edit.php?post_status=draft` on staging.
+
+4. **Before pointing at production**: explicitly set `WP_TARGET=production` and `WP_BASE_URL=https://www.bowtie.com.hk`.
+   The dry-publish endpoint shows `target_label` — verify it matches expectation
+   before approving any HITL_2 against production.
