@@ -73,3 +73,32 @@ class GapAnalysisRow(Base):
     thinking_tokens: Mapped[int | None]
     latency_ms: Mapped[int | None]
     raw_response: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class FetchedArticle(Base):
+    __tablename__ = "fetched_articles"
+
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    fetched_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
+    wp_post_id: Mapped[int | None]
+    wp_categories: Mapped[list | None] = mapped_column(JSONB)
+    raw_html: Mapped[str | None] = mapped_column(String)
+    markdown: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class OutlineRow(Base):
+    __tablename__ = "outlines"
+
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    edited_by_human: Mapped[bool] = mapped_column(default=False)
+    human_edits: Mapped[dict | None] = mapped_column(JSONB)
