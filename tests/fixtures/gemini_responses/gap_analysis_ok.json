@@ -1,0 +1,37 @@
+{
+  "target_query": "大腸癌篩查 香港 2026",
+  "top_pages": [
+    {"url": "https://www.ha.org.hk/cancer/colon", "title": "大腸癌資訊", "rank": 1},
+    {"url": "https://www.chp.gov.hk/screening", "title": "篩查計劃", "rank": 2},
+    {"url": "https://www.vhis.gov.hk/colon", "title": "自願醫保大腸癌", "rank": 3},
+    {"url": "https://www.cancer.org/colon", "title": "Colon Cancer", "rank": 4},
+    {"url": "https://www.who.int/colon", "title": "WHO Colon Cancer", "rank": 5}
+  ],
+  "current_article_assessment": {
+    "strengths": ["定義清晰"],
+    "outdated_points": ["2024 年數字"],
+    "weak_sections": ["FAQ 不足"],
+    "structure_status": "partly_outdated"
+  },
+  "content_gaps": {
+    "missing_topics": ["新標靶藥物"],
+    "missing_intents": ["復發風險"],
+    "freshness_gaps": ["最新存活率"],
+    "semantic_gaps": ["MSI-H"],
+    "source_trust_gaps": ["政府數據"],
+    "ai_extractability_gaps": ["缺少表格"],
+    "hk_localization_gaps": [],
+    "faq_gaps": ["篩查資格"]
+  },
+  "recommended_outline": "H1 -> 定義 -> 篩查 -> 治療 -> FAQ",
+  "update_plan": {
+    "must_add": ["MSI-H 解釋"],
+    "must_update": ["2026 存活率"],
+    "must_remove": ["2020 過時數據"],
+    "must_reorder": [],
+    "faq_to_add": ["篩查資格是什麼？"],
+    "facts_to_verify": ["第三期五年存活率"]
+  },
+  "chosen_route": "small_refresh",
+  "route_reason": "現有結構仍可保留 70% 以上，主要為數字與 FAQ 更新"
+}
