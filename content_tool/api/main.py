@@ -11,6 +11,7 @@ from opentelemetry.instrumentation.fastapi import (
 from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
+from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.sse import RunExecutor
 from content_tool.config import get_settings
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = sf
     app.state.run_executor = executor
     app.state.wp_client = wp_client
+    app.state.gemini_client = gemini
     app.state.seo_plugin = seo_plugin
     app.state.wp_target = settings.wp_target
     try:
@@ -82,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(articles_router)
     app.include_router(compliance_router)
     app.include_router(costs_router)
+    app.include_router(refresh_router)
     FastAPIInstrumentor().instrument_app(app)
     return app
 
