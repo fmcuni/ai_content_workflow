@@ -140,7 +140,9 @@ class WordPressClient:
         if not slug:
             return None
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        own = self._client is None
+        client = self._client or httpx.AsyncClient(timeout=self._timeout)
+        try:
             resp = await client.get(
                 f"{self._base_url}/wp-json/wp/v2/posts",
                 params={
@@ -148,7 +150,7 @@ class WordPressClient:
                     "_fields": "id,slug,link,title,content,modified_gmt,status,author,categories",
                     "status": "publish",
                 },
-                headers={"Authorization": self._auth_header()},
+                headers={"authorization": self._auth_header()},
             )
             resp.raise_for_status()
             posts = resp.json()
@@ -166,3 +168,6 @@ class WordPressClient:
                 author=p.get("author"),
                 categories=list(p.get("categories", [])),
             )
+        finally:
+            if own:
+                await client.aclose()
