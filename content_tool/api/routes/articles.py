@@ -58,6 +58,16 @@ def _to_out(
 _OPEN_STATUSES = ("pending", "strategy", "hitl_1", "production", "hitl_2", "persisted")
 
 
+async def _count_in_flight_runs(session: AsyncSession, article_id: UUID) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(Run)
+        .where(Run.article_id == article_id)
+        .where(Run.status.in_(_OPEN_STATUSES))
+    )
+    return int(result.scalar_one())
+
+
 @router.get("", response_model=ArticleListResponse)
 async def list_articles(
     needs_refresh: bool | None = Query(None),
@@ -215,7 +225,8 @@ async def dismiss_article(
 
     await session.commit()
     await session.refresh(a)
-    return _to_out(a, latest_open, open_runs_count=0)
+    open_runs = await _count_in_flight_runs(session, article_id)
+    return _to_out(a, latest_open, open_runs_count=open_runs)
 
 
 @router.delete("/{article_id}/dismiss", response_model=ArticleOut)
@@ -232,4 +243,5 @@ async def clear_dismissal(
     a.updated_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(a)
-    return _to_out(a, None, open_runs_count=0)
+    open_runs = await _count_in_flight_runs(session, article_id)
+    return _to_out(a, None, open_runs_count=open_runs)

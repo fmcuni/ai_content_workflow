@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
-from content_tool.db.models import Article, RefreshEvaluation
+from content_tool.db.models import Article, RefreshEvaluation, Run
 
 
 @pytest.mark.asyncio
@@ -82,3 +82,46 @@ async def test_dismiss_until_in_past_returns_422(api_client: AsyncClient, pg_ses
         json={"until": past, "dismissed_by": "editor@bowtie"},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_dismiss_returns_accurate_open_runs_count(
+    api_client: AsyncClient, pg_session_factory
+):
+    """dismiss_article must return the real in-flight run count, not a hardcoded 0."""
+    sf = pg_session_factory
+    async with sf() as s:
+        a = Article(
+            article_url="https://b/a-dismiss-count",
+            next_scan_due_at=datetime.now(UTC),
+        )
+        s.add(a)
+        await s.commit()
+        # Add one in-flight run linked to this article.
+        run = Run(
+            created_by="test",
+            status="pending",
+            article_url=a.article_url,
+            topic="test topic",
+            keywords=[],
+            mode="refresh",
+            persona="bowtie",
+            acf_adv_id=0,
+            acf_widget_id=0,
+            today_date=date.today(),
+            article_id=a.article_id,
+        )
+        s.add(run)
+        await s.commit()
+        aid = a.article_id
+
+    until = (datetime.now(UTC) + timedelta(days=14)).isoformat()
+    resp = await api_client.post(
+        f"/articles/{aid}/dismiss",
+        json={"until": until, "dismissed_by": "editor@bowtie"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["open_runs_count"] == 1, (
+        f"Expected open_runs_count=1 (in-flight run present), got {body['open_runs_count']}"
+    )

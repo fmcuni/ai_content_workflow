@@ -90,8 +90,8 @@ async def api_client(
 ) -> AsyncGenerator[AsyncClient]:
     """Yields an AsyncClient bound to the FastAPI app with the test session factory wired in."""
     app = create_app()
+    app.state.session_factory = pg_session_factory
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        app.state.session_factory = pg_session_factory
         yield ac
 
 
