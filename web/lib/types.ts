@@ -28,6 +28,7 @@ export interface CreateRunRequest {
   persona: string;
   topic_category?: string | null;
   editor_email: string;
+  triggered_by_evaluation_id?: string | null;
 }
 
 export interface GapAnalysis {
