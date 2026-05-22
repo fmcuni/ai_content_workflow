@@ -50,7 +50,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Providers>
           <Masthead />
           <Folio variant="top" />
-          <main>{children}</main>
+          <main className="pb-24">{children}</main>
+          <footer className="mx-auto max-w-[1180px] px-5 md:px-10 pt-8 pb-10">
+            <div className="border-t border-rule pt-4">
+              <p className="text-center font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+                Bowtie Content Desk · Internal · Commit{" "}
+                <span className="text-ink-soft">{process.env.NEXT_PUBLIC_BUILD_SHA ?? "dev"}</span>
+                {" · Built "}
+                <span className="text-ink-soft">{process.env.NEXT_PUBLIC_BUILD_DATE ?? "dev"}</span>
+              </p>
+            </div>
+          </footer>
         </Providers>
       </body>
     </html>
