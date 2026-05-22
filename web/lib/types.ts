@@ -127,3 +127,61 @@ export interface Hitl2Request {
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
 }
+
+export type RecommendedAction = "refresh" | "monitor" | "ok";
+export type EvaluationOutcome = "open" | "triggered" | "dismissed" | "superseded";
+
+export interface RefreshEvaluation {
+  evaluation_id: string;
+  evaluated_at: string;
+  age_days: number;
+  staleness_score: string;
+  recommended_action: RecommendedAction;
+  deterministic_findings: {
+    findings: Array<{ id: string; severity: "high" | "medium" | "low"; message: string; context?: Record<string, unknown> }>;
+    severity_high: number;
+    severity_medium: number;
+    severity_low: number;
+    passed: boolean;
+  };
+  llm_findings: Record<string, unknown> | null;
+  llm_skipped_reason: string | null;
+  outcome: EvaluationOutcome;
+  resulting_run_id: string | null;
+}
+
+export interface Article {
+  article_id: string;
+  article_url: string;
+  wp_post_id: number | null;
+  topic: string | null;
+  persona: string | null;
+  topic_category: string | null;
+  first_seen_at: string;
+  last_persisted_at: string | null;
+  next_scan_due_at: string;
+  dismissed_until: string | null;
+  latest_evaluation: RefreshEvaluation | null;
+  open_runs_count: number;
+}
+
+export interface ArticleListResponse {
+  items: Article[];
+  total: number;
+}
+
+export interface ArticleDetail extends Article {
+  recent_evaluations: RefreshEvaluation[];
+  recent_run_ids: string[];
+}
+
+export interface ScanResponse {
+  tick_id: string;
+  scanned: number;
+  evaluations_created: number;
+  llm_calls: number;
+  est_cost_usd_cents: number;
+  started_at: string;
+  finished_at: string;
+  skipped: Array<{ article_id?: string; reason: string }>;
+}

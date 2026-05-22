@@ -10,6 +10,8 @@ const nextConfig = {
       { source: "/api/runs/:path*", destination: `${apiBase}/runs/:path*` },
       { source: "/api/costs/:path*", destination: `${apiBase}/costs/:path*` },
       { source: "/api/health", destination: `${apiBase}/health` },
+      { source: "/api/articles/:path*", destination: `${apiBase}/articles/:path*` },
+      { source: "/api/refresh/:path*", destination: `${apiBase}/refresh/:path*` },
     ];
   },
 };
