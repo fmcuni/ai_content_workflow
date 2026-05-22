@@ -100,14 +100,18 @@ async def test_backfill_articles_from_runs(postgres_url: str) -> None:
         _alembic(["upgrade", "0006"], postgres_url)
 
         # ------------------------------------------------------------------
-        # 4. Assert articles table has exactly 2 rows
+        # 4. Assert both seeded article_urls have been backfilled
+        # (other tests may have seeded runs with different urls, so we scope
+        #  the assertion to just the urls we control)
         # ------------------------------------------------------------------
         articles_rows = await _fetchall(
             postgres_url,
-            "SELECT article_url FROM content_tool.articles ORDER BY article_url",
+            f"SELECT article_url FROM content_tool.articles"
+            f" WHERE article_url IN ('{url_a}', '{url_b}')"
+            f" ORDER BY article_url",
         )
         assert len(articles_rows) == 2, (
-            f"Expected 2 articles, got {len(articles_rows)}: {articles_rows}"
+            f"Expected 2 articles for seeded urls, got {len(articles_rows)}: {articles_rows}"
         )
         article_urls = {row[0] for row in articles_rows}
         assert url_a in article_urls
@@ -148,6 +152,25 @@ async def test_backfill_articles_from_runs(postgres_url: str) -> None:
 
     finally:
         # ------------------------------------------------------------------
-        # Restore: bring DB back to HEAD so other integration tests are unaffected
+        # Restore: delete seeded rows, then bring DB back to HEAD.
+        # Delete runs first so articles backfill doesn't persist them into HEAD.
+        # Both deletes use columns present in both 0005 and 0006 schemas.
         # ------------------------------------------------------------------
+        try:
+            await _execute(
+                postgres_url,
+                f"DELETE FROM content_tool.runs WHERE run_id IN ("
+                f"'{run_ids[0]}'::uuid, '{run_ids[1]}'::uuid, '{run_ids[2]}'::uuid)",
+            )
+        except Exception:
+            pass  # already gone or schema state prevents it
+        try:
+            await _execute(
+                postgres_url,
+                "DELETE FROM content_tool.articles"
+                " WHERE article_url IN ("
+                f"'{url_a}', '{url_b}')",
+            )
+        except Exception:
+            pass  # articles table may not exist yet if upgrade never ran
         _alembic(["upgrade", "head"], postgres_url)

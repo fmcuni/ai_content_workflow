@@ -5,9 +5,10 @@ Revises: 0005
 Create Date: 2026-05-22
 """
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "0006"
 down_revision = "0005"
@@ -20,7 +21,7 @@ def upgrade() -> None:
         "articles",
         sa.Column(
             "article_id",
-            UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
@@ -74,13 +75,13 @@ def upgrade() -> None:
         "refresh_evaluations",
         sa.Column(
             "evaluation_id",
-            UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
         sa.Column(
             "article_id",
-            UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey("content_tool.articles.article_id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -94,8 +95,8 @@ def upgrade() -> None:
         sa.Column("trigger_source", sa.Text, nullable=False),
         sa.Column("age_days", sa.Integer, nullable=False),
         sa.Column("fetched_html_hash", sa.Text),
-        sa.Column("deterministic_findings", JSONB, nullable=False),
-        sa.Column("llm_findings", JSONB),
+        sa.Column("deterministic_findings", postgresql.JSONB, nullable=False),
+        sa.Column("llm_findings", postgresql.JSONB),
         sa.Column("llm_skipped_reason", sa.Text),
         sa.Column("staleness_score", sa.Numeric(4, 2), nullable=False),
         sa.Column("recommended_action", sa.Text, nullable=False),
@@ -107,7 +108,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "resulting_run_id",
-            UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey("content_tool.runs.run_id"),
         ),
         sa.Column("outcome_set_at", sa.TIMESTAMP(timezone=True)),
@@ -136,7 +137,7 @@ def upgrade() -> None:
         "runs",
         sa.Column(
             "article_id",
-            UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey("content_tool.articles.article_id"),
         ),
         schema="content_tool",
@@ -145,7 +146,7 @@ def upgrade() -> None:
         "runs",
         sa.Column(
             "triggered_by_evaluation_id",
-            UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey("content_tool.refresh_evaluations.evaluation_id"),
         ),
         schema="content_tool",
