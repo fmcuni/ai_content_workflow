@@ -42,6 +42,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     }
   }, [render.data]);
 
+  const renderReady = Boolean(render.data);
+
   const submit = useMutation({
     mutationFn: (decision: Hitl2Request["decision"]) =>
       api.resumeHitl2(runId, { ...form, decision, edited_html_body: html }),
@@ -73,9 +75,19 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               <TabsTrigger value="audit">Audit findings</TabsTrigger>
             </TabsList>
             <TabsContent value="edit" className="pt-6">
-              <div className="max-w-[65ch] mx-auto font-display text-[18px] leading-[1.65] text-ink" style={{ fontVariationSettings: '"opsz" 14, "SOFT" 60' }}>
-                <TipTapEditor value={html} onChange={setHtml} />
-              </div>
+              {render.isPending && (
+                <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider animate-pulse">Loading draft…</p>
+              )}
+              {render.isError && (
+                <p className="font-mono text-[12px] text-accent-deep">
+                  Failed to load draft — {(render.error as Error).message}
+                </p>
+              )}
+              {renderReady && (
+                <div className="max-w-[65ch] mx-auto font-display text-[18px] leading-[1.65] text-ink" style={{ fontVariationSettings: '"opsz" 14, "SOFT" 60' }}>
+                  <TipTapEditor value={html} onChange={setHtml} />
+                </div>
+              )}
             </TabsContent>
             <TabsContent value="diff" className="pt-6">
               <HtmlDiffView original={originalHtml} updated={html} />
@@ -119,9 +131,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       {/* Sticky action bar */}
       <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
         <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-end gap-2">
-          <Button variant="destructive" size="sm" disabled={submit.isPending} onClick={() => submit.mutate("reject")}>Reject ✕</Button>
-          <Button variant="secondary" size="sm" disabled={submit.isPending} onClick={() => submit.mutate("request_changes")}>Request changes ↺</Button>
-          <Button variant="primary" disabled={submit.isPending} onClick={() => submit.mutate("approve")}>
+          <Button variant="destructive" size="sm" disabled={!renderReady || submit.isPending} onClick={() => submit.mutate("reject")}>Reject ✕</Button>
+          <Button variant="secondary" size="sm" disabled={!renderReady || submit.isPending} onClick={() => submit.mutate("request_changes")}>Request changes ↺</Button>
+          <Button variant="primary" disabled={!renderReady || submit.isPending} onClick={() => submit.mutate("approve")}>
             {submit.isPending ? "Pushing…" : "Approve & push to WP ↪"}
           </Button>
         </div>
