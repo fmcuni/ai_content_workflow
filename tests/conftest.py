@@ -9,9 +9,11 @@ import httpx
 import pytest
 import pytest_asyncio
 import respx
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from testcontainers.postgres import PostgresContainer
 
+from content_tool.api.main import create_app
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.gemini.fake import FakeGeminiClient
 from content_tool.wordpress.client import WordPressClient
@@ -80,6 +82,17 @@ async def pg_session_factory(
             )
             await cleanup.commit()
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def api_client(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[AsyncClient]:
+    """Yields an AsyncClient bound to the FastAPI app with the test session factory wired in."""
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        app.state.session_factory = pg_session_factory
+        yield ac
 
 
 @pytest.fixture

@@ -8,6 +8,7 @@ from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
 )
 
+from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
 from content_tool.api.routes.runs import router as runs_router
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(runs_router)
+    app.include_router(articles_router)
     app.include_router(compliance_router)
     app.include_router(costs_router)
     FastAPIInstrumentor().instrument_app(app)
