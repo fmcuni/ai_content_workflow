@@ -36,6 +36,7 @@ export function Masthead() {
 
   // Hydration-safe: render dateline client-side only.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);

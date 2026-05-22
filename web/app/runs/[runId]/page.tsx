@@ -82,7 +82,7 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
 
         {/* Editor's actions */}
         <aside className="lg:sticky lg:top-32 self-start">
-          <p className="kicker mb-3">Editor's actions</p>
+          <p className="kicker mb-3">Editor&apos;s actions</p>
           <div className="space-y-3">
             {run?.status === "hitl_1" && (
               <div>
