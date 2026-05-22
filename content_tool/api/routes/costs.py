@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, text
 
 from content_tool.db.models import Draft, GapAnalysisRow, Run
 from content_tool.observability.cost import CostCalculator
@@ -60,7 +60,7 @@ async def cost_summary(
     start: date,
     end: date,
     sf: Any = Depends(get_session_factory),  # noqa: ANN401, B008
-) -> dict[str, int]:
+) -> dict[str, Any]:
     calc = CostCalculator.load_from("config/pricing.yaml")
     async with sf() as session:
         runs = (
@@ -96,4 +96,26 @@ async def cost_summary(
                 tokens_out=tout,
                 thinking_tokens=tthk,
             )
-        return {"runs": len(runs), "total_usd_cents": total_cents}
+
+        refresh = (
+            await session.execute(
+                text("""
+                    SELECT
+                      COALESCE(SUM(tokens_in), 0)          AS tokens_in,
+                      COALESCE(SUM(tokens_out), 0)         AS tokens_out,
+                      COALESCE(SUM(est_cost_usd_cents), 0) AS cents
+                    FROM content_tool.refresh_evaluations
+                    WHERE evaluated_at >= now() - INTERVAL '30 days'
+                """)
+            )
+        ).one()
+
+        return {
+            "runs": len(runs),
+            "total_usd_cents": total_cents,
+            "refresh_scan_30d": {
+                "tokens_in": int(refresh.tokens_in),
+                "tokens_out": int(refresh.tokens_out),
+                "cents": int(refresh.cents),
+            },
+        }

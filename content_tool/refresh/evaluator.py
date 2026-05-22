@@ -18,6 +18,11 @@ class LLMFindings:
     severity_medium: int = 0
     severity_low: int = 0
     raw: dict | None = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    thinking_tokens: int = 0
+    latency_ms: int = 0
+    model: str | None = None
 
 
 def compute_staleness(
@@ -106,5 +111,9 @@ async def llm_audit_published(
         severity_medium=sum(1 for f in llm_output.findings if f.severity == "medium"),
         severity_low=sum(1 for f in llm_output.findings if f.severity == "low"),
         raw=llm_output.model_dump(mode="json"),
+        tokens_in=result.tokens_in,
+        tokens_out=result.tokens_out,
+        thinking_tokens=result.thinking_tokens,
+        latency_ms=result.latency_ms,
     )
     return findings

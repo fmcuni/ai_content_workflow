@@ -14,13 +14,23 @@ import structlog
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from content_tool.config import get_refresh_config
+from content_tool.config import get_refresh_config, get_settings
 from content_tool.db.models import Article, RefreshEvaluation, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.observability.cost import CostCalculator
 from content_tool.refresh.deterministic_checks import deterministic_audit_published_html
 from content_tool.refresh.evaluator import LLMFindings, compute_staleness, llm_audit_published
 from content_tool.refresh.inventory import advance_schedule, schedule_after_retry
 from content_tool.wordpress.client import WordPressClient
+
+_COST_CALC: CostCalculator | None = None
+
+
+def _get_cost_calc() -> CostCalculator:
+    global _COST_CALC
+    if _COST_CALC is None:
+        _COST_CALC = CostCalculator.load_from("config/pricing.yaml")
+    return _COST_CALC
 
 log = structlog.get_logger(__name__)
 
@@ -164,6 +174,7 @@ async def scan_article(
                 gemini_client=gemini_client,
             )
             llm_used = 1
+            llm.model = get_settings().gemini_model
         except Exception as llm_exc:
             log.error(
                 "refresh_scan_article.llm_failed",
@@ -177,6 +188,15 @@ async def scan_article(
 
     score, action = compute_staleness(det, llm, age_days=age_days)
 
+    est_cents: int | None = None
+    if llm is not None and (llm.tokens_in or llm.tokens_out):
+        est_cents = _get_cost_calc().estimate_cents(
+            model=llm.model or get_settings().gemini_model,
+            tokens_in=llm.tokens_in,
+            tokens_out=llm.tokens_out,
+            thinking_tokens=llm.thinking_tokens,
+        )
+
     ev = await _insert_evaluation(
         session,
         article=article,
@@ -188,6 +208,10 @@ async def scan_article(
         llm_skipped_reason=llm_skipped_reason,
         score=score,
         action=action,
+        tokens_in=llm.tokens_in if llm else None,
+        tokens_out=llm.tokens_out if llm else None,
+        est_cost_usd_cents=est_cents,
+        latency_ms=llm.latency_ms if llm else None,
     )
 
     new_due = advance_schedule(action=action, now=now)
@@ -219,6 +243,10 @@ async def _insert_evaluation(
     score: Decimal,
     action: str,
     fetched_html_hash: str | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    est_cost_usd_cents: int | None = None,
+    latency_ms: int | None = None,
 ) -> RefreshEvaluation:
     """Supersede prior open evals for the article and insert a new open eval.
 
@@ -254,6 +282,10 @@ async def _insert_evaluation(
         staleness_score=score,
         recommended_action=action,
         outcome="open",
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        est_cost_usd_cents=est_cost_usd_cents,
+        latency_ms=latency_ms,
     )
     session.add(ev)
     return ev
