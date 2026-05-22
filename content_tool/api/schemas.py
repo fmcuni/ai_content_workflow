@@ -17,12 +17,14 @@ class CreateRunRequest(BaseModel):
     persona: str = "bowtie-editor"
     topic_category: str | None = None
     editor_email: str = Field(description="Identifies who triggered the run")
+    triggered_by_evaluation_id: UUID | None = None
 
 
 class CreateRunResponse(BaseModel):
     run_id: UUID
     status: str
     created_at: datetime
+    article_id: UUID | None = None
 
 
 class ResumeRequest(BaseModel):

@@ -13,7 +13,16 @@ from content_tool.api.schemas import (
     ResumeRequest,
 )
 from content_tool.api.sse import sse_stream
-from content_tool.db.models import AuditRun, Draft, GapAnalysisRow, OutlineRow, Render, Run
+from content_tool.db.models import (
+    AuditRun,
+    Draft,
+    GapAnalysisRow,
+    OutlineRow,
+    RefreshEvaluation,
+    Render,
+    Run,
+)
+from content_tool.refresh.inventory import upsert_article
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -34,6 +43,22 @@ async def create_run(
 ) -> CreateRunResponse:
     run_id = uuid4()
     async with sf() as session:
+        article = await upsert_article(
+            session,
+            article_url=payload.article_url,
+            topic=payload.topic,
+            persona=payload.persona,
+            topic_category=payload.topic_category,
+        )
+
+        ev = None
+        if payload.triggered_by_evaluation_id is not None:
+            ev = await session.get(RefreshEvaluation, payload.triggered_by_evaluation_id)
+            if ev is None or ev.article_id != article.article_id:
+                raise HTTPException(status_code=422, detail="triggered_by_evaluation_id mismatch")
+            if ev.outcome != "open":
+                raise HTTPException(status_code=409, detail="evaluation already resolved")
+
         row = Run(
             run_id=run_id,
             created_by=payload.editor_email,
@@ -48,8 +73,18 @@ async def create_run(
             persona=payload.persona,
             topic_category=payload.topic_category,
             today_date=date.today(),
+            article_id=article.article_id,
+            triggered_by_evaluation_id=ev.evaluation_id if ev else None,
         )
         session.add(row)
+        await session.flush()
+
+        if ev is not None:
+            ev.outcome = "triggered"
+            ev.resulting_run_id = run_id
+            ev.outcome_set_at = datetime.now(UTC)
+            ev.outcome_set_by = payload.editor_email
+
         await session.commit()
 
     # Fire and forget: spawn graph execution
@@ -57,7 +92,8 @@ async def create_run(
     return CreateRunResponse(
         run_id=run_id,
         status="pending",
-        created_at=row.created_at if row.created_at else __import__("datetime").datetime.utcnow(),
+        created_at=row.created_at if row.created_at else datetime.now(UTC),
+        article_id=article.article_id,
     )
 
 
