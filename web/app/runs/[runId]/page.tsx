@@ -1,15 +1,30 @@
 "use client";
+import * as React from "react";
 import { use } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { SectionHead } from "@/components/SectionHead";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { CostMeter } from "@/components/CostMeter";
 import { useRunEvents } from "@/lib/sse";
 import { api } from "@/lib/api";
+
+function BylineItems({ items }: { items: (React.ReactNode | null)[] }) {
+  const visible = items.filter((x): x is React.ReactNode => x !== null && x !== undefined && x !== false);
+  return (
+    <>
+      {visible.map((item, i) => (
+        <React.Fragment key={i}>
+          {item}
+          {i < visible.length - 1 ? <span className="text-ink-faint">·</span> : null}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
 
 export default function RunDetail({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -43,21 +58,18 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
       {/* Byline strip */}
       <div className="font-mono text-[12px] text-ink-soft border-y border-rule py-3 mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
         {run && (
-          <>
-            <span className="inline-flex items-center gap-2">
-              STATUS · <RunStatusBadge status={run.status} />
-            </span>
-            <span className="text-ink-faint">·</span>
-            {run.chosen_route && (
-              <>
-                <span>ROUTE · <span className="text-ink">{run.chosen_route}</span></span>
-                <span className="text-ink-faint">·</span>
-              </>
-            )}
-            <span>ITER · <span className="text-ink tabular-nums">{run.iteration_count}</span></span>
-            <span className="text-ink-faint">·</span>
-            <CostMeter runId={runId} />
-          </>
+          <BylineItems
+            items={[
+              <span key="status" className="inline-flex items-center gap-2">
+                STATUS · <RunStatusBadge status={run.status} />
+              </span>,
+              run.chosen_route ? (
+                <span key="route">ROUTE · <span className="text-ink">{run.chosen_route}</span></span>
+              ) : null,
+              <span key="iter">ITER · <span className="text-ink tabular-nums">{run.iteration_count}</span></span>,
+              <CostMeter key="cost" runId={runId} />,
+            ]}
+          />
         )}
       </div>
 
@@ -75,16 +87,22 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
             {run?.status === "hitl_1" && (
               <div>
                 <p className="kicker mb-2">Hitl · Stage 1</p>
-                <Link href={`/runs/${runId}/hitl1`} className="block">
-                  <Button variant="primary" size="lg" className="w-full">Review gap analysis & outline →</Button>
+                <Link
+                  href={`/runs/${runId}/hitl1`}
+                  className={buttonVariants({ variant: "primary", size: "lg" }) + " w-full"}
+                >
+                  Review gap analysis & outline →
                 </Link>
               </div>
             )}
             {run?.status === "hitl_2" && (
               <div>
                 <p className="kicker mb-2">Hitl · Stage 2</p>
-                <Link href={`/runs/${runId}/hitl2`} className="block">
-                  <Button variant="primary" size="lg" className="w-full">Review final draft →</Button>
+                <Link
+                  href={`/runs/${runId}/hitl2`}
+                  className={buttonVariants({ variant: "primary", size: "lg" }) + " w-full"}
+                >
+                  Review final draft →
                 </Link>
               </div>
             )}
