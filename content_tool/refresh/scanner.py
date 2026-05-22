@@ -121,7 +121,7 @@ async def scan_article(
             age_days=age_days,
             deterministic_findings={
                 "findings": [],
-                "note": "wp_post_not_found",
+                "error": "wp_post_not_found",
                 "severity_high": 0,
                 "severity_medium": 0,
                 "severity_low": 0,
@@ -150,6 +150,7 @@ async def scan_article(
 
     llm_skipped_reason: str | None = None
     llm: LLMFindings | None = None
+    llm_findings_override: dict | None = None
     llm_used = 0
     if det.passed:
         llm_skipped_reason = "deterministic_passed"
@@ -163,13 +164,16 @@ async def scan_article(
                 gemini_client=gemini_client,
             )
             llm_used = 1
-        except Exception:
+        except Exception as llm_exc:
             log.error(
                 "refresh_scan_article.llm_failed",
                 article_id=str(article.article_id),
                 exc_info=True,
             )
             llm_skipped_reason = "llm_error"
+            # Store failure detail so ops can distinguish "no LLM call" (None)
+            # from "LLM call failed" (dict with error key).
+            llm_findings_override = {"error": "llm_error", "detail": str(llm_exc)[:500]}
 
     score, action = compute_staleness(det, llm, age_days=age_days)
 
@@ -180,7 +184,7 @@ async def scan_article(
         age_days=age_days,
         fetched_html_hash=html_hash,
         deterministic_findings=det.to_jsonb(),
-        llm_findings=(llm.raw if llm else None),
+        llm_findings=(llm.raw if llm else llm_findings_override),
         llm_skipped_reason=llm_skipped_reason,
         score=score,
         action=action,
@@ -220,6 +224,15 @@ async def _insert_evaluation(
 
     UPDATE + INSERT are atomic within the caller's transaction (in `scan_tick`
     this is a nested savepoint per article).
+
+    Flush / refresh note:
+        The returned ``RefreshEvaluation`` is added to the session but NOT
+        flushed.  Python-side defaults — e.g. ``evaluation_id`` (``uuid4()``)
+        — ARE populated immediately.  Server-side defaults — ``evaluated_at``
+        (``server_default=text("now()")``) and ``outcome='open'`` set by the
+        DB — are NOT available until after a flush.  Callers that need
+        ``evaluated_at`` before commit must call ``await session.flush()``
+        followed by ``await session.refresh(ev)``.
     """
     await session.execute(
         update(RefreshEvaluation)
