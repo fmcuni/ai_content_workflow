@@ -3,6 +3,7 @@ import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import Link from "next/link";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { SectionHead } from "@/components/SectionHead";
@@ -22,12 +23,16 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
   const approve = useMutation({
     mutationFn: () => api.resumeHitl1(runId, edited ? { decision: "edit_outline", edited_outline: edited } : { decision: "approve" }),
     onSuccess: () => router.push(`/runs/${runId}`),
+    onError: (e: Error) => toast.error(e.message),
   });
   const overrideRoute = useMutation({
     mutationFn: (newRoute: "small_refresh" | "full_rewrite") =>
       api.resumeHitl1(runId, { decision: "override_route", new_route: newRoute }),
     onSuccess: () => router.push(`/runs/${runId}`),
+    onError: (e: Error) => toast.error(e.message),
   });
+
+  const isBusy = approve.isPending || overrideRoute.isPending;
 
   const outline = edited ?? ol.data?.payload ?? null;
 
@@ -63,10 +68,10 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
             {edited ? "EDITS PENDING" : "AWAITING DECISION"}
           </p>
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
-            <Button variant="secondary" size="sm" onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
-            <Button variant="primary" onClick={() => approve.mutate()}>
-              {edited ? "Approve with edits ↪" : "Approve ↪"}
+            <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
+            <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
+            <Button variant="primary" disabled={isBusy} onClick={() => approve.mutate()}>
+              {approve.isPending ? "Submitting…" : edited ? "Approve with edits ↪" : "Approve ↪"}
             </Button>
           </div>
         </div>
