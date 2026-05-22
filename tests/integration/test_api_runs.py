@@ -46,29 +46,26 @@ async def test_create_run_then_resume(postgres_url, monkeypatch):
         )
 
         with respx.mock(assert_all_called=False) as router:
-            router.get("https://www.bowtie.com.hk/blog/zh/cancer-screening/").mock(
+            # Slug-based fetch via WordPressClient (wp_base_url = staging.bowtie.com.hk)
+            router.get("https://staging.bowtie.com.hk/wp-json/wp/v2/posts").mock(
                 return_value=Response(
                     200,
-                    headers={"Link": "<https://www.bowtie.com.hk/blog/?p=98785>; rel=shortlink"},
-                    text="x",
+                    json=[
+                        {
+                            "id": 98785,
+                            "slug": "cancer-screening",
+                            "categories": [42],
+                            "link": "x",
+                            "title": {"rendered": "x"},
+                            "status": "publish",
+                            "author": 5,
+                            "modified_gmt": "2026-04-12T08:30:00",
+                            "content": {"rendered": "<p>x</p>"},
+                        }
+                    ],
                 )
             )
-            router.get("https://www.bowtie.com.hk/blog/wp-json/wp/v2/posts/98785").mock(
-                return_value=Response(
-                    200,
-                    json={
-                        "id": 98785,
-                        "slug": "x",
-                        "categories": [42],
-                        "link": "x",
-                        "title": {"rendered": "x"},
-                        "status": "publish",
-                        "author": 5,
-                        "modified_gmt": "2026-04-12T08:30:00",
-                        "content": {"rendered": "<p>x</p>"},
-                    },
-                )
-            )
+            # Categories via _WP_BASE_DEFAULT
             router.get("https://www.bowtie.com.hk/blog/wp-json/wp/v2/categories").mock(
                 return_value=Response(200, json=[{"id": 42, "name": "x", "slug": "x"}])
             )
