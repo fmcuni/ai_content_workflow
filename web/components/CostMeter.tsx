@@ -1,6 +1,12 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 100_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${Math.round(n / 1000)}k`;
+}
+
 export function CostMeter({ runId }: { runId: string }) {
   const { data } = useQuery({
     queryKey: ["cost", runId],
@@ -18,13 +24,12 @@ export function CostMeter({ runId }: { runId: string }) {
     refetchInterval: 5000,
   });
   if (!data) return null;
+  const totalTokens = data.tokens_in + data.tokens_out + data.thinking_tokens;
+  // HK$ at 7.8 ~= USD; we show as HK$ since this is Bowtie/HK.
+  const hk = (data.est_usd_cents / 100) * 7.8;
   return (
-    <div className="text-xs text-neutral-500">
-      Tokens: {data.tokens_in.toLocaleString()} in / {data.tokens_out.toLocaleString()} out
-      {" · "}
-      {data.thinking_tokens.toLocaleString()} thinking
-      {" · "}
-      Est: US${(data.est_usd_cents / 100).toFixed(2)}
-    </div>
+    <span className="font-mono text-[12px] text-ink-soft tabular-nums">
+      HK$ {hk.toFixed(2)} · {formatTokens(totalTokens)} tok
+    </span>
   );
 }
