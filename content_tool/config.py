@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     log_level: str = "info"
 
     # WordPress
-    wp_base_url: str = "https://staging.bowtie.com.hk"
+    wp_base_url: str = "https://www.bowtie.com.hk/blog"
     wp_target: str = "staging"                # staging | production
     wp_username: str = ""                     # WP user the editor authenticates as
     wp_app_password: str = ""                 # Application Password

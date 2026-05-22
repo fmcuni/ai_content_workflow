@@ -20,6 +20,7 @@ from content_tool.gemini.fake import FakeGeminiClient
 async def test_create_run_then_resume(postgres_url, monkeypatch):
     monkeypatch.setenv("POSTGRES_URL", postgres_url)
     monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    monkeypatch.setenv("WP_BASE_URL", "https://www.bowtie.com.hk/blog")
 
     app = create_app()
 
@@ -46,8 +47,8 @@ async def test_create_run_then_resume(postgres_url, monkeypatch):
         )
 
         with respx.mock(assert_all_called=False) as router:
-            # Slug-based fetch via WordPressClient (wp_base_url = staging.bowtie.com.hk)
-            router.get("https://staging.bowtie.com.hk/wp-json/wp/v2/posts").mock(
+            # Slug-based fetch via WordPressClient (wp_base_url = www.bowtie.com.hk/blog)
+            router.get("https://www.bowtie.com.hk/blog/wp-json/wp/v2/posts").mock(
                 return_value=Response(
                     200,
                     json=[

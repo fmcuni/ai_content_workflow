@@ -122,3 +122,4 @@ Periodic re-audit of onboarded articles, surfaced at `/library`.
 - **Manual scan:** `POST /refresh/scan`
 - **Manual single-article:** `POST /refresh/scan/{article_id}`
 - **Disable cron without code changes:** set `REFRESH_CRON_ENABLED=false`
+- **After pulling Plan 7:** run `cd web && npm install` — the calendar + sheet shadcn components add `react-day-picker` and friends, so a stale `node_modules` will 500 `/library`.

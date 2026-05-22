@@ -90,6 +90,22 @@ export default function NewRunPage() {
         </div>
       )}
 
+      {article && !evaluation && (
+        <div className="mb-6">
+          <h2 className="text-sm font-medium mb-2">Refresh context</h2>
+          <Card className="p-4 text-sm space-y-1 bg-neutral-50">
+            <div className="text-neutral-500">From library queue</div>
+            <div className="font-medium">{article.topic ?? "(no topic)"}</div>
+            <a href={article.article_url} target="_blank" rel="noopener noreferrer"
+               className="text-blue-700 underline break-all line-clamp-1">{article.article_url}</a>
+            <div className="text-neutral-500">
+              Open runs: {article.open_runs_count}
+              {article.last_persisted_at && ` · last persisted ${new Date(article.last_persisted_at).toLocaleDateString()}`}
+            </div>
+          </Card>
+        </div>
+      )}
+
       <Card className="p-6 space-y-4">
         <div>
           <Label>Article URL</Label>

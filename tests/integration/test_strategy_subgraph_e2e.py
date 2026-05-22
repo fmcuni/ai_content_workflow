@@ -16,7 +16,9 @@ from content_tool.graph.strategy import build_strategy_graph
 
 
 @pytest.mark.asyncio
-async def test_strategy_subgraph_end_to_end(postgres_url):
+async def test_strategy_subgraph_end_to_end(postgres_url, monkeypatch):
+    monkeypatch.setenv("WP_BASE_URL", "https://www.bowtie.com.hk/blog")
+
     engine = make_engine(postgres_url)
     sf = make_session_factory(engine)
 
@@ -51,8 +53,8 @@ async def test_strategy_subgraph_end_to_end(postgres_url):
     gemini = FakeGeminiClient(canned_responses=canned)
 
     with respx.mock(assert_all_called=True) as router:
-        # Slug-based fetch via WordPressClient (wp_base_url = staging.bowtie.com.hk)
-        router.get("https://staging.bowtie.com.hk/wp-json/wp/v2/posts").mock(
+        # Slug-based fetch via WordPressClient (wp_base_url = www.bowtie.com.hk/blog)
+        router.get("https://www.bowtie.com.hk/blog/wp-json/wp/v2/posts").mock(
             return_value=Response(
                 200,
                 json=[

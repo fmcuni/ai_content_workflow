@@ -196,15 +196,16 @@ async def dismiss_article(
     body: DismissRequest,
     session: AsyncSession = Depends(_session),  # noqa: B008
 ) -> ArticleOut:
-    if body.until <= datetime.now(UTC):
+    until = body.until if body.until.tzinfo else body.until.replace(tzinfo=UTC)
+    if until <= datetime.now(UTC):
         raise HTTPException(status_code=422, detail="until must be in the future")
     a = await session.get(Article, article_id)
     if a is None:
         raise HTTPException(status_code=404, detail="article not found")
-    a.dismissed_until = body.until
+    a.dismissed_until = until
     a.dismissed_by = body.dismissed_by
     a.dismissed_reason = body.reason
-    a.next_scan_due_at = body.until
+    a.next_scan_due_at = until
     a.updated_at = datetime.now(UTC)
 
     latest_open = (

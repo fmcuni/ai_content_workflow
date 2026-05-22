@@ -6,6 +6,8 @@ export function CostMeter({ runId }: { runId: string }) {
     queryKey: ["cost", runId],
     queryFn: async () => {
       const r = await fetch(`/api/costs/run/${runId}`);
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
       return (await r.json()) as {
         tokens_in: number;
         tokens_out: number;

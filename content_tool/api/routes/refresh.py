@@ -88,6 +88,7 @@ async def trigger_scan_one(
             select(Run.run_id)
             .where(Run.article_id == article_id)
             .where(Run.status.in_(IN_FLIGHT_STATUSES))
+            .limit(1)
         )
     ).scalar_one_or_none()
     if inflight is not None:

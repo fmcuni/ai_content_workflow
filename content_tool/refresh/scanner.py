@@ -117,7 +117,7 @@ async def scan_article(
             llm_findings=None,
             llm_skipped_reason="scanner_error",
             score=Decimal("0.00"),
-            action="ok",
+            action="monitor",
         )
         article.next_scan_due_at = schedule_after_retry(now=now)
         article.updated_at = now
@@ -132,17 +132,17 @@ async def scan_article(
             deterministic_findings={
                 "findings": [],
                 "error": "wp_post_not_found",
-                "severity_high": 0,
+                "severity_high": 1,
                 "severity_medium": 0,
                 "severity_low": 0,
-                "passed": True,
+                "passed": False,
             },
             llm_findings=None,
             llm_skipped_reason="no_published_html",
-            score=Decimal("0.00"),
-            action="ok",
+            score=Decimal("10.00"),
+            action="refresh",
         )
-        new_due = advance_schedule(action="ok", now=now)
+        new_due = advance_schedule(action="refresh", now=now)
         if new_due is not None:
             article.next_scan_due_at = new_due
         article.updated_at = now
@@ -353,6 +353,15 @@ async def scan_tick(
                         Article.next_scan_due_at <= datetime.now(UTC)
                     )
                 articles = list((await session.execute(stmt)).scalars().all())
+                returned_ids = {a.article_id for a in articles}
+                for missing in forced_article_ids:
+                    if missing not in returned_ids:
+                        result.skipped.append(
+                            {
+                                "article_id": str(missing),
+                                "reason": "not_found_or_not_due",
+                            }
+                        )
             else:
                 articles = await select_due_articles(
                     session, batch_size=scan_cfg["batch_size"]
