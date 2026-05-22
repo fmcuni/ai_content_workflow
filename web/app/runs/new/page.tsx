@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
@@ -26,14 +26,14 @@ const DEFAULT_FORM: CreateRunRequest = {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="kicker">{label}</label>
+    <label className="flex flex-col gap-1.5">
+      <span className="kicker">{label}</span>
       {children}
-    </div>
+    </label>
   );
 }
 
-export default function NewRunPage() {
+function NewRunForm() {
   const router = useRouter();
   const params = useSearchParams();
   const articleId = params.get("article_id");
@@ -170,5 +170,13 @@ export default function NewRunPage() {
         {mutation.isError && <p className="text-accent-deep text-[12px]">{(mutation.error as Error).message}</p>}
       </Card>
     </div>
+  );
+}
+
+export default function NewRunPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewRunForm />
+    </Suspense>
   );
 }
