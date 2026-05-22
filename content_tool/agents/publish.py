@@ -6,7 +6,12 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import Draft, FetchedArticle, Render, Run
-from content_tool.wordpress.client import PublishPayload, WordPressClient, WordPressConflictError
+from content_tool.wordpress.client import (
+    PublishPayload,
+    WordPressClient,
+    WordPressConflictError,
+    WordPressError,
+)
 
 
 def _seo_meta_key(plugin: Literal["yoast", "rankmath"] | None) -> str | None:
@@ -62,6 +67,28 @@ async def publish_to_wordpress(
         await session.execute(update(Run).where(Run.run_id == run_id).values(
             status="failed",
             wp_push_error={"code": "conflict", "message": str(e)},
+        ))
+        await session.commit()
+        raise
+    except WordPressError as e:
+        # WP returned a non-2xx that wasn't a 412 conflict (e.g. 401 auth,
+        # 403 forbidden, 404 invalid post id, 5xx). Persist it so the run
+        # row carries the failure signal even when no SSE subscriber is
+        # listening.
+        await session.execute(update(Run).where(Run.run_id == run_id).values(
+            status="failed",
+            wp_push_error={"code": "wp_error", "message": str(e)},
+        ))
+        await session.commit()
+        raise
+    except Exception as e:  # noqa: BLE001 — also catches transport-level errors
+        await session.execute(update(Run).where(Run.run_id == run_id).values(
+            status="failed",
+            wp_push_error={
+                "code": "transport_error",
+                "type": type(e).__name__,
+                "message": str(e),
+            },
         ))
         await session.commit()
         raise

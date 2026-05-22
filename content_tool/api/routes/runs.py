@@ -102,6 +102,22 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             "mode": row.mode,
             "chosen_route": row.chosen_route,
             "iteration_count": row.iteration_count,
+            # Timestamps / identity
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            "created_by": row.created_by,
+            # HITL_2 signals — `runs` has no hitl_*_decision columns (those
+            # live in the LangGraph checkpoint state). `approved_at` and
+            # `approved_by` are the durable proxies for HITL_2 approval.
+            "approved_at": row.approved_at.isoformat() if row.approved_at else None,
+            "approved_by": row.approved_by,
+            # WordPress publish outcome
+            "wp_publish_status": row.wp_publish_status,
+            "wp_pushed_post_id": row.wp_pushed_post_id,
+            "wp_pushed_at": row.wp_pushed_at.isoformat() if row.wp_pushed_at else None,
+            "wp_push_error": row.wp_push_error,
+            # Generic graph error
+            "error": row.error,
         }
 
 

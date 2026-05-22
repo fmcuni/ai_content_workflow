@@ -4,6 +4,7 @@ from uuid import UUID
 
 import httpx
 from markdownify import markdownify as md
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import FetchedArticle
@@ -20,6 +21,22 @@ async def fetch_article(
     wp_base: str = _WP_BASE_DEFAULT,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
+    # Short-circuit if this run already has a fetched-article row.
+    # Lets the pipeline recover from partial failures and supports seeding
+    # the article out-of-band (e.g. when the live URL is behind a WAF).
+    existing = (
+        await session.execute(
+            select(FetchedArticle).where(FetchedArticle.run_id == run_id)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return {
+            "wp_post_id": existing.wp_post_id,
+            "wp_categories": existing.wp_categories or [],
+            "raw_html": existing.raw_html or "",
+            "markdown": existing.markdown,
+        }
+
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=15.0, follow_redirects=True)
     try:

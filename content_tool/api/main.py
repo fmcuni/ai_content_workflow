@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
 )
+
+logger = logging.getLogger(__name__)
 
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
@@ -34,8 +37,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     seo_plugin = None
     if settings.wp_base_url:
         try:
-            seo_plugin = await detect_seo_plugin(settings.wp_base_url)
+            seo_plugin = await detect_seo_plugin(
+                settings.wp_base_url,
+                username=settings.wp_username,
+                app_password=settings.wp_app_password,
+            )
         except Exception:
+            logger.warning(
+                "SEO plugin detection failed; SEO meta will be skipped on publish",
+                exc_info=True,
+            )
             seo_plugin = None
     wp_client = WordPressClient(
         settings.wp_base_url,
