@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (  # noqa: F401
@@ -8,6 +9,7 @@ from sqlalchemy import (  # noqa: F401
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     text,
@@ -66,6 +68,12 @@ class Run(Base):
     hitl_2_notes: Mapped[str | None] = mapped_column(String)
     approved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     approved_by: Mapped[str | None] = mapped_column(String)
+    article_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("content_tool.articles.article_id")
+    )
+    triggered_by_evaluation_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("content_tool.refresh_evaluations.evaluation_id")
+    )
 
 
 class GapAnalysisRow(Base):
@@ -247,3 +255,62 @@ class Eval(Base):
     pass_: Mapped[bool] = mapped_column("pass", default=False)
     judge_notes: Mapped[dict | None] = mapped_column(JSONB)
     commit_sha: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class Article(Base):
+    __tablename__ = "articles"
+    __table_args__ = (
+        Index("articles_next_scan_due_idx", "next_scan_due_at"),
+        Index("articles_wp_post_id_idx", "wp_post_id"),
+        UniqueConstraint("article_url", name="articles_article_url_uidx"),
+        {"schema": "content_tool"},
+    )
+
+    article_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    article_url: Mapped[str] = mapped_column(String, nullable=False)
+    wp_post_id: Mapped[int | None]
+    topic: Mapped[str | None] = mapped_column(String)
+    persona: Mapped[str | None] = mapped_column(String)
+    topic_category: Mapped[str | None] = mapped_column(String)
+    first_seen_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    last_persisted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    next_scan_due_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    dismissed_until: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    dismissed_by: Mapped[str | None] = mapped_column(String)
+    dismissed_reason: Mapped[str | None] = mapped_column(String)
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class RefreshEvaluation(Base):
+    __tablename__ = "refresh_evaluations"
+    __table_args__ = (
+        Index("refresh_evals_article_evaluated_idx", "article_id", "evaluated_at"),
+        {"schema": "content_tool"},
+    )
+
+    evaluation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    article_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.articles.article_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    evaluated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    scanner_version: Mapped[str] = mapped_column(String, nullable=False)
+    trigger_source: Mapped[str] = mapped_column(String, nullable=False)
+    age_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    fetched_html_hash: Mapped[str | None] = mapped_column(String)
+    deterministic_findings: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    llm_findings: Mapped[dict | None] = mapped_column(JSONB)
+    llm_skipped_reason: Mapped[str | None] = mapped_column(String)
+    staleness_score: Mapped[Decimal] = mapped_column(Numeric(4, 2), nullable=False)
+    recommended_action: Mapped[str] = mapped_column(String, nullable=False)
+    outcome: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'open'"))
+    resulting_run_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("content_tool.runs.run_id")
+    )
+    outcome_set_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    outcome_set_by: Mapped[str | None] = mapped_column(String)
+    tokens_in: Mapped[int | None]
+    tokens_out: Mapped[int | None]
+    est_cost_usd_cents: Mapped[int | None]
+    latency_ms: Mapped[int | None]

@@ -9,6 +9,24 @@ class FakeGeminiClient:
         self._canned = canned_responses
         self.calls: list[dict[str, Any]] = []
 
+    def set_audit_response(self, canned: dict[str, Any]) -> None:
+        """Set/replace the canned response returned for agent="audit".
+
+        Fills in `severity_summary` if the caller omits it so the returned
+        payload validates against AuditOutput.
+        """
+        payload = dict(canned)
+        findings = payload.get("findings", [])
+        if "severity_summary" not in payload:
+            payload["severity_summary"] = {
+                "high": sum(1 for f in findings if f.get("severity") == "high"),
+                "medium": sum(1 for f in findings if f.get("severity") == "medium"),
+                "low": sum(1 for f in findings if f.get("severity") == "low"),
+            }
+        if "overall_pass" not in payload:
+            payload["overall_pass"] = payload["severity_summary"]["high"] == 0
+        self._canned["audit"] = payload
+
     async def generate(
         self,
         *,

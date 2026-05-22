@@ -1,3 +1,8 @@
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +22,20 @@ class Settings(BaseSettings):
     wp_app_password: str = ""                 # Application Password
     wp_timeout: float = 15.0
 
+    # Refresh route
+    refresh_config_path: str = "config/refresh.yaml"
+    refresh_cron_enabled: bool = True
+
 
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
+
+
+@lru_cache(maxsize=1)
+def get_refresh_config() -> dict[str, Any]:
+    settings = get_settings()
+    path = Path(settings.refresh_config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"refresh config not found: {path}")
+    with path.open() as f:
+        return yaml.safe_load(f)

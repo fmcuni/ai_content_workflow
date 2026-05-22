@@ -1,5 +1,6 @@
 import base64
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 
@@ -35,6 +36,19 @@ class PublishResult:
     status: str
     modified_gmt: str
     slug: str
+
+
+@dataclass
+class FetchedPost:
+    id: int
+    slug: str
+    link: str
+    title: str
+    content_html: str
+    modified_gmt: str
+    status: str
+    author: int | None
+    categories: list[int]
 
 
 class WordPressClient:
@@ -110,6 +124,49 @@ class WordPressClient:
                 status=data["status"],
                 modified_gmt=data["modified_gmt"],
                 slug=data["slug"],
+            )
+        finally:
+            if own:
+                await client.aclose()
+
+    async def fetch_post_by_url(self, article_url: str) -> FetchedPost | None:
+        """Resolve a WordPress post by its public URL. Returns None if not found.
+
+        Strategy: extract the trailing slug from the URL path, then call
+        GET /wp/v2/posts?slug=<slug>&_fields=...
+        """
+        parsed = urlparse(article_url)
+        slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        if not slug:
+            return None
+
+        own = self._client is None
+        client = self._client or httpx.AsyncClient(timeout=self._timeout)
+        try:
+            resp = await client.get(
+                f"{self._base_url}/wp-json/wp/v2/posts",
+                params={
+                    "slug": slug,
+                    "_fields": "id,slug,link,title,content,modified_gmt,status,author,categories",
+                    "status": "publish",
+                },
+                headers={"authorization": self._auth_header()},
+            )
+            resp.raise_for_status()
+            posts = resp.json()
+            if not posts:
+                return None
+            p = posts[0]
+            return FetchedPost(
+                id=int(p["id"]),
+                slug=p["slug"],
+                link=p["link"],
+                title=p["title"]["rendered"],
+                content_html=p["content"]["rendered"],
+                modified_gmt=p["modified_gmt"],
+                status=p["status"],
+                author=p.get("author"),
+                categories=list(p.get("categories", [])),
             )
         finally:
             if own:

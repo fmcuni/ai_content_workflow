@@ -1,0 +1,40 @@
+# Bowtie AI Content Tool — Refresh route cron
+#
+# This is a TEMPLATE for system cron / k8s CronJob / GitHub Actions cron.
+# The actual operationalisation host is an ops decision (see spec §10 open
+# question 1). Match the existing nightly-reference-eval cron pattern.
+#
+# Schedule: 03:00 HKT (HKT = UTC+8, so cron line below assumes UTC)
+# Adjust to your TZ if your scheduler is local-time.
+#
+# Required env vars (inherit from systemd EnvironmentFile or k8s ConfigMap):
+#   POSTGRES_URL                — same as FastAPI app
+#   GEMINI_API_KEY              — same as FastAPI app
+#   WP_BASE_URL, WP_USERNAME, WP_APP_PASSWORD  — same as FastAPI app
+#   REFRESH_CRON_ENABLED=true   — kill-switch
+#
+# Command:
+#   uv run python -m scripts.refresh_scan
+#
+# Example crontab line (system cron, UTC):
+# 0 19 * * *  REFRESH_CRON_ENABLED=true /opt/bowtie-content-tool/.venv/bin/python -m scripts.refresh_scan >> /var/log/bowtie/refresh.log 2>&1
+#
+# Example k8s CronJob skeleton:
+# apiVersion: batch/v1
+# kind: CronJob
+# metadata:
+#   name: refresh-scan
+# spec:
+#   schedule: "0 19 * * *"          # 03:00 HKT
+#   jobTemplate:
+#     spec:
+#       template:
+#         spec:
+#           containers:
+#             - name: scan
+#               image: bowtie/content-tool:latest
+#               command: ["python", "-m", "scripts.refresh_scan"]
+#               envFrom:
+#                 - secretRef: { name: content-tool-secrets }
+#                 - configMapRef: { name: content-tool-config }
+#           restartPolicy: OnFailure

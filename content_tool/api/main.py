@@ -9,10 +9,10 @@ from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
 )
 
-logger = logging.getLogger(__name__)
-
+from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
+from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.sse import RunExecutor
 from content_tool.config import get_settings
@@ -22,6 +22,8 @@ from content_tool.observability.logging import configure_logging
 from content_tool.observability.tracing import configure_tracing
 from content_tool.wordpress.client import WordPressClient
 from content_tool.wordpress.seo_plugin import detect_seo_plugin
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -64,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = sf
     app.state.run_executor = executor
     app.state.wp_client = wp_client
+    app.state.gemini_client = gemini
     app.state.seo_plugin = seo_plugin
     app.state.wp_target = settings.wp_target
     try:
@@ -89,8 +92,10 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(runs_router)
+    app.include_router(articles_router)
     app.include_router(compliance_router)
     app.include_router(costs_router)
+    app.include_router(refresh_router)
     FastAPIInstrumentor().instrument_app(app)
     return app
 

@@ -8,10 +8,13 @@ from sqlalchemy import select
 
 from content_tool.agents.fetch_article import fetch_article
 from content_tool.db.models import FetchedArticle, Run
+from content_tool.wordpress.client import WordPressClient
+
+_WP_BASE = "https://www.bowtie.com.hk/blog"
 
 
 @pytest.mark.asyncio
-async def test_fetch_article_resolves_via_shortlink_and_writes(db_session):
+async def test_fetch_article_resolves_via_slug_and_writes(db_session):
     run_id = uuid4()
     db_session.add(
         Run(
@@ -30,34 +33,34 @@ async def test_fetch_article_resolves_via_shortlink_and_writes(db_session):
     )
     await db_session.commit()
 
+    wp_client = WordPressClient(
+        _WP_BASE,
+        username="user",
+        app_password="pass",
+    )
+
     with respx.mock(assert_all_called=True) as router:
-        # 1. Page resolution returns Link header with ?p=98785
-        router.get("https://www.bowtie.com.hk/blog/zh/cancer-screening/").mock(
+        # 1. Slug-based WP post fetch (new flow — no shortlink resolution)
+        router.get(f"{_WP_BASE}/wp-json/wp/v2/posts").mock(
             return_value=Response(
                 200,
-                headers={"Link": "<https://www.bowtie.com.hk/blog/?p=98785>; rel=shortlink"},
-                text="ignored",
+                json=[
+                    {
+                        "id": 98785,
+                        "slug": "cancer-screening",
+                        "categories": [42, 7],
+                        "link": "https://www.bowtie.com.hk/blog/zh/cancer-screening/",
+                        "title": {"rendered": "大腸癌篩查指南"},
+                        "status": "publish",
+                        "author": 5,
+                        "modified_gmt": "2026-04-12T08:30:00",
+                        "content": {"rendered": "<h2>什麼是大腸癌？</h2><p>大腸癌是...</p>"},  # noqa: RUF001
+                    }
+                ],
             )
         )
-        # 2. WP post fetch
-        router.get("https://www.bowtie.com.hk/blog/wp-json/wp/v2/posts/98785").mock(
-            return_value=Response(
-                200,
-                json={
-                    "id": 98785,
-                    "slug": "cancer-screening",
-                    "categories": [42, 7],
-                    "link": "https://www.bowtie.com.hk/blog/zh/cancer-screening/",
-                    "title": {"rendered": "大腸癌篩查指南"},
-                    "status": "publish",
-                    "author": 5,
-                    "modified_gmt": "2026-04-12T08:30:00",
-                    "content": {"rendered": "<h2>什麼是大腸癌？</h2><p>大腸癌是...</p>"},  # noqa: RUF001
-                },
-            )
-        )
-        # 3. Categories
-        router.get("https://www.bowtie.com.hk/blog/wp-json/wp/v2/categories").mock(
+        # 2. Categories — same endpoint as before
+        router.get(f"{_WP_BASE}/wp-json/wp/v2/categories").mock(
             return_value=Response(
                 200,
                 json=[
@@ -70,10 +73,9 @@ async def test_fetch_article_resolves_via_shortlink_and_writes(db_session):
         result = await fetch_article(
             session=db_session,
             run_id=run_id,
-            article_url=str(
-                db_session.get(Run, run_id)
-                and "https://www.bowtie.com.hk/blog/zh/cancer-screening/"
-            ),
+            article_url="https://www.bowtie.com.hk/blog/zh/cancer-screening/",
+            wp_base=f"{_WP_BASE}/wp-json/wp/v2",
+            wp_client=wp_client,
         )
 
     assert result["wp_post_id"] == 98785
