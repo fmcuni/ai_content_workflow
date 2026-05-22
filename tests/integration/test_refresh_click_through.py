@@ -119,6 +119,47 @@ async def test_post_runs_with_evaluation_id_flips_outcome(pg_session_factory):
 
 
 @pytest.mark.asyncio
+async def test_post_runs_already_resolved_evaluation_returns_409(pg_session_factory):
+    """Seeding an eval already marked 'triggered' and POSTing /runs with its ID must return 409."""
+    sf = pg_session_factory
+
+    async with sf() as s:
+        article = _make_article("https://www.bowtie.com.hk/blog/zh/already-resolved/")
+        s.add(article)
+        await s.commit()
+        # Seed an evaluation already marked "triggered" (not "open")
+        ev = RefreshEvaluation(
+            article_id=article.article_id,
+            scanner_version="test",
+            trigger_source="cron",
+            age_days=120,
+            deterministic_findings={},
+            staleness_score=Decimal("7.50"),
+            recommended_action="refresh",
+            outcome="triggered",
+        )
+        s.add(ev)
+        await s.commit()
+        eval_id = ev.evaluation_id
+
+    app = create_app()
+    app.state.session_factory = sf
+    app.state.run_executor = _StubRunner()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        payload = {
+            **_BASE_PAYLOAD,
+            "article_url": "https://www.bowtie.com.hk/blog/zh/already-resolved/",
+            "triggered_by_evaluation_id": str(eval_id),
+        }
+        resp = await ac.post("/runs", json=payload)
+
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert "already" in detail.lower() or "resolved" in detail.lower()
+
+
+@pytest.mark.asyncio
 async def test_post_runs_evaluation_mismatch_returns_422(pg_session_factory):
     """Posting /runs for article B with an eval that belongs to article A must return 422."""
     sf = pg_session_factory
