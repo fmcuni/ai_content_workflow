@@ -3,6 +3,8 @@ import { cn } from "@/lib/utils";
 
 type Tone = "neutral" | "accent" | "ok" | "warn" | "info" | "danger";
 
+// Tone → ink color. `danger` deliberately reuses the deeper accent shade rather
+// than introducing a separate red, keeping the palette to a single editorial accent.
 const TONE: Record<Tone, string> = {
   neutral: "text-ink-soft",
   accent: "text-accent",
