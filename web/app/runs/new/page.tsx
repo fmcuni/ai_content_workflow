@@ -3,13 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { SectionHead } from "@/components/SectionHead";
 import { RefreshFindingsPanel } from "@/components/RefreshFindingsPanel";
 import { api, articlesApi, refreshApi } from "@/lib/api";
 import type { CreateRunRequest } from "@/lib/types";
@@ -22,6 +23,15 @@ const DEFAULT_FORM: CreateRunRequest = {
   editor_email: process.env.NEXT_PUBLIC_DEFAULT_EDITOR_EMAIL ?? "",
   triggered_by_evaluation_id: null,
 };
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="kicker">{label}</label>
+      {children}
+    </div>
+  );
+}
 
 export default function NewRunPage() {
   const router = useRouter();
@@ -45,8 +55,6 @@ export default function NewRunPage() {
     enabled: !!evaluationId,
   });
 
-  // Prefill form once when remote data arrives. Both queries must settle (or not be requested)
-  // before we seed, so the mode + article fields are applied together.
   const articleReady = !articleId || article !== undefined;
   const evaluationReady = !evaluationId || evaluation !== undefined;
   useEffect(() => {
@@ -80,49 +88,46 @@ export default function NewRunPage() {
   });
 
   return (
-    <div className="max-w-2xl mx-auto p-8">
-      <h1 className="text-xl font-semibold mb-4">New article update</h1>
+    <div className="mx-auto max-w-[760px] px-5 md:px-10 py-10 space-y-8">
+      <SectionHead
+        kicker="New Run"
+        hed="Article Assignment"
+        dek="Brief the desk on the next refresh."
+        size="md"
+      />
 
       {evaluation && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium mb-2">Refresh context</h2>
-          <RefreshFindingsPanel ev={evaluation} />
-        </div>
+        <RefreshFindingsPanel ev={evaluation} />
       )}
 
       {article && !evaluation && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium mb-2">Refresh context</h2>
-          <Card className="p-4 text-sm space-y-1 bg-neutral-50">
-            <div className="text-neutral-500">From library queue</div>
-            <div className="font-medium">{article.topic ?? "(no topic)"}</div>
-            <a href={article.article_url} target="_blank" rel="noopener noreferrer"
-               className="text-blue-700 underline break-all line-clamp-1">{article.article_url}</a>
-            <div className="text-neutral-500">
-              Open runs: {article.open_runs_count}
-              {article.last_persisted_at && ` · last persisted ${new Date(article.last_persisted_at).toLocaleDateString()}`}
-            </div>
-          </Card>
-        </div>
+        <blockquote className="border-l-2 border-accent pl-5 space-y-2 text-[13px]">
+          <p className="kicker">Brief from Archive</p>
+          <p className="font-display text-[18px] text-ink leading-snug">{article.topic ?? "(no topic)"}</p>
+          <a href={article.article_url} target="_blank" rel="noopener noreferrer"
+             className="font-mono text-[11px] text-ink-faint underline-offset-2 hover:underline break-all line-clamp-1">
+            {article.article_url}
+          </a>
+          <p className="font-mono text-[11px] text-ink-soft">
+            OPEN RUNS · <span className="tabular-nums">{article.open_runs_count}</span>
+            {article.last_persisted_at && <> · LAST PERSISTED {new Date(article.last_persisted_at).toLocaleDateString()}</>}
+          </p>
+        </blockquote>
       )}
 
-      <Card className="p-6 space-y-4">
-        <div>
-          <Label>Article URL</Label>
+      <Card variant="editorial" className="px-6 py-6 space-y-6">
+        <Field label="Article URL">
           <Input value={form.article_url} onChange={(e) => setForm({ ...form, article_url: e.target.value })}
                  placeholder="https://www.bowtie.com.hk/blog/zh/..." />
-        </div>
-        <div>
-          <Label>Topic</Label>
+        </Field>
+        <Field label="Topic">
           <Input value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} />
-        </div>
-        <div>
-          <Label>Focus keywords (comma-separated)</Label>
+        </Field>
+        <Field label="Focus keywords (comma-separated)">
           <Input value={keywordsRaw} onChange={(e) => setKeywordsRaw(e.target.value)} />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Mode</Label>
+        </Field>
+        <div className="grid grid-cols-2 gap-6">
+          <Field label="Mode">
             <Select value={form.mode} onValueChange={(v) => setForm({ ...form, mode: v as CreateRunRequest["mode"] })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -131,41 +136,38 @@ export default function NewRunPage() {
                 <SelectItem value="full_rewrite">Full rewrite</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div>
-            <Label>Persona</Label>
+          </Field>
+          <Field label="Persona">
             <Input value={form.persona} onChange={(e) => setForm({ ...form, persona: e.target.value })} />
-          </div>
+          </Field>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>acf_adv_id</Label>
+        <div className="grid grid-cols-2 gap-6">
+          <Field label="acf_adv_id">
             <Input type="number" value={form.acf_adv_id}
                    onChange={(e) => setForm({ ...form, acf_adv_id: parseInt(e.target.value || "0", 10) })} />
-          </div>
-          <div>
-            <Label>acf_widget_id</Label>
+          </Field>
+          <Field label="acf_widget_id">
             <Input type="number" value={form.acf_widget_id}
                    onChange={(e) => setForm({ ...form, acf_widget_id: parseInt(e.target.value || "0", 10) })} />
-          </div>
+          </Field>
         </div>
-        <div>
-          <Label>Topic category (optional, for community sources)</Label>
+        <Field label="Topic category (optional)">
           <Input value={form.topic_category ?? ""} onChange={(e) => setForm({ ...form, topic_category: e.target.value || null })}
                  placeholder="community-response / patient-experience / social-discussion" />
-        </div>
-        <div>
-          <Label>Edit note (optional)</Label>
+        </Field>
+        <Field label="Edit note (optional)">
           <Textarea value={form.edit_note ?? ""} onChange={(e) => setForm({ ...form, edit_note: e.target.value || null })} />
-        </div>
-        <div>
-          <Label>Editor email</Label>
+        </Field>
+        <Field label="Editor email">
           <Input value={form.editor_email} onChange={(e) => setForm({ ...form, editor_email: e.target.value })} />
+        </Field>
+        <div className="flex items-center justify-end gap-4 pt-2">
+          <Link href="/" className="text-[12px] text-ink-soft hover:text-ink">Cancel ↩</Link>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending ? "Creating…" : "Start run →"}
+          </Button>
         </div>
-        <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-          {mutation.isPending ? "Creating…" : "Start run"}
-        </Button>
-        {mutation.isError && <p className="text-rose-600">{(mutation.error as Error).message}</p>}
+        {mutation.isError && <p className="text-accent-deep text-[12px]">{(mutation.error as Error).message}</p>}
       </Card>
     </div>
   );
