@@ -16,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
 
@@ -28,10 +29,10 @@ interface LibraryTableProps {
   };
 }
 
-function dotColor(action: string | undefined) {
-  if (action === "refresh") return "bg-orange-500";
-  if (action === "monitor") return "bg-amber-400";
-  return "bg-neutral-300";
+function dotColorStamp(action: string | undefined) {
+  if (action === "refresh") return "text-accent";
+  if (action === "monitor") return "text-warn";
+  return "text-ink-faint";
 }
 
 function addDays(days: number): string {
@@ -121,7 +122,7 @@ export function LibraryTable({ filters }: LibraryTableProps) {
 
   if (isLoading) {
     return (
-      <div className="py-12 text-center text-muted-foreground text-sm">
+      <div className="py-12 text-center text-ink-faint text-[13px]">
         Loading…
       </div>
     );
@@ -129,7 +130,7 @@ export function LibraryTable({ filters }: LibraryTableProps) {
 
   if (isError) {
     return (
-      <div className="py-12 text-center text-destructive text-sm">
+      <div className="py-12 text-center text-accent-deep text-[13px]">
         Failed to load articles.
       </div>
     );
@@ -137,17 +138,17 @@ export function LibraryTable({ filters }: LibraryTableProps) {
 
   return (
     <>
-      <div className="overflow-x-auto rounded-lg border bg-white">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto border-t border-b border-rule">
+        <table className="w-full text-[13px]">
           <thead>
-            <tr className="border-b bg-neutral-50 text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 w-6" />
-              <th className="px-3 py-2">Topic / URL</th>
-              <th className="px-3 py-2">Persona</th>
-              <th className="px-3 py-2">Last persisted</th>
-              <th className="px-3 py-2">Staleness</th>
-              <th className="px-3 py-2">Top reason</th>
-              <th className="px-3 py-2">Actions</th>
+            <tr className="border-b border-rule text-left font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+              <th className="px-3 py-3 w-6" />
+              <th className="px-3 py-3">Topic / URL</th>
+              <th className="px-3 py-3">Persona</th>
+              <th className="px-3 py-3">Last persisted</th>
+              <th className="px-3 py-3">Staleness</th>
+              <th className="px-3 py-3">Top reason</th>
+              <th className="px-3 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -155,9 +156,9 @@ export function LibraryTable({ filters }: LibraryTableProps) {
               <tr>
                 <td
                   colSpan={7}
-                  className="px-3 py-10 text-center text-muted-foreground"
+                  className="px-3 py-12 text-center font-display italic text-ink-faint text-[16px]"
                 >
-                  No articles found.
+                  Nothing to file in the archive.
                 </td>
               </tr>
             ) : (
@@ -170,26 +171,24 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                 return (
                   <tr
                     key={a.article_id}
-                    className="border-b last:border-0 hover:bg-neutral-50 cursor-pointer transition-colors"
+                    className="border-b border-rule last:border-b-0 cursor-pointer transition-colors hover:bg-paper-deep/60 group"
                     onClick={() => handleRowClick(a)}
                   >
                     {/* dot */}
-                    <td className="px-3 py-2">
-                      <span
-                        className={`inline-block h-2.5 w-2.5 rounded-full ${dotColor(action)}`}
-                      />
+                    <td className="px-3 py-3">
+                      <span aria-hidden className={cn("inline-block leading-none text-[14px]", dotColorStamp(action))}>▪</span>
                     </td>
 
                     {/* Topic / URL */}
-                    <td className="px-3 py-2 max-w-xs">
-                      <p className="font-medium line-clamp-1">
+                    <td className="px-3 py-3 max-w-xs">
+                      <p className="font-display text-[15px] text-ink line-clamp-1" style={{ fontVariationSettings: '"opsz" 36, "SOFT" 70' }}>
                         {a.topic ?? "—"}
                       </p>
                       <a
                         href={a.article_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-blue-700 underline break-all line-clamp-1"
+                        className="font-mono text-[11px] text-ink-faint underline-offset-2 hover:underline break-all line-clamp-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {a.article_url}
@@ -197,19 +196,19 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                     </td>
 
                     {/* Persona */}
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <td className="px-3 py-3 text-ink-soft font-mono text-[12px]">
                       {a.persona ?? "—"}
                     </td>
 
                     {/* Last persisted */}
-                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                    <td className="px-3 py-3 whitespace-nowrap text-ink-soft font-mono text-[12px] tabular-nums">
                       {a.last_persisted_at
                         ? new Date(a.last_persisted_at).toLocaleDateString()
                         : "—"}
                     </td>
 
                     {/* Staleness */}
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-3">
                       {ev ? (
                         <StalenessIndicator
                           score={ev.staleness_score}
@@ -221,13 +220,13 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                     </td>
 
                     {/* Top reason */}
-                    <td className="px-3 py-2 max-w-[200px] text-muted-foreground line-clamp-2 text-xs">
+                    <td className="px-3 py-3 max-w-[200px] text-ink-soft line-clamp-2 text-[12px]">
                       {topFinding ?? "—"}
                     </td>
 
                     {/* Actions */}
                     <td
-                      className="px-3 py-2"
+                      className="px-3 py-3"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center gap-2">
@@ -235,7 +234,7 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                         {ev?.outcome === "open" && (
                           <a
                             href={`/runs/new?article_id=${a.article_id}&evaluation_id=${ev.evaluation_id}`}
-                            className="inline-flex h-7 items-center rounded-lg border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-muted"
+                            className="inline-flex h-7 items-center border border-ink bg-transparent text-ink px-2.5 text-[11px] font-medium transition-colors hover:bg-ink hover:text-paper rounded-[2px]"
                           >
                             Trigger
                           </a>
@@ -248,7 +247,7 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-7 text-xs"
+                                className="h-7 text-[11px]"
                               >
                                 Dismiss ▾
                               </Button>
@@ -311,27 +310,11 @@ export function LibraryTable({ filters }: LibraryTableProps) {
 
       {/* Pagination */}
       {total > PAGE_SIZE && (
-        <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            {from}–{to} of {total}
-          </span>
+        <div className="mt-4 flex items-center justify-between font-mono text-[12px] text-ink-soft tabular-nums">
+          <span>{String(from).padStart(2, "0")} — {String(to).padStart(2, "0")} OF {String(total).padStart(2, "0")}</span>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            >
-              Prev
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={to >= total}
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-            >
-              Next
-            </Button>
+            <Button size="sm" variant="secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>← Prev</Button>
+            <Button size="sm" variant="secondary" disabled={to >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>Next →</Button>
           </div>
         </div>
       )}
