@@ -111,3 +111,14 @@ export WP_APP_PASSWORD=<application-password>
 - Nightly cron runs reference evals against last 30 published runs → `content_tool.evals`.
 - Manual: `python -m evals.runner`
 - LLM-judge: triggered on PRs labeled `prompt-change`.
+
+## Refresh route (CMS Stage 0)
+
+Periodic re-audit of onboarded articles, surfaced at `/library`.
+
+- **Spec:** `docs/superpowers/specs/2026-05-22-cms-stage-0-refresh-route-design.md`
+- **Plan:** `docs/superpowers/plans/2026-05-22-plan-7-refresh-route.md`
+- **Cron entrypoint:** `uv run python -m scripts.refresh_scan`
+- **Manual scan:** `POST /refresh/scan`
+- **Manual single-article:** `POST /refresh/scan/{article_id}`
+- **Disable cron without code changes:** set `REFRESH_CRON_ENABLED=false`
