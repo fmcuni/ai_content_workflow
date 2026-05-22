@@ -14,7 +14,7 @@ def test_settings_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.log_level == "info"                  # default
 
 
-def test_get_refresh_config_loads_yaml():
+def test_get_refresh_config_loads_yaml() -> None:
     from content_tool.config import get_refresh_config
     cfg = get_refresh_config()
     assert cfg["scheduling"]["default_interval_days"] == 30
