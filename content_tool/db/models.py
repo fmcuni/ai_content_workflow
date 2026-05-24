@@ -66,6 +66,8 @@ class Run(Base):
     hitl_1_notes: Mapped[str | None] = mapped_column(String)
     hitl_2_decision: Mapped[str | None] = mapped_column(String)
     hitl_2_notes: Mapped[str | None] = mapped_column(String)
+    hitl_2_comments: Mapped[list | None] = mapped_column(JSONB)
+    hitl_2_iteration: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     approved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     approved_by: Mapped[str | None] = mapped_column(String)
     article_id: Mapped[UUID | None] = mapped_column(

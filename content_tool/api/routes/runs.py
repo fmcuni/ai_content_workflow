@@ -147,6 +147,9 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             # `approved_by` are the durable proxies for HITL_2 approval.
             "approved_at": row.approved_at.isoformat() if row.approved_at else None,
             "approved_by": row.approved_by,
+            "hitl_2_decision": row.hitl_2_decision,
+            "hitl_2_notes": row.hitl_2_notes,
+            "hitl_2_iteration": row.hitl_2_iteration,
             # WordPress publish outcome
             "wp_publish_status": row.wp_publish_status,
             "wp_pushed_post_id": row.wp_pushed_post_id,
@@ -213,10 +216,27 @@ async def hitl_2(
     from sqlalchemy import update
 
     async with sf() as session:
+        row = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "run not found")
+
+        # Cap defense — UI also disables; this is belt + braces against tab races.
+        if payload.decision == "request_changes" and row.hitl_2_iteration >= 3:
+            raise HTTPException(409, "request_changes cap reached")
+
+        new_iteration = (
+            row.hitl_2_iteration + 1
+            if payload.decision == "request_changes"
+            else row.hitl_2_iteration
+        )
+        comments_json = [c.model_dump() for c in (payload.comments or [])]
+
         await session.execute(
             update(Run).where(Run.run_id == run_id).values(
                 hitl_2_decision=payload.decision,
                 hitl_2_notes=payload.notes,
+                hitl_2_comments=comments_json,
+                hitl_2_iteration=new_iteration,
                 approved_at=datetime.now(UTC) if payload.decision == "approve" else None,
                 approved_by="placeholder-editor",  # Plan 4 binds real identity
                 wp_publish_status=payload.wp_publish_status,
@@ -231,9 +251,15 @@ async def hitl_2(
         )
         await session.commit()
 
-    state_update: dict = {"hitl_2_decision": payload.decision, "hitl_2_notes": payload.notes}
-    if payload.decision != "approve":
-        state_update["status"] = "rejected" if payload.decision == "reject" else "changes_requested"
+    state_update: dict = {
+        "hitl_2_decision": payload.decision,
+        "hitl_2_notes": payload.notes,
+        "hitl_2_comments": comments_json,
+        "hitl_2_iteration": new_iteration,
+    }
+    # request_changes no longer pins a terminal status — the graph decides.
+    if payload.decision == "reject":
+        state_update["status"] = "rejected"
 
     await runner.resume(run_id, state_update)
     return {"ok": True}

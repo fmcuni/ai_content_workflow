@@ -88,3 +88,96 @@
     max-width: 65ch;
   }
 }
+
+@layer components {
+  /* WYSIWYG content styling — applied to the TipTap editor and anywhere we
+     render raw editorial HTML. Uses editorial tokens, no `prose` plugin. */
+  .editorial-prose {
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    font-variation-settings: "opsz" 14, "SOFT" 60;
+    font-size: 17px;
+    line-height: 1.7;
+  }
+  .editorial-prose > :first-child { margin-top: 0; }
+  .editorial-prose p { margin-top: 1em; }
+  .editorial-prose h1,
+  .editorial-prose h2,
+  .editorial-prose h3,
+  .editorial-prose h4 {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+    line-height: 1.2;
+    font-weight: 600;
+    font-variation-settings: "opsz" 36, "SOFT" 60;
+  }
+  .editorial-prose h1 { font-size: 2rem;   margin: 1.8em 0 0.6em; }
+  .editorial-prose h2 { font-size: 1.55rem; margin: 1.6em 0 0.5em; }
+  .editorial-prose h3 { font-size: 1.25rem; margin: 1.4em 0 0.45em; }
+  .editorial-prose h4 { font-size: 1.1rem;  margin: 1.2em 0 0.4em; font-weight: 500; }
+  .editorial-prose a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .editorial-prose strong { font-weight: 600; color: var(--color-ink); }
+  .editorial-prose em { font-style: italic; }
+  .editorial-prose s, .editorial-prose del { text-decoration: line-through; color: var(--color-ink-faint); }
+  .editorial-prose ul,
+  .editorial-prose ol {
+    padding-left: 1.6em;
+    margin: 0.9em 0;
+  }
+  .editorial-prose ul { list-style: disc; }
+  .editorial-prose ol { list-style: decimal; }
+  .editorial-prose li { margin: 0.3em 0; }
+  .editorial-prose li > p { margin: 0.2em 0; }
+  .editorial-prose ul ul,
+  .editorial-prose ol ol,
+  .editorial-prose ul ol,
+  .editorial-prose ol ul { margin: 0.25em 0; }
+  .editorial-prose blockquote {
+    border-left: 3px solid var(--color-rule);
+    padding: 0.1em 0 0.1em 1em;
+    margin: 1.2em 0;
+    font-style: italic;
+    color: var(--color-ink-soft);
+  }
+  .editorial-prose code {
+    background: var(--color-paper-deep);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+  .editorial-prose pre {
+    background: var(--color-paper-deep);
+    padding: 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    margin: 1.2em 0;
+  }
+  .editorial-prose pre code { background: transparent; padding: 0; }
+  .editorial-prose hr {
+    border: 0;
+    border-top: 1px solid var(--color-rule);
+    margin: 2em 0;
+  }
+  /* TipTap's empty-line placeholder dot */
+  .editorial-prose p.is-empty::before { color: var(--color-ink-faint); }
+
+  /* Reviewer comment anchors in the WYSIWYG editor. */
+  .editorial-prose .comment-anchor {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    border-bottom: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+    cursor: pointer;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .editorial-prose .comment-anchor[data-focus="true"] {
+    background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+    border-bottom-color: var(--color-accent);
+  }
+}

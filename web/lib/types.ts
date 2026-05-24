@@ -15,6 +15,7 @@ export interface RunSummary {
   created_at: string;
   chosen_route: Route | null;
   iteration_count: number;
+  hitl_2_iteration?: number;
 }
 
 export interface CreateRunRequest {
@@ -113,9 +114,16 @@ export interface SseEvent {
   payload: Record<string, unknown>;
 }
 
+export interface Hitl2Comment {
+  id: string;
+  anchor_text: string;
+  body: string;
+}
+
 export interface Hitl2Request {
   decision: "approve" | "request_changes" | "reject";
   notes?: string | null;
+  comments?: Hitl2Comment[] | null;
   edited_html_body?: string | null;
   edited_seo_title?: string | null;
   edited_meta_description?: string | null;

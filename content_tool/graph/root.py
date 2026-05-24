@@ -16,6 +16,8 @@ from content_tool.models.state import ContentToolState
 from content_tool.observability.cost import CostCalculator
 from content_tool.wordpress.client import WordPressClient
 
+MAX_HITL2_ROUNDS = 3
+
 
 def build_root_graph(
     *,
@@ -28,43 +30,73 @@ def build_root_graph(
     strategy = build_strategy_graph(session_factory=session_factory, gemini=gemini).compile()
     production = build_production_graph(session_factory=session_factory, gemini=gemini).compile()
 
-    async def n_publish(state: ContentToolState) -> dict[str, Any]:
-        if state.get("hitl_2_decision") != "approve":
-            return {"status": state.get("status", "rejected")}
-        if wp_client is None:
-            return {"status": "persisted", "error": {"message": "wp_client not configured"}}
+    async def n_publish_or_revise(state: ContentToolState) -> dict[str, Any]:
+        decision = state.get("hitl_2_decision")
 
-        async with session_factory() as session:
-            await publish_to_wordpress(
-                session=session,
-                run_id=UUID(state["run_id"]),
-                wp_client=wp_client,
-                seo_plugin=seo_plugin,  # type: ignore[arg-type]
-                if_unmodified_since=None,
-            )
+        if decision == "approve":
+            if wp_client is None:
+                return {"status": "persisted", "error": {"message": "wp_client not configured"}}
+            async with session_factory() as session:
+                await publish_to_wordpress(
+                    session=session,
+                    run_id=UUID(state["run_id"]),
+                    wp_client=wp_client,
+                    seo_plugin=seo_plugin,  # type: ignore[arg-type]
+                    if_unmodified_since=None,
+                )
+            settings = get_settings()
+            cost_calc = CostCalculator.load_from("config/pricing.yaml")
+            async with session_factory() as session:
+                await write_compliance_log(
+                    session=session,
+                    run_id=UUID(state["run_id"]),
+                    cost_calc=cost_calc,
+                    gemini_model=settings.gemini_model,
+                )
+            return {"status": "published"}
 
-        settings = get_settings()
-        cost_calc = CostCalculator.load_from("config/pricing.yaml")
-        async with session_factory() as session:
-            await write_compliance_log(
-                session=session,
-                run_id=UUID(state["run_id"]),
-                cost_calc=cost_calc,
-                gemini_model=settings.gemini_model,
-            )
-        return {"status": "published"}
+        if decision == "reject":
+            return {"status": "rejected"}
+
+        # decision == "request_changes"
+        if state.get("hitl_2_iteration", 0) >= MAX_HITL2_ROUNDS:
+            return {"status": "changes_requested"}  # cap reached, terminal
+
+        # Reset production-internal counters so the audit refine-loop has fresh
+        # budget for the next revision round. We keep hitl_2_* fields intact —
+        # writer reads them on entry to produce a reviewer-driven draft.
+        return {
+            "status": "revising",
+            "iteration": 0,
+            "writer_output": None,
+            "render": None,
+            "audit_findings": None,
+        }
+
+    def route_after_publish_or_revise(state: ContentToolState) -> str:
+        return "production_revise" if state.get("status") == "revising" else END
 
     root = StateGraph(ContentToolState)
     root.add_node("strategy", strategy)
     root.add_node("production", production)
-    root.add_node("publish", n_publish)
+    # "production_revise" is the SAME compiled sub-graph mounted under a second
+    # node name. We want HITL_1 to gate only the *initial* entry to production;
+    # revision rounds (publish_or_revise → production_revise) must not re-pause.
+    root.add_node("production_revise", production)
+    root.add_node("publish_or_revise", n_publish_or_revise)
     root.add_edge(START, "strategy")
     root.add_edge("strategy", "production")
-    root.add_edge("production", "publish")
-    root.add_edge("publish", END)
+    root.add_edge("production", "publish_or_revise")
+    root.add_edge("production_revise", "publish_or_revise")
+    root.add_conditional_edges(
+        "publish_or_revise",
+        route_after_publish_or_revise,
+        {"production_revise": "production_revise", END: END},
+    )
 
-    # HITL_1 interrupt is BEFORE production; HITL_2 is BEFORE publish.
+    # HITL_1 interrupt is BEFORE the initial production node; HITL_2 is BEFORE
+    # publish_or_revise. "production_revise" intentionally has no interrupt.
     return root.compile(
         checkpointer=checkpointer,
-        interrupt_before=["production", "publish"],
+        interrupt_before=["production", "publish_or_revise"],
     )

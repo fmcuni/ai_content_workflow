@@ -39,6 +39,8 @@ class ContentToolState(TypedDict):
     hitl_1_edits: dict[str, Any] | None
     hitl_2_decision: str | None
     hitl_2_notes: str | None
+    hitl_2_comments: list[dict[str, Any]] | None
+    hitl_2_iteration: int
 
     # lifecycle
     status: str

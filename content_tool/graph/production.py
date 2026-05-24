@@ -21,13 +21,30 @@ def build_production_graph(
     gemini: GeminiClient,
 ) -> StateGraph:
     async def n_writer(state: ContentToolState) -> dict[str, Any]:
-        # Build refine_notes from prior audit if iteration > 0
-        refine_notes: list[dict] | None = None
+        # Build refine_notes from prior audit (if internal-loop iteration > 0)
+        # AND from reviewer feedback at the HITL2 gate (if hitl_2_iteration > 0).
+        refine_notes_list: list[dict] = []
         if state["iteration"] > 0 and state["audit_findings"]:
             findings = state["audit_findings"].get("findings", [])
-            refine_notes = [
+            refine_notes_list.extend(
                 f for f in findings if f.get("must_fix") or f.get("severity") == "high"
-            ]
+            )
+        if state.get("hitl_2_iteration", 0) > 0:
+            for c in state.get("hitl_2_comments") or []:
+                refine_notes_list.append({
+                    "source": "reviewer",
+                    "severity": "high",
+                    "must_fix": True,
+                    "issue": f'On span "{c["anchor_text"]}": {c["body"]}',
+                })
+            if state.get("hitl_2_notes"):
+                refine_notes_list.append({
+                    "source": "reviewer-overall",
+                    "severity": "high",
+                    "must_fix": True,
+                    "issue": f"Overall reviewer note: {state['hitl_2_notes']}",
+                })
+        refine_notes: list[dict] | None = refine_notes_list or None
         async with session_factory() as session:
             result = await run_writer(
                 session=session,

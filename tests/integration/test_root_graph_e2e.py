@@ -167,7 +167,7 @@ async def test_root_graph_with_two_hitl_resumes(postgres_url, monkeypatch):
             await graph.aupdate_state(config, {"hitl_1_decision": "approve"})
             await graph.ainvoke(None, config=config)
             st = await graph.aget_state(config)
-            assert "publish" in st.next
+            assert "publish_or_revise" in st.next
 
             # Resume — final publish (no wp_client → falls back to "persisted").
             await graph.aupdate_state(config, {"hitl_2_decision": "approve"})

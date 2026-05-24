@@ -34,9 +34,16 @@ class ResumeRequest(BaseModel):
     notes: str | None = None
 
 
+class Hitl2Comment(BaseModel):
+    id: str
+    anchor_text: str = Field(max_length=120)
+    body: str
+
+
 class Hitl2Request(BaseModel):
     decision: Literal["approve", "request_changes", "reject"]
     notes: str | None = None
+    comments: list[Hitl2Comment] | None = None
     edited_html_body: str | None = None      # if editor tweaked HTML
     edited_seo_title: str | None = None
     edited_meta_description: str | None = None
