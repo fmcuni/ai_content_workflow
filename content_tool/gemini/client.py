@@ -40,6 +40,62 @@ def strip_property_ordering(schema: Any) -> Any:  # noqa: ANN401
     return schema
 
 
+def parse_gemini_json(text: str) -> dict[str, Any]:
+    # Gemini occasionally returns the JSON wrapped in ```json fences or with
+    # leading/trailing commentary, especially when grounding tools are enabled.
+    # Tolerate those shapes before falling back to first-balanced-object extraction.
+    import json
+
+    if not text:
+        return {}
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.split("\n", 1)[1] if "\n" in candidate else candidate[3:]
+        if candidate.endswith("```"):
+            candidate = candidate[: -3]
+        candidate = candidate.strip()
+        if candidate.lower().startswith("json\n"):
+            candidate = candidate[5:].lstrip()
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    start = candidate.find("{")
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(candidate)):
+            ch = candidate[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    block = candidate[start : i + 1]
+                    try:
+                        return json.loads(block)
+                    except json.JSONDecodeError:
+                        break
+
+    snippet = text[:200].replace("\n", " ")
+    raise ValueError(
+        f"Gemini response is not valid JSON (len={len(text)}). "
+        f"First 200 chars: {snippet!r}"
+    )
+
+
 class RealGeminiClient:
     def __init__(self, api_key: str, model: str, thinking_level: str) -> None:
         self._client = genai.Client(api_key=api_key)
@@ -55,7 +111,6 @@ class RealGeminiClient:
         response_schema: dict[str, Any] | None,
         tools: list[str],
     ) -> GeminiResult:
-        import json
         import time
 
         config_tools: list[genai_types.Tool] = []
@@ -82,7 +137,7 @@ class RealGeminiClient:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
         text = response.text or ""
-        parsed = json.loads(text) if text else {}
+        parsed = parse_gemini_json(text)
         usage = response.usage_metadata
         candidate = response.candidates[0] if response.candidates else None
         grounding = None
