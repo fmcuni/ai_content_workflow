@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -46,6 +46,10 @@ async def publish_to_wordpress(
     if key:
         meta[key] = render.meta_description
 
+    date_gmt: str | None = None
+    if run.wp_publish_at is not None:
+        date_gmt = run.wp_publish_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
     payload = PublishPayload(
         post_id=fa.wp_post_id,
         title=render.seo_title,
@@ -59,6 +63,7 @@ async def publish_to_wordpress(
         featured_media=run.wp_featured_media_id,
         meta=meta,
         if_unmodified_since=if_unmodified_since,
+        date_gmt=date_gmt,
     )
 
     try:
