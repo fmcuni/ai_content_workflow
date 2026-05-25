@@ -9,6 +9,7 @@ from content_tool.api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
     DryPublishResponse,
+    ExistingPostOut,
     Hitl2Request,
     ResumeRequest,
 )
@@ -16,6 +17,7 @@ from content_tool.api.sse import sse_stream
 from content_tool.db.models import (
     AuditRun,
     Draft,
+    FetchedArticle,
     GapAnalysisRow,
     OutlineRow,
     RefreshEvaluation,
@@ -354,8 +356,6 @@ async def get_latest_audit(run_id: UUID, sf=Depends(get_session_factory)) -> dic
 @router.post("/{run_id}/dry-publish", response_model=DryPublishResponse)
 async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
     """Return the exact REST payload we'd send to WP, WITHOUT calling WP."""
-    from content_tool.db.models import FetchedArticle
-
     target_base = request.app.state.wp_client.base_url
     target_label = request.app.state.wp_target
     seo_plugin = request.app.state.seo_plugin
@@ -412,4 +412,37 @@ async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_fac
             "content-type": "application/json",
         },
         "request_body": body,
+    }
+
+
+@router.get("/{run_id}/existing-post", response_model=ExistingPostOut)
+async def get_existing_post(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Return the cached snapshot of the existing WP post for this run.
+
+    404 when there's no fetched-article row, or when wp_post_id is null
+    (e.g. brand-new-post path).
+    """
+    async with sf() as session:
+        fa = (await session.execute(
+            select(FetchedArticle).where(FetchedArticle.run_id == run_id)
+        )).scalar_one_or_none()
+    if fa is None or fa.wp_post_id is None:
+        raise HTTPException(status_code=404, detail="No existing post")
+
+    cats = fa.wp_categories or []
+    first_cat_id = (
+        cats[0]["id"]
+        if cats and isinstance(cats[0], dict) and "id" in cats[0]
+        else None
+    )
+
+    return {
+        "wp_post_id": fa.wp_post_id,
+        "link": fa.wp_link,
+        "wp_author_id": fa.wp_author_id,
+        "wp_category_id": first_cat_id,
+        "wp_slug": fa.wp_slug,
     }
