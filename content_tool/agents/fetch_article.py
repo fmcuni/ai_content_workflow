@@ -79,6 +79,9 @@ async def fetch_article(
             run_id=run_id,
             wp_post_id=post.id,
             wp_categories=cats,
+            wp_author_id=post.author,
+            wp_slug=post.slug,
+            wp_link=post.link,
             raw_html=html,
             markdown=markdown,
         )
