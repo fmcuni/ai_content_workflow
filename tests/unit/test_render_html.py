@@ -107,3 +107,59 @@ def test_no_faq_means_no_jsonld():
     r = render_html(no_faq)
     assert r.faq_schema_jsonld is None
     assert not r.html_body.startswith('<script type="application/ld+json">')
+
+
+DEFTERM_SAMPLE = """\
+# 妊娠糖尿病指南
+%%meta desc=妊娠糖尿病解說%%
+
+孕婦會在 24–28 週接受 OGTT 篩查。
+%%defterm name=OGTT%%
+口服葡萄糖耐量測試，飲糖水後 2 小時抽血評估血糖反應。
+%%end%%
+
+%%adv_panel id=1%%
+
+## 自願醫保如何配合
+
+VHIS 是政府自願醫保計劃。
+%%defterm name=VHIS%%
+自願醫保計劃，由食衞局監管的標準個人醫療保險產品。
+%%end%%
+
+%%defterm name=OGTT%%
+這條會被去重，不應出現在 JSON-LD。
+%%end%%
+
+%%page_widget id=2%%
+
+## 常見問題
+%%acf_faq type=q%%
+甚麼時候要做 OGTT？
+%%acf_faq type=a%%
+24 至 28 週。
+%%end%%
+"""
+
+
+def test_defterm_emits_jsonld_and_strips_shortcode():
+    r = render_html(DEFTERM_SAMPLE)
+    # Shortcode must not survive into visible HTML
+    assert "%%defterm" not in r.html_body
+    assert "%%end%%" not in r.html_body
+    # Both FAQ + DefinedTermSet scripts present
+    scripts = [
+        line for line in r.html_body.split("\n") if line.startswith("<script type=")
+    ]
+    assert len(scripts) == 2
+    # DefinedTermSet payload: dedup'd, ordered by first occurrence
+    assert '"@type": "DefinedTermSet"' in r.html_body
+    assert '"name": "OGTT"' in r.html_body
+    assert '"name": "VHIS"' in r.html_body
+    assert r.html_body.count('"@type": "DefinedTerm"') == 2
+    assert r.html_body.index('"OGTT"') < r.html_body.index('"VHIS"')
+
+
+def test_defterm_absent_means_no_definedtermset():
+    r = render_html(SAMPLE)  # SAMPLE has no defterm blocks
+    assert "DefinedTermSet" not in r.html_body

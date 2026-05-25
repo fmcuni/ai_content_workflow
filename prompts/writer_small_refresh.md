@@ -35,7 +35,7 @@
 2. meta description 可以重寫。
 3. H2 wording 原則上不可改；只有在明顯過時、不準確、與最新 intent 不符時才可改。
 4. shortcode 位置：首段後必須有 `%%adv_panel id=acf_adv_id%%`；FAQ 區塊前必須有 `%%page_widget id=acf_widget_id%%`。
-5. FAQ 區塊以下列 shortcode 表示，每個 shortcode 必須獨立成行：
+5. **FAQ 必須出現**，最少 4 條 Q&A，最多 8 條；對應 schema.org `FAQPage`，由後處理流程自動 emit JSON-LD。FAQ 區塊以下列 shortcode 表示，每個 shortcode 必須獨立成行：
    ```
    %%acf_faq type=q%%
    問題
@@ -44,6 +44,27 @@
    %%end%%
    ```
 6. 不可捏造數字、年份、法例、醫療或保險條款；如未能核實，使用保守中性寫法。
+
+JSON-LD Schema 規則（去重 / dedup against Yoast）：
+- 本文章發佈到 WordPress 時，**Yoast SEO 已自動 emit** 以下 schema.org 類型，**不要在 markup 中重複描述或手寫**：
+  - `Article` / `WebPage` / `BreadcrumbList` / `WebSite`
+  - `Organization` / `Corporation`（Bowtie 機構資訊、聯絡、社交連結）
+  - `Person`（作者）
+  - `ImageObject`（feature image）
+  - 文章 `datePublished` / `dateModified` / `headline` / `articleSection` / `inLanguage`
+- 不要在 H1、meta description、正文寫「Bowtie 創立於…」、「Bowtie 地址…」、「作者：…」、「發佈日期：…」、「分類：…」這類純機構/出版 metadata，因為 Yoast 已負責處理。
+- **必須 emit** 的額外 schema：`FAQPage`（透過上方 FAQ shortcode；renderer 會自動轉成 JSON-LD）。
+- **可選 emit** 的額外 schema：`DefinedTermSet` — 用於文章內專有名詞、英文縮寫、政策/醫學/保險術語。每個術語以下列 shortcode 表示，放在該術語**首次在正文出現之後的獨立空行**，不要連續多個堆在一起。每個 shortcode 必須獨立成行：
+   ```
+   %%defterm name=術語%%
+   一句解釋（≤ 60 字，香港繁體中文）
+   %%end%%
+   ```
+   - `name` 為單一字串，不含空格與引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
+   - 全文最多 6 個 `defterm`；如全文無真正需要解釋的術語，可不輸出
+   - 不要為已在 H2 標題出現的常用詞重複定義
+   - 不要在 description 內嵌 HTML / Markdown 連結 / 表情符號
+   - 不要 emit 其他 schema 類型（如 `MedicalCondition`、`HowTo`、`Review`、`AggregateRating`、`Drug`、`MedicalProcedure`），renderer 不會處理，且部分有合規風險。
 
 寫作要求：
 1. 先理解 existing_article_markdown，再根據 gap_analysis 與 outline 補足缺口。
@@ -72,7 +93,7 @@ SEO 及 AI Search 優化要求：
    - 第二行：%%meta desc=...%%
    - 正文首段
    - %%adv_panel id=acf_adv_id%%
-   - 餘下正文
+   - 餘下正文（如有 `%%defterm%%` shortcode，散落於相關段落之後）
    - %%page_widget id=acf_widget_id%%
    - ## 常見問題
    - FAQ shortcodes

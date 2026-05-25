@@ -27,6 +27,12 @@ _FAQ_BLOCK_RE = re.compile(
     r"%%acf_faq type=q%%\s*\n(.*?)\n%%acf_faq type=a%%\s*\n(.*?)\n%%end%%",
     re.DOTALL,
 )
+# %%defterm name=<term>%%\n<description>\n%%end%%
+# `name` is a single token (no spaces / quotes) per the writer-prompt contract.
+_DEFTERM_BLOCK_RE = re.compile(
+    r"%%defterm name=(\S+?)%%\s*\n(.*?)\n%%end%%",
+    re.DOTALL,
+)
 
 
 def _build_faq_html(items: list[tuple[str, str]]) -> str:
@@ -69,6 +75,17 @@ def _build_faq_jsonld(items: list[tuple[str, str]]) -> dict:
     }
 
 
+def _build_defterm_jsonld(items: list[tuple[str, str]]) -> dict:
+    return {
+        "@context": "https://schema.org",
+        "@type": "DefinedTermSet",
+        "hasDefinedTerm": [
+            {"@type": "DefinedTerm", "name": name, "description": desc}
+            for name, desc in items
+        ],
+    }
+
+
 def _check_no_raw_html(markdown_body: str) -> None:
     """Refuse if writer somehow emitted a raw <script> or other dangerous tag."""
     if re.search(r"<\s*(script|style|iframe|object|embed)\b", markdown_body, re.IGNORECASE):
@@ -99,6 +116,17 @@ def render_html(markdown: str) -> RenderResult:
     # Remove "## 常見問題" line if it's followed only by what was FAQ
     rest = re.sub(r"##\s*常見問題\s*\n", "", rest)
 
+    # Extract DefinedTerm items, dedup by name (first occurrence wins),
+    # then strip the shortcodes so they don't survive into the visible HTML.
+    defterm_items: list[tuple[str, str]] = []
+    _seen_defterm_names: set[str] = set()
+    for name, desc in _DEFTERM_BLOCK_RE.findall(rest):
+        n = name.strip()
+        if n and n not in _seen_defterm_names:
+            _seen_defterm_names.add(n)
+            defterm_items.append((n, desc.strip()))
+    rest = _DEFTERM_BLOCK_RE.sub("", rest)
+
     # Markdown → HTML (without FAQ block; we'll inject)
     md = MarkdownIt("commonmark").enable(["table"])
     body_html = md.render(rest)
@@ -110,13 +138,18 @@ def render_html(markdown: str) -> RenderResult:
     # FAQ widget + JSON-LD
     faq_html = _build_faq_html(faq_items)
     faq_jsonld = _build_faq_jsonld(faq_items) if faq_items else None
-    jsonld_script = ""
-    if faq_jsonld is not None:
-        jsonld_script = (
+    defterm_jsonld = _build_defterm_jsonld(defterm_items) if defterm_items else None
+
+    jsonld_blocks: list[str] = []
+    for obj in (faq_jsonld, defterm_jsonld):
+        if obj is None:
+            continue
+        jsonld_blocks.append(
             '<script type="application/ld+json">\n'
-            + json.dumps(faq_jsonld, ensure_ascii=False, indent=2)
-            + "\n</script>\n"
+            + json.dumps(obj, ensure_ascii=False, indent=2)
+            + "\n</script>"
         )
+    jsonld_script = ("\n".join(jsonld_blocks) + "\n") if jsonld_blocks else ""
 
     final = jsonld_script + body_html
     if faq_html:
