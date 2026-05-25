@@ -54,9 +54,24 @@ async def test_categories_uses_cache_for_second_call() -> None:
 @pytest.mark.asyncio
 async def test_users_surfaces_wp_error_as_502() -> None:
     wp = AsyncMock()
-    wp.list_users.side_effect = WordPressError("403: forbidden")
+    wp.list_users.side_effect = WordPressError("403: forbidden — sensitive internal text")
     app = _make_app(wp)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/wp-options/users")
     assert r.status_code == 502
-    assert "forbidden" in r.json()["detail"]
+    assert r.json()["detail"] == "WordPress upstream error"
+    # Critical: raw WP error text must NOT leak to clients.
+    assert "sensitive internal text" not in r.text
+    assert "403" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_categories_surfaces_wp_error_as_502() -> None:
+    wp = AsyncMock()
+    wp.list_categories.side_effect = WordPressError("500: upstream went sideways")
+    app = _make_app(wp)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/wp-options/categories")
+    assert r.status_code == 502
+    assert r.json()["detail"] == "WordPress upstream error"
+    assert "upstream went sideways" not in r.text
