@@ -14,7 +14,9 @@ from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
 from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
+from content_tool.api.routes.wp_options import router as wp_options_router
 from content_tool.api.sse import RunExecutor
+from content_tool.api.wp_options_cache import TtlCache
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.gemini.client import RealGeminiClient
@@ -56,6 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app_password=settings.wp_app_password,
         timeout=settings.wp_timeout,
     )
+    wp_options_cache = TtlCache(ttl_seconds=600)
     executor = RunExecutor(
         postgres_url=settings.postgres_url,
         session_factory=sf,
@@ -66,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = sf
     app.state.run_executor = executor
     app.state.wp_client = wp_client
+    app.state.wp_options_cache = wp_options_cache
     app.state.gemini_client = gemini
     app.state.seo_plugin = seo_plugin
     app.state.wp_target = settings.wp_target
@@ -96,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(compliance_router)
     app.include_router(costs_router)
     app.include_router(refresh_router)
+    app.include_router(wp_options_router)
     FastAPIInstrumentor().instrument_app(app)
     return app
 
