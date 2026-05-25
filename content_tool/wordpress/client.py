@@ -27,6 +27,7 @@ class PublishPayload:
     featured_media: int | None
     meta: dict[str, str]
     if_unmodified_since: str | None
+    date_gmt: str | None = None
 
 
 @dataclass
@@ -49,6 +50,20 @@ class FetchedPost:
     status: str
     author: int | None
     categories: list[int]
+
+
+@dataclass
+class WpUser:
+    id: int
+    name: str
+    slug: str
+
+
+@dataclass
+class WpCategory:
+    id: int
+    name: str
+    slug: str
 
 
 class WordPressClient:
@@ -98,6 +113,8 @@ class WordPressClient:
                 body["author"] = p.author
             if p.featured_media is not None:
                 body["featured_media"] = p.featured_media
+            if p.date_gmt is not None:
+                body["date_gmt"] = p.date_gmt
 
             if p.post_id:
                 resp = await client.put(
@@ -183,3 +200,65 @@ class WordPressClient:
         finally:
             if own:
                 await client.aclose()
+
+    async def _list_paginated(
+        self,
+        path: str,
+        *,
+        extra_params: dict[str, str] | None = None,
+    ) -> list[dict]:
+        own = self._client is None
+        client = self._client or httpx.AsyncClient(timeout=self._timeout)
+        try:
+            headers = {"authorization": self._auth_header()}
+            base_params: dict[str, str] = {
+                "per_page": "100",
+                "_fields": "id,name,slug",
+            }
+            if extra_params:
+                base_params.update(extra_params)
+
+            page = 1
+            total_pages = 1
+            results: list[dict] = []
+            while True:
+                params = {**base_params, "page": str(page)}
+                resp = await client.get(
+                    f"{self._base_url}{path}",
+                    params=params,
+                    headers=headers,
+                )
+                # CloudFront / WAF guard — same shape as fetch_post_by_url.
+                # We deliberately run this BEFORE the is_error check below so a
+                # 2xx-with-empty-HTML response (CloudFront edge failure) is
+                # diagnosed clearly instead of producing a JSONDecodeError.
+                ctype = resp.headers.get("content-type", "")
+                if not ctype.lower().startswith("application/json") or not resp.content:
+                    raise WordPressError(
+                        f"WP REST returned non-JSON response ({resp.status_code} "
+                        f"{ctype or 'no content-type'}, {len(resp.content)} bytes, "
+                        f"x-cache={resp.headers.get('x-cache')!r})."
+                    )
+                if resp.is_error:
+                    raise WordPressError(f"{resp.status_code}: {resp.text}")
+                if page == 1:
+                    total_pages = int(resp.headers.get("x-wp-totalpages", "1") or "1")
+                results.extend(resp.json())
+                if page >= total_pages:
+                    break
+                page += 1
+            return results
+        finally:
+            if own:
+                await client.aclose()
+
+    async def list_categories(self) -> list[WpCategory]:
+        rows = await self._list_paginated(
+            "/wp-json/wp/v2/categories",
+            extra_params={"hide_empty": "false"},
+        )
+        return [WpCategory(id=int(r["id"]), name=r["name"], slug=r["slug"]) for r in rows]
+
+    async def list_users(self) -> list[WpUser]:
+        rows = await self._list_paginated("/wp-json/wp/v2/users")
+        return [WpUser(id=int(r["id"]), name=r["name"], slug=r["slug"]) for r in rows]

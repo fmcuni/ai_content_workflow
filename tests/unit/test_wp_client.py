@@ -52,3 +52,47 @@ async def test_publish_raises_on_412():
                 status="draft", slug=None, categories=[], tags=[], author=None,
                 featured_media=None, meta={}, if_unmodified_since="2026-04-12T08:30:00",
             ))
+
+
+@pytest.mark.asyncio
+async def test_publish_includes_date_gmt_when_set():
+    raw = Path("tests/fixtures/wp_responses/publish_response.json").read_text(encoding="utf-8")  # noqa: ASYNC240
+    expected_resp = json.loads(raw)
+    with respx.mock(assert_all_called=True) as r:
+        route = r.put("https://wp.example.com/wp-json/wp/v2/posts/98785").mock(
+            return_value=Response(200, json=expected_resp)
+        )
+        client = WordPressClient(
+            "https://wp.example.com", username="user", app_password="pass"  # noqa: S106
+        )
+        await client.upsert(PublishPayload(
+            post_id=98785, title="x", content="<p>x</p>", excerpt="x",
+            status="future", slug="x", categories=[42], tags=[],
+            author=5, featured_media=None, meta={},
+            if_unmodified_since=None,
+            date_gmt="2026-06-01T03:00:00",
+        ))
+        body = json.loads(route.calls.last.request.content)
+        assert body["date_gmt"] == "2026-06-01T03:00:00"
+
+
+@pytest.mark.asyncio
+async def test_publish_omits_date_gmt_when_none():
+    raw = Path("tests/fixtures/wp_responses/publish_response.json").read_text(encoding="utf-8")  # noqa: ASYNC240
+    expected_resp = json.loads(raw)
+    with respx.mock(assert_all_called=True) as r:
+        route = r.put("https://wp.example.com/wp-json/wp/v2/posts/98785").mock(
+            return_value=Response(200, json=expected_resp)
+        )
+        client = WordPressClient(
+            "https://wp.example.com", username="user", app_password="pass"  # noqa: S106
+        )
+        await client.upsert(PublishPayload(
+            post_id=98785, title="x", content="<p>x</p>", excerpt="x",
+            status="draft", slug=None, categories=[], tags=[],
+            author=None, featured_media=None, meta={},
+            if_unmodified_since=None,
+            date_gmt=None,
+        ))
+        body = json.loads(route.calls.last.request.content)
+        assert "date_gmt" not in body

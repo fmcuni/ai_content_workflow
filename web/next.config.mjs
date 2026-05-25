@@ -31,6 +31,7 @@ const nextConfig = {
       { source: "/api/health", destination: `${apiBase}/health` },
       { source: "/api/articles/:path*", destination: `${apiBase}/articles/:path*` },
       { source: "/api/refresh/:path*", destination: `${apiBase}/refresh/:path*` },
+      { source: "/api/wp-options/:path*", destination: `${apiBase}/wp-options/:path*` },
     ];
   },
 };
