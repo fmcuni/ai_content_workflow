@@ -1,6 +1,7 @@
 import type {
   Audit, Article, ArticleDetail, ArticleListResponse, CreateRunRequest, GapAnalysis,
   Hitl2Request, Outline, RefreshEvaluation, Render, RunSummary, ScanResponse,
+  WpCategoryOption, WpUserOption,
 } from "./types";
 
 const BASE = "/api/runs";
@@ -32,6 +33,8 @@ export const api = {
   ) => http(`${BASE}/${runId}/resume`, { method: "POST", body: JSON.stringify(body) }),
   resumeHitl2: (runId: string, body: Hitl2Request) =>
     http(`${BASE}/${runId}/hitl-2`, { method: "POST", body: JSON.stringify(body) }),
+  listWpUsers: () => http<WpUserOption[]>("/api/wp-options/users"),
+  listWpCategories: () => http<WpCategoryOption[]>("/api/wp-options/categories"),
 };
 
 const ARTICLES_BASE = "/api/articles";

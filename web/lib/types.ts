@@ -194,3 +194,6 @@ export interface ScanResponse {
   finished_at: string;
   skipped: Array<{ article_id?: string; reason: string }>;
 }
+
+export interface WpUserOption { id: number; name: string; slug: string }
+export interface WpCategoryOption { id: number; name: string; slug: string }
