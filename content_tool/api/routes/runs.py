@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
@@ -25,6 +26,8 @@ from content_tool.db.models import (
     Run,
 )
 from content_tool.refresh.inventory import upsert_article
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -445,4 +448,58 @@ async def get_existing_post(
         "wp_author_id": fa.wp_author_id,
         "wp_category_id": first_cat_id,
         "wp_slug": fa.wp_slug,
+    }
+
+
+@router.post("/{run_id}/existing-post/refresh", response_model=ExistingPostOut)
+async def refresh_existing_post(
+    run_id: UUID,
+    request: Request,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Re-read the existing post from WP and update the cached row.
+
+    Refreshes wp_author_id / wp_slug / wp_link / wp_categories only.
+    Leaves raw_html / markdown / wp_post_id intact (those drove the writer).
+    """
+    from content_tool.wordpress.client import WordPressError
+
+    async with sf() as session:
+        run = (await session.execute(
+            select(Run).where(Run.run_id == run_id)
+        )).scalar_one_or_none()
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        wp = request.app.state.wp_client
+        try:
+            post = await wp.fetch_post_by_url(run.article_url)
+        except WordPressError as e:
+            logger.warning("WordPress refresh failed for run %s: %s", run_id, e)
+            raise HTTPException(status_code=502, detail="WordPress upstream error") from e
+
+        if post is None:
+            raise HTTPException(status_code=404, detail="Existing post not found on WordPress")
+
+        fa = (await session.execute(
+            select(FetchedArticle).where(FetchedArticle.run_id == run_id)
+        )).scalar_one_or_none()
+        if fa is None:
+            raise HTTPException(status_code=404, detail="No fetched article for this run")
+
+        # Store categories as id-only dicts; name resolution is only needed for
+        # the /wp-options/categories dropdown, not for prefill.
+        fa.wp_categories = [{"id": cid} for cid in post.categories]
+        fa.wp_author_id = post.author
+        fa.wp_slug = post.slug
+        fa.wp_link = post.link
+        await session.commit()
+
+    first_cat_id = post.categories[0] if post.categories else None
+    return {
+        "wp_post_id": post.id,
+        "link": post.link,
+        "wp_author_id": post.author,
+        "wp_category_id": first_cat_id,
+        "wp_slug": post.slug,
     }
