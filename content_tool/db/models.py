@@ -106,6 +106,9 @@ class FetchedArticle(Base):
     fetched_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
     wp_post_id: Mapped[int | None]
     wp_categories: Mapped[list | None] = mapped_column(JSONB)
+    wp_author_id: Mapped[int | None]
+    wp_slug: Mapped[str | None] = mapped_column(String)
+    wp_link: Mapped[str | None] = mapped_column(String)
     raw_html: Mapped[str | None] = mapped_column(String)
     markdown: Mapped[str] = mapped_column(String, nullable=False)
 

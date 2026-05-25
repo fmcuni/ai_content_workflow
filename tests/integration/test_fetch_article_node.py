@@ -87,3 +87,6 @@ async def test_fetch_article_resolves_via_slug_and_writes(db_session):
     assert row.wp_post_id == 98785
     assert row.markdown is not None
     assert any(c["slug"] == "cancer" for c in row.wp_categories)
+    assert row.wp_author_id == 5
+    assert row.wp_slug == "cancer-screening"
+    assert row.wp_link == "https://www.bowtie.com.hk/blog/zh/cancer-screening/"

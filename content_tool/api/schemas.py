@@ -66,6 +66,14 @@ class DryPublishResponse(BaseModel):
     request_body: dict
 
 
+class ExistingPostOut(BaseModel):
+    wp_post_id: int
+    link: str | None = None
+    wp_author_id: int | None = None
+    wp_category_id: int | None = None
+    wp_slug: str | None = None
+
+
 class RefreshEvaluationOut(BaseModel):
     evaluation_id: UUID
     evaluated_at: datetime

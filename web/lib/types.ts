@@ -197,3 +197,11 @@ export interface ScanResponse {
 
 export interface WpUserOption { id: number; name: string; slug: string }
 export interface WpCategoryOption { id: number; name: string; slug: string }
+
+export interface ExistingPost {
+  wp_post_id: number;
+  link: string | null;
+  wp_author_id: number | null;
+  wp_category_id: number | null;
+  wp_slug: string | null;
+}
