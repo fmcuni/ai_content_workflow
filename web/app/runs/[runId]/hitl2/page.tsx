@@ -1,7 +1,7 @@
 "use client";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -14,8 +14,16 @@ import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
 import { WordPressMetaForm } from "@/components/WordPressMetaForm";
 import { CommentsSidebar } from "@/components/CommentsSidebar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type { Hitl2Comment, Hitl2Request } from "@/lib/types";
+import type { ExistingPost, Hitl2Comment, Hitl2Request } from "@/lib/types";
 
 const MAX_ROUNDS = 3;
 
@@ -27,6 +35,51 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const render = useQuery({ queryKey: ["render", runId], queryFn: () => api.getLatestRender(runId) });
   const audit = useQuery({ queryKey: ["audit", runId], queryFn: () => api.getLatestAudit(runId) });
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.getRun(runId) });
+
+  const qc = useQueryClient();
+
+  const existingPost = useQuery({
+    queryKey: ["existing-post", runId],
+    queryFn: () => api.getExistingPost(runId),
+    retry: false, // 404 is expected on the new-post path
+  });
+
+  const prefilledRef = useRef<ExistingPost | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const refresh = useMutation({
+    mutationFn: () => api.refreshExistingPost(runId),
+    onSuccess: (fresh) => {
+      prefilledRef.current = fresh;
+      setForm((f) => ({
+        ...f,
+        wp_author_id: fresh.wp_author_id,
+        wp_category_ids: fresh.wp_category_id != null ? [fresh.wp_category_id] : null,
+        wp_slug: fresh.wp_slug,
+      }));
+      qc.setQueryData(["existing-post", runId], fresh);
+    },
+    onError: () => toast.error("Couldn't re-read from WordPress"),
+  });
+
+  function getDirtyFields(): ("Author" | "Category" | "Slug")[] {
+    const baseline = prefilledRef.current;
+    if (!baseline) return [];
+    const dirty: ("Author" | "Category" | "Slug")[] = [];
+    if ((form.wp_author_id ?? null) !== (baseline.wp_author_id ?? null)) dirty.push("Author");
+    const formCat = form.wp_category_ids?.[0] ?? null;
+    if (formCat !== (baseline.wp_category_id ?? null)) dirty.push("Category");
+    if ((form.wp_slug ?? null) !== (baseline.wp_slug ?? null)) dirty.push("Slug");
+    return dirty;
+  }
+
+  function handleRereadClick() {
+    if (getDirtyFields().length === 0) {
+      refresh.mutate();
+    } else {
+      setConfirmOpen(true);
+    }
+  }
 
   const [html, setHtml] = useState<string>("");
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
@@ -48,6 +101,19 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       }));
     }
   }, [render.data]);
+
+  useEffect(() => {
+    if (!existingPost.data) return;
+    if (prefilledRef.current !== null) return; // already prefilled
+    prefilledRef.current = existingPost.data;
+    const ep = existingPost.data;
+    setForm((f) => ({
+      ...f,
+      wp_author_id: ep.wp_author_id,
+      wp_category_ids: ep.wp_category_id != null ? [ep.wp_category_id] : null,
+      wp_slug: ep.wp_slug,
+    }));
+  }, [existingPost.data]);
 
   const renderReady = Boolean(render.data);
   const round = run.data?.hitl_2_iteration ?? 0;
@@ -108,6 +174,27 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         kicker={
           <>
             Galley Proof · Stage 2 · <span className="text-accent">{shortId}</span>
+            {existingPost.data?.wp_post_id != null && (
+              <>
+                {" · "}
+                <a
+                  href={existingPost.data.link ?? "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  WP #{existingPost.data.wp_post_id} ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={handleRereadClick}
+                  disabled={refresh.isPending}
+                  className="ml-2 font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
+                >
+                  {refresh.isPending ? "↻ Reading…" : "↻ Re-read from WP"}
+                </button>
+              </>
+            )}
           </>
         }
         hed="Editor's review"
@@ -276,6 +363,31 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           </Button>
         </div>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Re-read from WordPress?</DialogTitle>
+            <DialogDescription>
+              This will overwrite your edits to: {getDirtyFields().join(", ")}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setConfirmOpen(false);
+                refresh.mutate();
+              }}
+            >
+              Overwrite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
