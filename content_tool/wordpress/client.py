@@ -153,6 +153,18 @@ class WordPressClient:
                 headers={"authorization": self._auth_header()},
             )
             resp.raise_for_status()
+            # CloudFront sometimes returns 2xx with an empty/HTML body when the
+            # edge can't reach origin (x-cache: "Error from cloudfront"). Surface
+            # that as a clear WordPressError instead of a cryptic JSONDecodeError
+            # from resp.json().
+            ctype = resp.headers.get("content-type", "")
+            if not ctype.lower().startswith("application/json") or not resp.content:
+                raise WordPressError(
+                    f"WP REST returned non-JSON response ({resp.status_code} "
+                    f"{ctype or 'no content-type'}, {len(resp.content)} bytes, "
+                    f"x-cache={resp.headers.get('x-cache')!r}) — likely a "
+                    f"CloudFront/origin outage."
+                )
             posts = resp.json()
             if not posts:
                 return None

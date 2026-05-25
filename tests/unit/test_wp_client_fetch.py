@@ -7,7 +7,7 @@ import pytest
 import respx
 from httpx import Response
 
-from content_tool.wordpress.client import FetchedPost, WordPressClient
+from content_tool.wordpress.client import FetchedPost, WordPressClient, WordPressError
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "wp_responses"
 
@@ -66,3 +66,24 @@ async def test_fetch_post_by_url_empty_slug(client: WordPressClient) -> None:
     """A URL with no path slug returns None without making any HTTP call."""
     result = await client.fetch_post_by_url("https://www.bowtie.com.hk/")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_post_by_url_raises_on_empty_2xx(client: WordPressClient) -> None:
+    # CloudFront returns "202 Accepted + text/html + empty body" when the edge
+    # cannot reach origin. raise_for_status() does not treat 2xx as an error,
+    # so without an explicit guard resp.json() raised JSONDecodeError. Now we
+    # surface a clear WordPressError instead.
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://wp.test/wp-json/wp/v2/posts").mock(
+            return_value=Response(
+                202,
+                content=b"",
+                headers={"content-type": "text/html; charset=UTF-8",
+                         "x-cache": "Error from cloudfront"},
+            )
+        )
+        with pytest.raises(WordPressError, match="non-JSON"):
+            await client.fetch_post_by_url(
+                "https://www.bowtie.com.hk/blog/zh/cancer-screening/"
+            )
