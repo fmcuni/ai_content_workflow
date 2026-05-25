@@ -225,6 +225,10 @@ class WordPressClient:
                     params=params,
                     headers=headers,
                 )
+                # CloudFront / WAF guard — same shape as fetch_post_by_url.
+                # We deliberately run this BEFORE the is_error check below so a
+                # 2xx-with-empty-HTML response (CloudFront edge failure) is
+                # diagnosed clearly instead of producing a JSONDecodeError.
                 ctype = resp.headers.get("content-type", "")
                 if not ctype.lower().startswith("application/json") or not resp.content:
                     raise WordPressError(
@@ -251,3 +255,7 @@ class WordPressClient:
             extra_params={"hide_empty": "false"},
         )
         return [WpCategory(id=int(r["id"]), name=r["name"], slug=r["slug"]) for r in rows]
+
+    async def list_users(self) -> list[WpUser]:
+        rows = await self._list_paginated("/wp-json/wp/v2/users")
+        return [WpUser(id=int(r["id"]), name=r["name"], slug=r["slug"]) for r in rows]

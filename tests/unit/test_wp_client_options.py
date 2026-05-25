@@ -73,3 +73,39 @@ async def test_list_categories_raises_on_non_json(client: WordPressClient) -> No
         )
         with pytest.raises(WordPressError, match="non-JSON"):
             await client.list_categories()
+
+
+@pytest.mark.asyncio
+async def test_list_users_paginates(client: WordPressClient) -> None:
+    page1 = [{"id": i, "name": f"u{i}", "slug": f"u{i}"} for i in range(100)]
+    page2 = [{"id": i, "name": f"u{i}", "slug": f"u{i}"} for i in range(100, 200)]
+    page3 = [{"id": i, "name": f"u{i}", "slug": f"u{i}"} for i in range(200, 266)]
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get("https://wp.test/wp-json/wp/v2/users")
+        route.mock(side_effect=[
+            Response(200, json=page1, headers={"x-wp-total": "266", "x-wp-totalpages": "3"}),
+            Response(200, json=page2, headers={"x-wp-total": "266", "x-wp-totalpages": "3"}),
+            Response(200, json=page3, headers={"x-wp-total": "266", "x-wp-totalpages": "3"}),
+        ])
+        result = await client.list_users()
+        assert route.call_count == 3
+        first_url = str(route.calls[0].request.url)
+        assert "per_page=100" in first_url
+        assert "hide_empty" not in first_url  # users endpoint doesn't take it
+    assert len(result) == 266
+    assert isinstance(result[0], WpUser)
+    assert result[0].id == 0
+
+
+@pytest.mark.asyncio
+async def test_list_users_propagates_4xx(client: WordPressClient) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://wp.test/wp-json/wp/v2/users").mock(
+            return_value=Response(
+                403,
+                json={"code": "rest_user_cannot_view", "message": "Sorry"},
+                headers={"content-type": "application/json"},
+            )
+        )
+        with pytest.raises(WordPressError, match="403"):
+            await client.list_users()
