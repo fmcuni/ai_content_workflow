@@ -37,6 +37,7 @@ out/
 .vscode/
 .idea/
 .claude/
+.playwright-cli/
 *.swp
 *.swo
 .DS_Store
