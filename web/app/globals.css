@@ -168,6 +168,38 @@
   /* TipTap's empty-line placeholder dot */
   .editorial-prose p.is-empty::before { color: var(--color-ink-faint); }
 
+  /* Tables */
+  .editorial-prose table {
+    width: 100%;
+    margin: 1.4em 0;
+    border-collapse: collapse;
+    font-family: var(--font-sans);
+    font-size: 0.95em;
+    line-height: 1.5;
+  }
+  .editorial-prose thead { background: var(--color-paper-deep); }
+  .editorial-prose th,
+  .editorial-prose td {
+    border: 1px solid var(--color-rule);
+    padding: 0.55em 0.75em;
+    text-align: left;
+    vertical-align: top;
+  }
+  .editorial-prose th {
+    font-weight: 600;
+    background: var(--color-paper-deep);
+    color: var(--color-ink);
+  }
+  .editorial-prose tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--color-paper-deep) 35%, transparent);
+  }
+  .editorial-prose td > p,
+  .editorial-prose th > p { margin: 0; }
+  /* TipTap selection highlight inside cells */
+  .editorial-prose .selectedCell {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  }
+
   /* Reviewer comment anchors in the WYSIWYG editor. */
   .editorial-prose .comment-anchor {
     background: color-mix(in srgb, var(--color-accent) 12%, transparent);

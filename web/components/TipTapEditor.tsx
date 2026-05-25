@@ -3,6 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableHeader } from "@tiptap/extension-table-header";
+import { TableCell } from "@tiptap/extension-table-cell";
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -16,10 +20,19 @@ import {
   Undo2,
   Redo2,
   MessageSquarePlus,
+  Table2,
+  ChevronDown,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { CommentAnchor } from "@/components/tiptap/CommentAnchor";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 type ToolbarButtonProps = {
   onClick: () => void;
@@ -55,6 +68,104 @@ function Divider() {
   return <span aria-hidden className="mx-1 h-5 w-px bg-rule" />;
 }
 
+function TableMenu({ editor }: { editor: Editor }) {
+  const inTable = editor.isActive("table");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            title="Table"
+            aria-label="Table"
+            aria-pressed={inTable}
+            onMouseDown={(e) => e.preventDefault()}
+            className={cn(
+              "inline-flex h-8 items-center gap-0.5 rounded px-1.5 text-ink-soft transition-colors",
+              "hover:bg-paper-deep hover:text-ink",
+              inTable && "bg-ink text-paper hover:bg-ink hover:text-paper",
+            )}
+          >
+            <Table2 className="h-4 w-4" />
+            <ChevronDown className="h-3 w-3" />
+          </button>
+        }
+      />
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem
+          onClick={() =>
+            editor
+              .chain()
+              .focus()
+              .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+              .run()
+          }
+        >
+          Insert table (3×3)
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().addRowBefore().run()}
+        >
+          Add row above
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().addRowAfter().run()}
+        >
+          Add row below
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().addColumnBefore().run()}
+        >
+          Add column left
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().addColumnAfter().run()}
+        >
+          Add column right
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().toggleHeaderRow().run()}
+        >
+          Toggle header row
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().mergeOrSplit().run()}
+        >
+          Merge / split cell
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().deleteRow().run()}
+        >
+          Delete row
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!inTable}
+          onClick={() => editor.chain().focus().deleteColumn().run()}
+        >
+          Delete column
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!inTable}
+          variant="destructive"
+          onClick={() => editor.chain().focus().deleteTable().run()}
+        >
+          Delete table
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function Toolbar({ editor }: { editor: Editor }) {
   const promptLink = () => {
     const prev = (editor.getAttributes("link").href as string | undefined) ?? "";
@@ -69,7 +180,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   };
 
   return (
-    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-0.5 rounded-t border border-b-0 border-rule bg-paper px-1.5 py-1">
+    <div className="sticky top-[6.25rem] z-20 flex flex-wrap items-center gap-0.5 rounded-t border border-b-0 border-rule bg-paper px-1.5 py-1">
       <ToolbarButton label="Bold (⌘B)" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
         <BoldIcon className="h-4 w-4" />
       </ToolbarButton>
@@ -96,6 +207,8 @@ function Toolbar({ editor }: { editor: Editor }) {
       <ToolbarButton label="Blockquote" active={editor.isActive("blockquote")} onClick={() => editor.chain().focus().toggleBlockquote().run()}>
         <Quote className="h-4 w-4" />
       </ToolbarButton>
+      <Divider />
+      <TableMenu editor={editor} />
       <Divider />
       <ToolbarButton label="Link" active={editor.isActive("link")} onClick={promptLink}>
         <LinkIcon className="h-4 w-4" />
@@ -134,6 +247,10 @@ export function TipTapEditor({
         autolink: true,
         HTMLAttributes: { class: "text-accent underline underline-offset-2" },
       }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
       CommentAnchor,
     ],
     content: value,

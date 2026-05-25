@@ -207,7 +207,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         </section>
 
         {/* Right rail — WP metadata ↔ Comments tab switcher */}
-        <aside className="lg:sticky lg:top-32 self-start">
+        <aside className="lg:sticky lg:top-[6.25rem] self-start">
           <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as "wp" | "comments")}>
             <TabsList className="border-b border-rule">
               <TabsTrigger value="wp">WP metadata</TabsTrigger>
