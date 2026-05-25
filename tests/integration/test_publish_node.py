@@ -1,4 +1,5 @@
-from datetime import date, datetime
+import json
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -63,11 +64,12 @@ async def test_publish_node_updates_runs(db_session):
 async def test_publish_node_forwards_wp_publish_at_as_date_gmt(db_session):
     """run.wp_publish_at (UTC datetime) lands in WP REST body as date_gmt
     (ISO 8601 UTC, no trailing Z, e.g. '2026-06-01T03:00:00')."""
-    from datetime import timezone
     run_id = uuid4()
-    # Editor in HK picks 2026-06-01 11:00 HKT → UTC 03:00 — i.e. the form
-    # would send "2026-06-01T03:00:00Z" and the API stores an aware UTC datetime.
-    publish_at = datetime(2026, 6, 1, 3, 0, 0, tzinfo=timezone.utc)
+    # Editor in HK picks 2026-06-01 11:00 HKT. Build the input in HKT so the
+    # test actually exercises the .astimezone(timezone.utc) conversion in
+    # publish.py — feeding a UTC value would let a missing conversion slip by.
+    hkt = timezone(timedelta(hours=8))
+    publish_at = datetime(2026, 6, 1, 11, 0, 0, tzinfo=hkt)
     db_session.add(Run(
         run_id=run_id, created_by="x", status="hitl_2",
         article_url="https://e.com", topic="x", keywords=[], mode="auto",
@@ -95,7 +97,6 @@ async def test_publish_node_forwards_wp_publish_at_as_date_gmt(db_session):
     ))
     await db_session.commit()
 
-    import json
     with respx.mock(assert_all_called=True) as r:
         route = r.put("https://wp.example.com/wp-json/wp/v2/posts/98785").mock(
             return_value=Response(200, json={
