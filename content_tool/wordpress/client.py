@@ -27,6 +27,7 @@ class PublishPayload:
     featured_media: int | None
     meta: dict[str, str]
     if_unmodified_since: str | None
+    date_gmt: str | None = None
 
 
 @dataclass
@@ -112,6 +113,8 @@ class WordPressClient:
                 body["author"] = p.author
             if p.featured_media is not None:
                 body["featured_media"] = p.featured_media
+            if p.date_gmt is not None:
+                body["date_gmt"] = p.date_gmt
 
             if p.post_id:
                 resp = await client.put(
