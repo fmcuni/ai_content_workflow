@@ -1,14 +1,35 @@
 "use client";
+import { useQuery } from "@tanstack/react-query";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { DateTimeField } from "@/components/DateTimeField";
+import { SearchableSelect } from "@/components/SearchableSelect";
+import { api } from "@/lib/api";
 
 import type { Hitl2Request } from "@/lib/types";
+
+const TEN_MIN = 10 * 60_000;
+const THIRTY_MIN = 30 * 60_000;
 
 export function WordPressMetaForm({
   form, onChange,
 }: { form: Hitl2Request; onChange: (f: Hitl2Request) => void }) {
+  const users = useQuery({
+    queryKey: ["wp-users"],
+    queryFn: api.listWpUsers,
+    staleTime: TEN_MIN,
+    gcTime: THIRTY_MIN,
+  });
+  const categories = useQuery({
+    queryKey: ["wp-categories"],
+    queryFn: api.listWpCategories,
+    staleTime: TEN_MIN,
+    gcTime: THIRTY_MIN,
+  });
+
   return (
     <div className="space-y-3 text-sm">
       <div>
@@ -41,13 +62,28 @@ export function WordPressMetaForm({
         </Select>
       </div>
       <div>
-        <Label>Author (WP user id)</Label>
-        <Input type="number" value={form.wp_author_id ?? ""} onChange={(e) => onChange({ ...form, wp_author_id: e.target.value ? parseInt(e.target.value, 10) : null })} />
+        <Label>Author</Label>
+        <SearchableSelect
+          value={form.wp_author_id ?? null}
+          onChange={(v) => onChange({ ...form, wp_author_id: v })}
+          options={users.data ?? []}
+          loading={users.isPending}
+          error={users.isError ? (users.error as Error).message : null}
+          onRetry={() => { void users.refetch(); }}
+          placeholder="Search author…"
+        />
       </div>
       <div>
-        <Label>Category IDs (comma)</Label>
-        <Input value={form.wp_category_ids?.join(",") ?? ""}
-               onChange={(e) => onChange({ ...form, wp_category_ids: e.target.value ? e.target.value.split(",").map(s => parseInt(s.trim(), 10)) : null })} />
+        <Label>Category</Label>
+        <SearchableSelect
+          value={form.wp_category_ids?.[0] ?? null}
+          onChange={(v) => onChange({ ...form, wp_category_ids: v == null ? null : [v] })}
+          options={categories.data ?? []}
+          loading={categories.isPending}
+          error={categories.isError ? (categories.error as Error).message : null}
+          onRetry={() => { void categories.refetch(); }}
+          placeholder="Search category…"
+        />
       </div>
       <div>
         <Label>Tag IDs (comma)</Label>
@@ -58,6 +94,13 @@ export function WordPressMetaForm({
         <Label>Featured media id</Label>
         <Input type="number" value={form.wp_featured_media_id ?? ""}
                onChange={(e) => onChange({ ...form, wp_featured_media_id: e.target.value ? parseInt(e.target.value, 10) : null })} />
+      </div>
+      <div>
+        <Label>Post date (optional)</Label>
+        <DateTimeField
+          value={form.wp_publish_at ?? null}
+          onChange={(v) => onChange({ ...form, wp_publish_at: v })}
+        />
       </div>
     </div>
   );
