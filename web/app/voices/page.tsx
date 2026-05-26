@@ -7,6 +7,7 @@ import { SectionHead } from "@/components/SectionHead";
 import { Rolodex } from "@/components/voices/Rolodex";
 import { StyleCard } from "@/components/voices/StyleCard";
 import { PressWorkflow } from "@/components/voices/PressWorkflow";
+import { PromptInspector } from "@/components/voices/PromptInspector";
 import { personasApi, promptsApi } from "@/lib/api";
 
 export default function VoicesPage() {
@@ -87,11 +88,7 @@ export default function VoicesPage() {
         {graph.data && (
           <PressWorkflow
             graph={graph.data}
-            renderInspector={(node) => (
-              <p className="text-ink-faint text-[12px]">
-                Inspector for {node.id} — coming next
-              </p>
-            )}
+            renderInspector={(node) => <PromptInspector node={node} />}
           />
         )}
       </section>
