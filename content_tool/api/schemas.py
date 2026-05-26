@@ -132,3 +132,46 @@ class ScanResponse(BaseModel):
     started_at: datetime
     finished_at: datetime
     skipped: list[dict]  # [{ "article_id": UUID, "reason": str }]
+
+
+# --- Personas ---------------------------------------------------------------
+
+class PersonaIn(BaseModel):
+    slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
+    name: str = Field(min_length=1, max_length=128)
+    voice_rules: list[str]
+    banned_terms: list[str]
+    required_phrasings: list[str]
+    disclaimer_templates: dict[str, str]
+    tone_examples: dict[str, list[str]]
+
+
+class PersonaPatch(BaseModel):
+    name: str | None = None
+    voice_rules: list[str] | None = None
+    banned_terms: list[str] | None = None
+    required_phrasings: list[str] | None = None
+    disclaimer_templates: dict[str, str] | None = None
+    tone_examples: dict[str, list[str]] | None = None
+
+
+class PersonaOut(BaseModel):
+    persona_id: UUID
+    slug: str
+    name: str
+    voice_rules: list[str]
+    banned_terms: list[str]
+    required_phrasings: list[str]
+    disclaimer_templates: dict[str, str]
+    tone_examples: dict[str, list[str]]
+    is_archived: bool
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+    updated_by: str | None
+
+
+class PersonaUsage(BaseModel):
+    slug: str
+    by_status: dict[str, int]
+    total: int
