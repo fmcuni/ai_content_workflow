@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from content_tool.api.schemas import (
@@ -41,14 +42,18 @@ def get_runner(request: Request):  # noqa: ANN201
     return request.app.state.run_executor
 
 
-@router.post("", response_model=CreateRunResponse)
-async def create_run(
+async def _create_run_row(
+    session: AsyncSession,
     payload: CreateRunRequest,
-    sf=Depends(get_session_factory),  # noqa: ANN001, B008
-    runner=Depends(get_runner),  # noqa: ANN001, B008
-) -> CreateRunResponse:
-    run_id = uuid4()
-    async with sf() as session:
+) -> Run:
+    """Insert a ``runs`` row from a validated ``CreateRunRequest``.
+
+    Shared by ``POST /runs`` and ``POST /topic-batches/{id}/promote``. Caller
+    commits the surrounding transaction.
+    """
+    article_id: UUID | None = None
+    if payload.start_mode == "refresh":
+        assert payload.article_url is not None  # validator-guaranteed
         article = await upsert_article(
             session,
             article_url=payload.article_url,
@@ -56,50 +61,69 @@ async def create_run(
             persona=payload.persona,
             topic_category=payload.topic_category,
         )
+        article_id = article.article_id
 
-        ev = None
-        if payload.triggered_by_evaluation_id is not None:
-            ev = await session.get(RefreshEvaluation, payload.triggered_by_evaluation_id)
-            if ev is None or ev.article_id != article.article_id:
-                raise HTTPException(status_code=422, detail="triggered_by_evaluation_id mismatch")
-            if ev.outcome != "open":
-                raise HTTPException(status_code=409, detail="evaluation already resolved")
+    ev: RefreshEvaluation | None = None
+    if payload.triggered_by_evaluation_id is not None:
+        ev = await session.get(RefreshEvaluation, payload.triggered_by_evaluation_id)
+        if ev is None or ev.article_id != article_id:
+            raise HTTPException(
+                status_code=422, detail="triggered_by_evaluation_id mismatch"
+            )
+        if ev.outcome != "open":
+            raise HTTPException(status_code=409, detail="evaluation already resolved")
 
-        row = Run(
-            run_id=run_id,
-            created_by=payload.editor_email,
-            status="pending",
-            article_url=payload.article_url,
-            topic=payload.topic,
-            keywords=payload.keywords,
-            mode=payload.mode,
-            edit_note=payload.edit_note,
-            acf_adv_id=payload.acf_adv_id,
-            acf_widget_id=payload.acf_widget_id,
-            persona=payload.persona,
-            topic_category=payload.topic_category,
-            today_date=date.today(),
-            article_id=article.article_id,
-            triggered_by_evaluation_id=ev.evaluation_id if ev else None,
-        )
-        session.add(row)
-        await session.flush()
+    row = Run(
+        run_id=uuid4(),
+        created_by=payload.editor_email,
+        status="pending",
+        article_url=payload.article_url,
+        topic=payload.topic,
+        keywords=payload.keywords,
+        mode=payload.mode,
+        edit_note=payload.edit_note,
+        acf_adv_id=payload.acf_adv_id,
+        acf_widget_id=payload.acf_widget_id,
+        persona=payload.persona,
+        topic_category=payload.topic_category,
+        today_date=date.today(),
+        article_id=article_id,
+        triggered_by_evaluation_id=ev.evaluation_id if ev else None,
+        start_mode=payload.start_mode,
+        topic_candidate_id=payload.topic_candidate_id,
+        target_audience=payload.target_audience,
+    )
+    session.add(row)
+    await session.flush()
 
-        if ev is not None:
-            ev.outcome = "triggered"
-            ev.resulting_run_id = run_id
-            ev.outcome_set_at = datetime.now(UTC)
-            ev.outcome_set_by = payload.editor_email
+    if ev is not None:
+        ev.outcome = "triggered"
+        ev.resulting_run_id = row.run_id
+        ev.outcome_set_at = datetime.now(UTC)
+        ev.outcome_set_by = payload.editor_email
 
+    return row
+
+
+@router.post("", response_model=CreateRunResponse)
+async def create_run(
+    payload: CreateRunRequest,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    runner=Depends(get_runner),  # noqa: ANN001, B008
+) -> CreateRunResponse:
+    async with sf() as session:
+        row = await _create_run_row(session, payload)
         await session.commit()
+        run_id = row.run_id
+        created_at = row.created_at
+        article_id = row.article_id
 
-    # Fire and forget: spawn graph execution
     await runner.start(run_id)
     return CreateRunResponse(
         run_id=run_id,
         status="pending",
-        created_at=row.created_at if row.created_at else datetime.now(UTC),
-        article_id=article.article_id,
+        created_at=created_at if created_at else datetime.now(UTC),
+        article_id=article_id,
     )
 
 
@@ -361,7 +385,7 @@ async def get_latest_audit(run_id: UUID, sf=Depends(get_session_factory)) -> dic
 async def dry_publish(
     run_id: UUID,
     request: Request,
-    overrides: DryPublishRequest | None = Body(None),
+    overrides: DryPublishRequest | None = Body(None),  # noqa: B008
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
 ) -> dict:
     """Return the exact REST payload we'd send to WP, WITHOUT calling WP.

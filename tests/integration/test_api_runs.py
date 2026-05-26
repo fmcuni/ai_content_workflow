@@ -103,6 +103,99 @@ async def test_create_run_then_resume(postgres_url, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_run_create_mode_no_article_url(postgres_url, monkeypatch):
+    """``start_mode='create'`` skips the article-URL upsert; the run row
+    lands with ``article_url=None`` and the start_mode + target_audience
+    persisted."""
+    monkeypatch.setenv("POSTGRES_URL", postgres_url)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+
+    app = create_app()
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+
+    class _StubExec:
+        def __init__(self) -> None:
+            self.started: list = []
+
+        async def start(self, run_id):
+            self.started.append(run_id)
+
+    stub = _StubExec()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        app.state.session_factory = sf
+        app.state.run_executor = stub
+        resp = await ac.post(
+            "/runs",
+            json={
+                "topic": "保險新手指南",
+                "keywords": ["保險", "新手"],
+                "mode": "auto",
+                "acf_adv_id": 1,
+                "acf_widget_id": 2,
+                "persona": "bowtie-editor",
+                "editor_email": "editor@bowtie",
+                "start_mode": "create",
+                "target_audience": "香港 25-35 歲首次買保險的上班族",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        run_id = UUID(body["run_id"])
+        assert body.get("article_id") is None
+        assert stub.started == [run_id]
+
+        async with sf() as session:
+            row = (
+                await session.execute(select(Run).where(Run.run_id == run_id))
+            ).scalar_one()
+            assert row.start_mode == "create"
+            assert row.article_url is None
+            assert row.target_audience == "香港 25-35 歲首次買保險的上班族"
+            assert row.article_id is None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_run_create_mode_rejects_article_url(postgres_url, monkeypatch):
+    """Create-mode requests that carry ``article_url`` must be rejected;
+    the URL is server-generated after draft publish."""
+    monkeypatch.setenv("POSTGRES_URL", postgres_url)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+
+    app = create_app()
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+
+    class _StubExec:
+        async def start(self, run_id):  # pragma: no cover - never reached
+            pass
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        app.state.session_factory = sf
+        app.state.run_executor = _StubExec()
+        resp = await ac.post(
+            "/runs",
+            json={
+                "article_url": "https://wp.test/x",
+                "topic": "x",
+                "keywords": ["x"],
+                "mode": "auto",
+                "acf_adv_id": 1,
+                "acf_widget_id": 2,
+                "persona": "bowtie-editor",
+                "editor_email": "e@x",
+                "start_mode": "create",
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        assert "article_url must be absent" in resp.text
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_resume_persists_override_route(postgres_url, monkeypatch):
     """HITL_1 override_route must update Run.chosen_route so writer.py picks it up."""
     monkeypatch.setenv("POSTGRES_URL", postgres_url)

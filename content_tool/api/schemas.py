@@ -1,13 +1,13 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CreateRunRequest(BaseModel):
-    article_url: str
+    article_url: str | None = None
     topic: str
     keywords: list[str]
     mode: Literal["auto", "small_refresh", "full_rewrite"] = "auto"
@@ -18,6 +18,21 @@ class CreateRunRequest(BaseModel):
     topic_category: str | None = None
     editor_email: str = Field(description="Identifies who triggered the run")
     triggered_by_evaluation_id: UUID | None = None
+    start_mode: Literal["refresh", "create"] = "refresh"
+    topic_candidate_id: UUID | None = None
+    target_audience: str | None = None
+
+    @model_validator(mode="after")
+    def _check_article_url_for_start_mode(self) -> Self:
+        """refresh mode requires article_url; create mode forbids it (server-generated)."""
+        if self.start_mode == "refresh" and not self.article_url:
+            raise ValueError("article_url is required when start_mode='refresh'")
+        if self.start_mode == "create" and self.article_url:
+            raise ValueError(
+                "article_url must be absent when start_mode='create' "
+                "(server-generated after draft publish)"
+            )
+        return self
 
 
 class CreateRunResponse(BaseModel):
@@ -216,3 +231,134 @@ class PersonaUsage(BaseModel):
     slug: str
     by_status: dict[str, int]
     total: int
+
+
+# --- Topic batches ----------------------------------------------------------
+
+BatchStatus = Literal[
+    "pending",
+    "generating",
+    "analysing",
+    "ready_for_review",
+    "partially_promoted",
+    "done",
+    "failed",
+]
+
+CandidateStatus = Literal["candidate", "promoted", "skipped", "errored"]
+
+ExistingVerdict = Literal["yes", "no", "not_sure"]
+HotTopicVerdict = Literal["yes", "no"]
+
+
+class TopicBatchIn(BaseModel):
+    """Brief-form payload that kicks off a topic-expansion batch."""
+
+    research_theme: str = Field(min_length=1)
+    target_audience: str = Field(min_length=1)
+    topic_count: int = Field(ge=1, le=30, default=10)
+    keywords_per_topic: int = Field(ge=1, le=10, default=5)
+    must_cover: list[str] = Field(default_factory=list)
+    must_avoid: list[str] = Field(default_factory=list)
+    priority_focus: str | None = None
+    notes: str | None = None
+    persona_default: str | None = None
+    acf_adv_id_default: int | None = None
+    acf_widget_id_default: int | None = None
+    editor_email: str = Field(description="Identifies who triggered the batch")
+
+
+class TopicCandidateOut(BaseModel):
+    candidate_id: UUID
+    batch_id: UUID
+    position: int
+    status: CandidateStatus
+    topic: str
+    keywords: list[str]
+    original_topic: str
+    original_keywords: list[str]
+    existing: ExistingVerdict | None = None
+    existing_note: str | None = None
+    existing_url: str | None = None
+    hot_topic: HotTopicVerdict | None = None
+    hot_topic_note: str | None = None
+    persona_slug: str | None = None
+    acf_adv_id: int | None = None
+    acf_widget_id: int | None = None
+    operator_note: str | None = None
+    promote_mode: Literal["create", "refresh"] | None = None
+    promoted_run_id: UUID | None = None
+    last_error: str | None = None
+    last_edited_by: str | None = None
+    last_edited_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TopicBatchOut(BaseModel):
+    batch_id: UUID
+    status: BatchStatus
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    research_theme: str
+    target_audience: str
+    topic_count: int
+    keywords_per_topic: int
+    must_cover: list[str]
+    must_avoid: list[str]
+    priority_focus: str | None = None
+    notes: str | None = None
+    persona_default: str | None = None
+    acf_adv_id_default: int | None = None
+    acf_widget_id_default: int | None = None
+    cost_cents: int = 0
+    last_error: str | None = None
+    candidates: list[TopicCandidateOut] | None = None
+
+
+class TopicBatchCreateResponse(BaseModel):
+    batch_id: UUID
+    status: BatchStatus
+
+
+class PatchCandidateIn(BaseModel):
+    """Partial-update payload for a single candidate row.
+
+    All fields are optional; only those explicitly set propagate to the row.
+    ``editor_email`` identifies the operator so the server can stamp
+    ``last_edited_by`` / ``last_edited_at``.
+    """
+
+    topic: str | None = Field(default=None, min_length=1)
+    keywords: list[str] | None = None
+    persona_slug: str | None = None
+    acf_adv_id: int | None = None
+    acf_widget_id: int | None = None
+    operator_note: str | None = None
+    editor_email: str = Field(description="Operator identifier for edit stamp")
+
+
+class PromotionItem(BaseModel):
+    candidate_id: UUID
+    mode: Literal["create", "refresh"]
+
+
+class PromoteRequest(BaseModel):
+    promotions: list[PromotionItem] = Field(min_length=1)
+    editor_email: str = Field(description="Identifies who is promoting")
+
+
+class PromoteResponseItem(BaseModel):
+    candidate_id: UUID
+    run_id: UUID
+    mode: Literal["create", "refresh"]
+
+
+class PromoteResponse(BaseModel):
+    items: list[PromoteResponseItem]
+    batch_status: BatchStatus
+
+
+class SkipCandidateRequest(BaseModel):
+    editor_email: str = Field(description="Identifies who skipped the candidate")

@@ -16,6 +16,7 @@ from content_tool.api.routes.personas import router as personas_router
 from content_tool.api.routes.prompts import router as prompts_router
 from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
+from content_tool.api.routes.topic_batches import router as topic_batches_router
 from content_tool.api.routes.wp_options import router as wp_options_router
 from content_tool.api.sse import RunExecutor
 from content_tool.api.wp_options_cache import TtlCache
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(personas_router)
     app.include_router(prompts_router)
     app.include_router(refresh_router)
+    app.include_router(topic_batches_router)
     app.include_router(wp_options_router)
     FastAPIInstrumentor().instrument_app(app)
     return app
