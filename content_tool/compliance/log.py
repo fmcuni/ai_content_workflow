@@ -30,9 +30,14 @@ async def write_compliance_log(
     audit = (
         await session.execute(select(AuditRun).where(AuditRun.draft_id == latest.draft_id))
     ).scalar_one_or_none()
+    # Create-mode runs (Task 4) have no GapAnalysisRow — fall back to zeros
+    # for the GA token-count contribution to total_tokens / cost_cents.
     ga = (
         await session.execute(select(GapAnalysisRow).where(GapAnalysisRow.run_id == run_id))
-    ).scalar_one()
+    ).scalar_one_or_none()
+    ga_tokens_in = (ga.tokens_in or 0) if ga is not None else 0
+    ga_tokens_out = (ga.tokens_out or 0) if ga is not None else 0
+    ga_thinking = (ga.thinking_tokens or 0) if ga is not None else 0
     citations = (
         await session.execute(select(Citation).where(Citation.draft_id == latest.draft_id))
     ).scalars().all()
@@ -45,12 +50,12 @@ async def write_compliance_log(
     total_tokens = sum(
         (d.tokens_in or 0) + (d.tokens_out or 0) + (d.thinking_tokens or 0) for d in drafts
     )
-    total_tokens += (ga.tokens_in or 0) + (ga.tokens_out or 0) + (ga.thinking_tokens or 0)
+    total_tokens += ga_tokens_in + ga_tokens_out + ga_thinking
     cost_cents = cost_calc.estimate_cents(
         model=gemini_model,
-        tokens_in=sum((d.tokens_in or 0) for d in drafts) + (ga.tokens_in or 0),
-        tokens_out=sum((d.tokens_out or 0) for d in drafts) + (ga.tokens_out or 0),
-        thinking_tokens=sum((d.thinking_tokens or 0) for d in drafts) + (ga.thinking_tokens or 0),
+        tokens_in=sum((d.tokens_in or 0) for d in drafts) + ga_tokens_in,
+        tokens_out=sum((d.tokens_out or 0) for d in drafts) + ga_tokens_out,
+        thinking_tokens=sum((d.thinking_tokens or 0) for d in drafts) + ga_thinking,
     )
 
     stmt = pg_insert(ComplianceLog).values(

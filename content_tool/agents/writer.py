@@ -81,29 +81,36 @@ async def run_writer(
     refine_notes: list[dict] | None,
 ) -> WriterRunResult:
     run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
+    # In create-mode runs (Task 4) there's no fetched article and no gap
+    # analysis on disk — the writer is the first node to actually produce
+    # content. Fall back to empty strings/dicts so the existing prompt
+    # template still renders cleanly.
     fa = (
         await session.execute(select(FetchedArticle).where(FetchedArticle.run_id == run_id))
-    ).scalar_one()
+    ).scalar_one_or_none()
     ga = (
         await session.execute(select(GapAnalysisRow).where(GapAnalysisRow.run_id == run_id))
-    ).scalar_one()
+    ).scalar_one_or_none()
     o = (
         await session.execute(select(OutlineRow).where(OutlineRow.run_id == run_id))
     ).scalar_one()
 
+    fa_markdown = fa.markdown if fa is not None else ""
+    ga_payload: dict = ga.payload if ga is not None else {}
+
     route = run.chosen_route or "small_refresh"
     writer_context = (
         f"{run.topic}\n{' '.join(run.keywords)}\n"
-        f"{json.dumps(o.payload, ensure_ascii=False)}\n{fa.markdown}"
+        f"{json.dumps(o.payload, ensure_ascii=False)}\n{fa_markdown}"
     )
     sys_prompt = await build_system_prompt(
         route, run.persona, today, session=session, context_text=writer_context
     )
     user_prompt = build_user_prompt(
         run=run,
-        gap_analysis=ga.payload,
+        gap_analysis=ga_payload,
         outline=o.payload,
-        existing_markdown=fa.markdown,
+        existing_markdown=fa_markdown,
         refine_notes=refine_notes,
     )
 

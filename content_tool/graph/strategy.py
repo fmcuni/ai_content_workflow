@@ -51,11 +51,24 @@ def build_strategy_graph(
             )
         return {"outline": o.model_dump()}
 
+    def route_entry(state: ContentToolState) -> str:
+        # Task 4: create-mode runs (Front III + Front II promotions) skip
+        # fetch_article + gap_analysis entirely — there is no upstream article
+        # to fetch and no gap to analyse. Refresh-mode behaviour (start_mode
+        # missing, None, or "refresh") keeps today's path.
+        if state.get("start_mode") == "create":
+            return "outline"
+        return "fetch_article"
+
     g = StateGraph(ContentToolState)
     g.add_node("fetch_article", n_fetch_article)
     g.add_node("gap_analysis", n_gap_analysis)
     g.add_node("outline", n_outline)
-    g.add_edge(START, "fetch_article")
+    g.add_conditional_edges(
+        START,
+        route_entry,
+        {"fetch_article": "fetch_article", "outline": "outline"},
+    )
     g.add_edge("fetch_article", "gap_analysis")
     g.add_edge("gap_analysis", "outline")
     g.add_edge("outline", END)

@@ -1,4 +1,4 @@
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class ContentToolState(TypedDict):
@@ -14,6 +14,13 @@ class ContentToolState(TypedDict):
     persona: str
     topic_category: str | None
     today_date: str
+
+    # entry mode (Task 4): "refresh" (default — today's behaviour, fetch+gap+
+    # outline) or "create" (Front III — skip fetch+gap, outline directly into
+    # writer, publish to WP as a draft). Absent/None is treated as "refresh".
+    start_mode: NotRequired[Literal["refresh", "create"] | None]
+    topic_candidate_id: NotRequired[str | None]
+    target_audience: NotRequired[str | None]
 
     # fetched
     existing_article_markdown: str | None

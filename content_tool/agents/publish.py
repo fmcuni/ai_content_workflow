@@ -29,11 +29,18 @@ async def publish_to_wordpress(
     wp_client: WordPressClient,
     seo_plugin: Literal["yoast", "rankmath"] | None,
     if_unmodified_since: str | None,
-) -> dict:
+) -> dict[str, object]:
     run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
-    fa = (await session.execute(
-        select(FetchedArticle).where(FetchedArticle.run_id == run_id)
-    )).scalar_one()
+    # Create-mode runs (Task 4) have no FetchedArticle row (we never fetched
+    # an upstream post). Refresh mode behaviour is unchanged — it still
+    # requires a fetched article.
+    is_create_mode = run.start_mode == "create"
+    if is_create_mode:
+        fa = None
+    else:
+        fa = (await session.execute(
+            select(FetchedArticle).where(FetchedArticle.run_id == run_id)
+        )).scalar_one()
     latest_draft = (await session.execute(
         select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
     )).scalar_one()
@@ -50,12 +57,21 @@ async def publish_to_wordpress(
     if run.wp_publish_at is not None:
         date_gmt = run.wp_publish_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
+    if is_create_mode:
+        # Brand-new post: no post_id, force status="draft" (the operator
+        # promotes drafts to publish manually in WP after review).
+        post_id: int | None = None
+        status = "draft"
+    else:
+        post_id = fa.wp_post_id if fa is not None else None
+        status = run.wp_publish_status or "draft"
+
     payload = PublishPayload(
-        post_id=fa.wp_post_id,
+        post_id=post_id,
         title=render.seo_title,
         content=render.html_body,
         excerpt=run.wp_excerpt or render.excerpt_suggestion,
-        status=run.wp_publish_status or "draft",
+        status=status,
         slug=run.wp_slug,
         categories=run.wp_category_ids or [],
         tags=run.wp_tag_ids or [],
@@ -98,10 +114,15 @@ async def publish_to_wordpress(
         await session.commit()
         raise
 
-    await session.execute(update(Run).where(Run.run_id == run_id).values(
-        wp_pushed_post_id=result.id,
-        wp_pushed_at=datetime.utcnow(),
-        status="published",
-    ))
+    update_values: dict[str, object] = {
+        "wp_pushed_post_id": result.id,
+        "wp_pushed_at": datetime.utcnow(),
+        "status": "published",
+    }
+    # Create-mode: WP just minted a brand-new draft post. Backfill the URL
+    # onto the run row so downstream UI ("View in WP") and ops have a link.
+    if is_create_mode:
+        update_values["article_url"] = result.link
+    await session.execute(update(Run).where(Run.run_id == run_id).values(**update_values))
     await session.commit()
     return {"id": result.id, "link": result.link, "status": result.status}

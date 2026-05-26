@@ -37,7 +37,7 @@ def build_root_graph(
             if wp_client is None:
                 return {"status": "persisted", "error": {"message": "wp_client not configured"}}
             async with session_factory() as session:
-                await publish_to_wordpress(
+                publish_result: dict[str, object] = await publish_to_wordpress(
                     session=session,
                     run_id=UUID(state["run_id"]),
                     wp_client=wp_client,
@@ -53,7 +53,14 @@ def build_root_graph(
                     cost_calc=cost_calc,
                     gemini_model=settings.gemini_model,
                 )
-            return {"status": "published"}
+            # Create-mode: surface the freshly-minted WP draft link on graph
+            # state so downstream nodes / SSE subscribers see the URL the
+            # publish step backfilled onto the runs row.
+            patch: dict[str, Any] = {"status": "published"}
+            link = publish_result.get("link")
+            if state.get("start_mode") == "create" and isinstance(link, str) and link:
+                patch["article_url"] = link
+            return patch
 
         if decision == "reject":
             return {"status": "rejected"}

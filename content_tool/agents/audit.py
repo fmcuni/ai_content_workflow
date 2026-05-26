@@ -73,11 +73,17 @@ async def run_audit(
     run = (
         await session.execute(select(Run).where(Run.run_id == draft.run_id))
     ).scalar_one()
+    # Create-mode runs (Task 4) skip gap_analysis entirely, so there is no
+    # GapAnalysisRow to read. The audit prompt only consumes the
+    # ``update_plan`` slice of the payload — fall back to an empty dict when
+    # the row is missing so the rest of the audit (LLM + deterministic
+    # checks + persistence) runs unchanged.
     ga = (
         await session.execute(
             select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    ga_payload: dict = ga.payload if ga is not None else {}
     render = (
         await session.execute(select(Render).where(Render.draft_id == draft_id))
     ).scalar_one()
@@ -111,7 +117,7 @@ async def run_audit(
     )
     user_prompt = build_user_prompt(
         html_body=render.html_body,
-        gap_update_plan=ga.payload.get("update_plan", {}),
+        gap_update_plan=ga_payload.get("update_plan", {}),
         citation_intents=draft.citation_intents,
         citations_summary=citations_summary,
         deterministic_findings=det_findings,
