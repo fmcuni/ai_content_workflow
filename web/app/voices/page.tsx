@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SectionHead } from "@/components/SectionHead";
 import { Rolodex } from "@/components/voices/Rolodex";
 import { StyleCard } from "@/components/voices/StyleCard";
+import { PressWorkflow } from "@/components/voices/PressWorkflow";
 import { personasApi, promptsApi } from "@/lib/api";
 
 export default function VoicesPage() {
@@ -81,11 +82,18 @@ export default function VoicesPage() {
         })()}
       </section>
 
-      {/* Movement 3+4: Press Workflow — replaced in Task 16+ */}
+      {/* Movement 3+4: Press Workflow */}
       <section aria-label="press-workflow">
-        <p className="text-ink-faint text-[12px]">
-          Press Workflow placeholder · {graph.data?.nodes.length ?? "?"} nodes loaded
-        </p>
+        {graph.data && (
+          <PressWorkflow
+            graph={graph.data}
+            renderInspector={(node) => (
+              <p className="text-ink-faint text-[12px]">
+                Inspector for {node.id} — coming next
+              </p>
+            )}
+          />
+        )}
       </section>
     </div>
   );
