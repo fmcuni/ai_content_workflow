@@ -143,12 +143,17 @@ export function SearchableSelect({
                   key={item.id}
                   value={item}
                   className={cn(
-                    "relative flex w-full cursor-default select-none items-center px-3 py-1.5 text-[13px] outline-none",
+                    "relative flex w-full cursor-default select-none items-center gap-2 px-3 py-1.5 text-[13px] outline-none",
                     "data-[highlighted]:bg-rule/40",
                     "data-[disabled]:opacity-50",
                   )}
                 >
-                  {labelById.get(item.id) ?? item.name}
+                  <span className="flex-1 truncate">
+                    {labelById.get(item.id) ?? item.name}
+                  </span>
+                  <span className="font-mono tabular-nums text-[11px] text-ink-faint">
+                    #{item.id}
+                  </span>
                 </Combobox.Item>
               )}
             </Combobox.List>

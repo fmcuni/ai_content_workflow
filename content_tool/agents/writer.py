@@ -30,13 +30,18 @@ class WriterRunResult:
 
 
 async def build_system_prompt(
-    route: str, persona_name: str, today: date, *, session: AsyncSession
+    route: str,
+    persona_name: str,
+    today: date,
+    *,
+    session: AsyncSession,
+    context_text: str | None = None,
 ) -> str:
     template = PROMPT_PATHS[route].read_text(encoding="utf-8")
     persona = await load_persona(persona_name, session=session)
-    return template.replace("{persona_block}", persona.to_prompt_block()).replace(
-        "{today_date}", today.isoformat()
-    )
+    return template.replace(
+        "{persona_block}", persona.to_prompt_block(context_text)
+    ).replace("{today_date}", today.isoformat())
 
 
 def build_user_prompt(
@@ -87,7 +92,13 @@ async def run_writer(
     ).scalar_one()
 
     route = run.chosen_route or "small_refresh"
-    sys_prompt = await build_system_prompt(route, run.persona, today, session=session)
+    writer_context = (
+        f"{run.topic}\n{' '.join(run.keywords)}\n"
+        f"{json.dumps(o.payload, ensure_ascii=False)}\n{fa.markdown}"
+    )
+    sys_prompt = await build_system_prompt(
+        route, run.persona, today, session=session, context_text=writer_context
+    )
     user_prompt = build_user_prompt(
         run=run,
         gap_analysis=ga.payload,

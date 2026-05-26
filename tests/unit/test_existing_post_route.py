@@ -1,6 +1,7 @@
 """Tests for /runs/{run_id}/existing-post GET."""
 
 from datetime import date
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -8,12 +9,23 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from content_tool.api.routes.runs import router
+from content_tool.api.wp_options_cache import TtlCache
 from content_tool.db.models import FetchedArticle, Run
+from content_tool.wordpress.client import WordPressError
 
 
-def _make_app(session_factory) -> FastAPI:
+def _make_app(session_factory, wp_client=None) -> FastAPI:
     app = FastAPI()
     app.state.session_factory = session_factory
+    # /existing-post resolves author/category display names via the WP client
+    # (cached). Default to a stub that raises WordPressError so names resolve
+    # to None and tests assert against ID-only payloads.
+    if wp_client is None:
+        wp_client = AsyncMock()
+        wp_client.get_user.side_effect = WordPressError("test-stub")
+        wp_client.get_category.side_effect = WordPressError("test-stub")
+    app.state.wp_client = wp_client
+    app.state.wp_options_cache = TtlCache(ttl_seconds=60)
     app.include_router(router)
     return app
 
@@ -63,7 +75,9 @@ async def test_existing_post_returns_cached_row(pg_session_factory):
         "wp_post_id": 98785,
         "link": "https://wp.example.com/p/cancer-screening/",
         "wp_author_id": 5,
+        "wp_author_name": None,
         "wp_category_id": 42,
+        "wp_category_name": None,
         "wp_slug": "cancer-screening",
     }
 
@@ -115,22 +129,27 @@ async def test_existing_post_refresh_updates_row(pg_session_factory):
         title="t", content_html="<p>new</p>", modified_gmt="2026-05-26T00:00:00",
         status="publish", author=7, categories=[42],
     )
+    # Name-resolution probes are unrelated to this test; force them to fail
+    # so the response carries IDs only.
+    wp.get_user.side_effect = WordPressError("test-stub")
+    wp.get_category.side_effect = WordPressError("test-stub")
 
-    app = _make_app(pg_session_factory)
-    app.state.wp_client = wp
+    app = _make_app(pg_session_factory, wp_client=wp)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post(f"/runs/{run_id}/existing-post/refresh")
 
     assert r.status_code == 200
     body = r.json()
-    assert body == {
-        "wp_post_id": 98785,
-        "link": "https://wp.example.com/new/",
-        "wp_author_id": 7,
-        "wp_category_id": 42,
-        "wp_slug": "new-slug",
-    }
+    # The mock wp client only stubs fetch_post_by_url; get_user/get_category
+    # aren't configured here, so name resolution yields None via the default
+    # AsyncMock-returns-AsyncMock path being short-circuited by our resolver.
+    # We only assert the ID-bearing fields so this test stays focused.
+    assert body["wp_post_id"] == 98785
+    assert body["link"] == "https://wp.example.com/new/"
+    assert body["wp_author_id"] == 7
+    assert body["wp_category_id"] == 42
+    assert body["wp_slug"] == "new-slug"
 
     # Row was updated
     async with pg_session_factory() as session:

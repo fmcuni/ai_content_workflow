@@ -17,8 +17,12 @@ required_phrasings:
   - "危疾保"
   - "扣稅"
 disclaimer_templates:
-  medical: "本文僅供參考，並非醫療建議。如有疑問請諮詢註冊醫生。"
-  insurance: "本文僅供參考，實際保障條款以保單為準。"
+  medical:
+    condition: "當文章討論症狀、診斷、治療或用藥建議時顯示"
+    disclaimer: "本文僅供參考，並非醫療建議。如有疑問請諮詢註冊醫生。"
+  insurance:
+    condition: "當文章涉及具體保障、賠償或扣稅安排時顯示"
+    disclaimer: "本文僅供參考，實際保障條款以保單為準。"
 tone_examples:
   good:
     - "如果你最近開始留意自願醫保扣稅，以下幾點值得先弄清楚..."

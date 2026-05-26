@@ -76,7 +76,8 @@ async def pg_session_factory(
             await cleanup.execute(
                 text(
                     "TRUNCATE TABLE content_tool.refresh_evaluations, "
-                    "content_tool.runs, content_tool.articles "
+                    "content_tool.runs, content_tool.articles, "
+                    "content_tool.wp_users, content_tool.wp_categories "
                     "RESTART IDENTITY CASCADE"
                 )
             )

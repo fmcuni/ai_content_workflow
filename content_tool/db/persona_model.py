@@ -23,6 +23,9 @@ class Persona(Base):
     required_phrasings: Mapped[list] = mapped_column(JSONB, nullable=False)
     disclaimer_templates: Mapped[dict] = mapped_column(JSONB, nullable=False)
     tone_examples: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    glossary: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )

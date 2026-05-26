@@ -57,6 +57,26 @@ class Hitl2Request(BaseModel):
     wp_publish_at: datetime | None = None
 
 
+class DryPublishRequest(BaseModel):
+    """Optional in-progress edits from the HITL2 reviewer.
+
+    When fields are set, they override the persisted Render / Run values
+    so the preview reflects unsaved edits.
+    """
+
+    edited_html_body: str | None = None
+    edited_seo_title: str | None = None
+    edited_meta_description: str | None = None
+    wp_publish_status: Literal["draft", "future", "publish"] | None = None
+    wp_author_id: int | None = None
+    wp_category_ids: list[int] | None = None
+    wp_tag_ids: list[int] | None = None
+    wp_featured_media_id: int | None = None
+    wp_slug: str | None = None
+    wp_excerpt: str | None = None
+    wp_publish_at: datetime | None = None
+
+
 class DryPublishResponse(BaseModel):
     target_base_url: str
     target_label: str                    # staging | production
@@ -70,7 +90,9 @@ class ExistingPostOut(BaseModel):
     wp_post_id: int
     link: str | None = None
     wp_author_id: int | None = None
+    wp_author_name: str | None = None
     wp_category_id: int | None = None
+    wp_category_name: str | None = None
     wp_slug: str | None = None
 
 
@@ -136,14 +158,31 @@ class ScanResponse(BaseModel):
 
 # --- Personas ---------------------------------------------------------------
 
+GlossaryStatus = Literal["preferred", "avoid", "forbidden", "do_not_translate"]
+
+
+class GlossaryEntry(BaseModel):
+    term: str = Field(min_length=1, max_length=200)
+    preferred: str = Field(default="", max_length=200)
+    variants: list[str] = Field(default_factory=list)
+    status: GlossaryStatus = "preferred"
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class DisclaimerTemplate(BaseModel):
+    condition: str = Field(default="", max_length=500)
+    disclaimer: str = Field(default="", max_length=2000)
+
+
 class PersonaIn(BaseModel):
     slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
     name: str = Field(min_length=1, max_length=128)
     voice_rules: list[str]
     banned_terms: list[str]
     required_phrasings: list[str]
-    disclaimer_templates: dict[str, str]
+    disclaimer_templates: dict[str, DisclaimerTemplate]
     tone_examples: dict[str, list[str]]
+    glossary: list[GlossaryEntry] = Field(default_factory=list)
 
 
 class PersonaPatch(BaseModel):
@@ -151,8 +190,9 @@ class PersonaPatch(BaseModel):
     voice_rules: list[str] | None = None
     banned_terms: list[str] | None = None
     required_phrasings: list[str] | None = None
-    disclaimer_templates: dict[str, str] | None = None
+    disclaimer_templates: dict[str, DisclaimerTemplate] | None = None
     tone_examples: dict[str, list[str]] | None = None
+    glossary: list[GlossaryEntry] | None = None
 
 
 class PersonaOut(BaseModel):
@@ -162,8 +202,9 @@ class PersonaOut(BaseModel):
     voice_rules: list[str]
     banned_terms: list[str]
     required_phrasings: list[str]
-    disclaimer_templates: dict[str, str]
+    disclaimer_templates: dict[str, DisclaimerTemplate]
     tone_examples: dict[str, list[str]]
+    glossary: list[GlossaryEntry] = Field(default_factory=list)
     is_archived: bool
     created_at: datetime
     updated_at: datetime

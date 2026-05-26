@@ -2,13 +2,14 @@ import logging
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from content_tool.api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
+    DryPublishRequest,
     DryPublishResponse,
     ExistingPostOut,
     Hitl2Request,
@@ -357,8 +358,18 @@ async def get_latest_audit(run_id: UUID, sf=Depends(get_session_factory)) -> dic
 
 
 @router.post("/{run_id}/dry-publish", response_model=DryPublishResponse)
-async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
-    """Return the exact REST payload we'd send to WP, WITHOUT calling WP."""
+async def dry_publish(
+    run_id: UUID,
+    request: Request,
+    overrides: DryPublishRequest | None = Body(None),
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Return the exact REST payload we'd send to WP, WITHOUT calling WP.
+
+    Accepts an optional body of in-progress HITL2 edits; when present, those
+    fields override the persisted Render / Run values so the preview reflects
+    unsaved reviewer edits.
+    """
     target_base = request.app.state.wp_client.base_url
     target_label = request.app.state.wp_target
     seo_plugin = request.app.state.seo_plugin
@@ -375,28 +386,59 @@ async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_fac
             select(Render).where(Render.draft_id == draft.draft_id)
         )).scalar_one()
 
+    ov = overrides or DryPublishRequest()
+
+    title = ov.edited_seo_title if ov.edited_seo_title is not None else render.seo_title
+    content = ov.edited_html_body if ov.edited_html_body is not None else render.html_body
+    meta_desc = (
+        ov.edited_meta_description
+        if ov.edited_meta_description is not None
+        else render.meta_description
+    )
+    status = ov.wp_publish_status or run.wp_publish_status or "draft"
+    categories = (
+        ov.wp_category_ids if ov.wp_category_ids is not None else (run.wp_category_ids or [])
+    )
+    tags = ov.wp_tag_ids if ov.wp_tag_ids is not None else (run.wp_tag_ids or [])
+    excerpt = (
+        ov.wp_excerpt
+        if ov.wp_excerpt is not None
+        else (run.wp_excerpt or render.excerpt_suggestion)
+    )
+    slug = ov.wp_slug if ov.wp_slug is not None else run.wp_slug
+    author = ov.wp_author_id if ov.wp_author_id is not None else run.wp_author_id
+    featured_media = (
+        ov.wp_featured_media_id
+        if ov.wp_featured_media_id is not None
+        else run.wp_featured_media_id
+    )
+
     meta_key = (
         "_yoast_wpseo_metadesc" if seo_plugin == "yoast"
         else ("rank_math_description" if seo_plugin == "rankmath" else None)
     )
-    meta = {meta_key: render.meta_description} if meta_key else {}
+    meta = {meta_key: meta_desc} if meta_key else {}
 
     body: dict = {
-        "title": render.seo_title,
-        "content": render.html_body,
-        "status": run.wp_publish_status or "draft",
-        "categories": run.wp_category_ids or [],
-        "tags": run.wp_tag_ids or [],
+        "title": title,
+        "content": content,
+        "status": status,
+        "categories": categories,
+        "tags": tags,
         "meta": meta,
     }
-    if run.wp_excerpt or render.excerpt_suggestion:
-        body["excerpt"] = run.wp_excerpt or render.excerpt_suggestion
-    if run.wp_slug:
-        body["slug"] = run.wp_slug
-    if run.wp_author_id:
-        body["author"] = run.wp_author_id
-    if run.wp_featured_media_id:
-        body["featured_media"] = run.wp_featured_media_id
+    if excerpt:
+        body["excerpt"] = excerpt
+    if slug:
+        body["slug"] = slug
+    if author:
+        body["author"] = author
+    if featured_media:
+        body["featured_media"] = featured_media
+
+    publish_at = ov.wp_publish_at if ov.wp_publish_at is not None else run.wp_publish_at
+    if publish_at is not None:
+        body["date_gmt"] = publish_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
     url = (
         f"{target_base}/wp-json/wp/v2/posts/{fa.wp_post_id}"
@@ -418,9 +460,53 @@ async def dry_publish(run_id: UUID, request: Request, sf=Depends(get_session_fac
     }
 
 
+async def _resolve_wp_names(
+    request: Request,
+    author_id: int | None,
+    category_id: int | None,
+) -> tuple[str | None, str | None]:
+    """Best-effort resolution of WP author / category display names.
+
+    Uses single-resource GETs (cached on app.state.wp_options_cache) so a
+    blocked /wp-json/wp/v2/users list endpoint doesn't take out the page.
+    Any upstream failure → None so the UI falls back to the raw ID.
+    """
+    from content_tool.wordpress.client import WordPressError
+
+    cache = request.app.state.wp_options_cache
+    wp = request.app.state.wp_client
+
+    async def _author() -> str | None:
+        if author_id is None:
+            return None
+        try:
+            user = await cache.get_or_set(
+                f"user:{author_id}", lambda: wp.get_user(author_id)
+            )
+        except WordPressError as e:
+            logger.warning("WP get_user(%s) failed: %s", author_id, e)
+            return None
+        return user.name if user else None
+
+    async def _category() -> str | None:
+        if category_id is None:
+            return None
+        try:
+            cat = await cache.get_or_set(
+                f"category:{category_id}", lambda: wp.get_category(category_id)
+            )
+        except WordPressError as e:
+            logger.warning("WP get_category(%s) failed: %s", category_id, e)
+            return None
+        return cat.name if cat else None
+
+    return await _author(), await _category()
+
+
 @router.get("/{run_id}/existing-post", response_model=ExistingPostOut)
 async def get_existing_post(
     run_id: UUID,
+    request: Request,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
 ) -> dict:
     """Return the cached snapshot of the existing WP post for this run.
@@ -442,11 +528,17 @@ async def get_existing_post(
         else None
     )
 
+    author_name, category_name = await _resolve_wp_names(
+        request, fa.wp_author_id, first_cat_id
+    )
+
     return {
         "wp_post_id": fa.wp_post_id,
         "link": fa.wp_link,
         "wp_author_id": fa.wp_author_id,
+        "wp_author_name": author_name,
         "wp_category_id": first_cat_id,
+        "wp_category_name": category_name,
         "wp_slug": fa.wp_slug,
     }
 
@@ -496,10 +588,15 @@ async def refresh_existing_post(
         await session.commit()
 
     first_cat_id = post.categories[0] if post.categories else None
+    author_name, category_name = await _resolve_wp_names(
+        request, post.author, first_cat_id
+    )
     return {
         "wp_post_id": post.id,
         "link": post.link,
         "wp_author_id": post.author,
+        "wp_author_name": author_name,
         "wp_category_id": first_cat_id,
+        "wp_category_name": category_name,
         "wp_slug": post.slug,
     }

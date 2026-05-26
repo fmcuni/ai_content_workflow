@@ -12,20 +12,30 @@ const TONE: Record<RunStatus, { tone: Tone; pulse?: boolean }> = {
   production:         { tone: "info", pulse: true },
   hitl_2:             { tone: "accent" },
   persisted:          { tone: "ok" },
+  published:          { tone: "ok" },
   failed:             { tone: "danger" },
   cancelled:          { tone: "neutral" },
   rejected:           { tone: "danger" },
   changes_requested:  { tone: "warn" },
 };
 
-const LABEL: Partial<Record<RunStatus, string>> = {
-  hitl_1: "HITL · 1",
-  hitl_2: "HITL · 2",
-  changes_requested: "CHANGES",
+export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
+  pending:            "Queued",
+  fetching:           "Fetching article",
+  strategy:           "Planning",
+  hitl_1:             "Outline review",
+  production:         "Drafting",
+  hitl_2:             "Draft review",
+  persisted:          "Saved",
+  published:          "Published",
+  failed:             "Failed",
+  cancelled:          "Cancelled",
+  rejected:           "Rejected",
+  changes_requested:  "Changes requested",
 };
 
 export function RunStatusBadge({ status }: { status: RunStatus }) {
   const { tone, pulse } = TONE[status] ?? { tone: "neutral" };
-  const label = LABEL[status] ?? status.toUpperCase();
+  const label = RUN_STATUS_LABEL[status] ?? status.replace(/_/g, " ");
   return <PaperStamp tone={tone} pulse={pulse}>{label}</PaperStamp>;
 }

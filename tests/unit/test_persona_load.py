@@ -33,7 +33,7 @@ async def test_load_persona_reads_from_db_when_present(db_session: AsyncSession)
             voice_rules=["rule A"],
             banned_terms=["X"],
             required_phrasings=["Y"],
-            disclaimer_templates={"medical": "..."},
+            disclaimer_templates={"medical": {"condition": "", "disclaimer": "..."}},
             tone_examples={"good": ["g"], "bad": ["b"]},
         ))
         await db_session.commit()

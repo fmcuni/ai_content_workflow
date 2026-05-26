@@ -86,7 +86,7 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
           <div className="space-y-3">
             {run?.status === "hitl_1" && (
               <div>
-                <p className="kicker mb-2">Hitl · Stage 1</p>
+                <p className="kicker mb-2">Outline review</p>
                 <Link
                   href={`/runs/${runId}/hitl1`}
                   className={buttonVariants({ variant: "primary", size: "lg" }) + " w-full"}
@@ -97,7 +97,7 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
             )}
             {run?.status === "hitl_2" && (
               <div>
-                <p className="kicker mb-2">Hitl · Stage 2</p>
+                <p className="kicker mb-2">Draft review</p>
                 <Link
                   href={`/runs/${runId}/hitl2`}
                   className={buttonVariants({ variant: "primary", size: "lg" }) + " w-full"}

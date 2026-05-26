@@ -1,5 +1,6 @@
 import type {
-  Audit, Article, ArticleDetail, ArticleListResponse, CreateRunRequest, ExistingPost, GapAnalysis,
+  Audit, Article, ArticleDetail, ArticleListResponse, CreateRunRequest,
+  DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis,
   Hitl2Request, Outline, Persona, PersonaIn, PersonaPatch, PersonaUsage,
   PromptGraph, PromptTemplate, RefreshEvaluation, Render, RunSummary, ScanResponse,
   UserPromptExample, WpCategoryOption, WpUserOption,
@@ -34,6 +35,11 @@ export const api = {
   ) => http(`${BASE}/${runId}/resume`, { method: "POST", body: JSON.stringify(body) }),
   resumeHitl2: (runId: string, body: Hitl2Request) =>
     http(`${BASE}/${runId}/hitl-2`, { method: "POST", body: JSON.stringify(body) }),
+  dryPublish: (runId: string, body?: DryPublishRequest) =>
+    http<DryPublishResponse>(`${BASE}/${runId}/dry-publish`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
   getExistingPost: (runId: string) =>
     http<ExistingPost>(`${BASE}/${runId}/existing-post`),
   refreshExistingPost: (runId: string) =>

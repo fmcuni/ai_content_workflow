@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { personasApi } from "@/lib/api";
-import type { Persona, PersonaIn } from "@/lib/types";
+import type { DisclaimerTemplate, Persona, PersonaIn } from "@/lib/types";
 
 interface ComposeDrawerProps {
   mode: { kind: "create" } | { kind: "edit"; persona: Persona };
@@ -86,42 +86,24 @@ function StringList({
   );
 }
 
-function KeyValueList({
+function DisclaimerTemplateList({
   label,
   entries,
   onChange,
 }: {
   label: string;
-  entries: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+  entries: Record<string, DisclaimerTemplate>;
+  onChange: (next: Record<string, DisclaimerTemplate>) => void;
 }) {
   const rows = Object.entries(entries);
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">{label}</p>
       {rows.length === 0 && (
         <p className="font-mono text-[10px] text-ink-faint italic">No templates yet.</p>
       )}
       {rows.map(([k, v], i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            value={k}
-            onChange={(e) => {
-              const next: Record<string, string> = {};
-              rows.forEach(([rk, rv], j) => {
-                next[j === i ? e.target.value : rk] = rv;
-              });
-              onChange(next);
-            }}
-            placeholder="key (e.g. medical)"
-            className="w-[140px] border-b border-rule bg-transparent py-1 text-[12px] font-mono uppercase tracking-wider focus:outline-none focus:border-ink"
-          />
-          <input
-            value={v}
-            onChange={(e) => onChange({ ...entries, [k]: e.target.value })}
-            placeholder="template body"
-            className="flex-1 border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
-          />
+        <div key={i} className="border border-rule p-3 space-y-2 relative">
           <button
             type="button"
             onClick={() => {
@@ -129,11 +111,55 @@ function KeyValueList({
               delete next[k];
               onChange(next);
             }}
-            className="text-ink-faint hover:text-accent-deep text-[14px]"
+            className="absolute top-2 right-2 text-ink-faint hover:text-accent-deep text-[14px]"
             aria-label="remove"
           >
             ×
           </button>
+          <div>
+            <p className="font-mono text-[9px] tracking-[0.18em] uppercase text-ink-faint mb-1">
+              Name · 名稱
+            </p>
+            <input
+              value={k}
+              onChange={(e) => {
+                const next: Record<string, DisclaimerTemplate> = {};
+                rows.forEach(([rk, rv], j) => {
+                  next[j === i ? e.target.value : rk] = rv;
+                });
+                onChange(next);
+              }}
+              placeholder="e.g. medical"
+              className="w-full border-b border-rule bg-transparent py-1 text-[13px] font-mono uppercase tracking-wider focus:outline-none focus:border-ink"
+            />
+          </div>
+          <div>
+            <p className="font-mono text-[9px] tracking-[0.18em] uppercase text-ink-faint mb-1">
+              Condition · 顯示時機
+            </p>
+            <input
+              value={v.condition}
+              onChange={(e) =>
+                onChange({ ...entries, [k]: { ...v, condition: e.target.value } })
+              }
+              placeholder="when to show this disclaimer"
+              className="w-full border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
+            />
+          </div>
+          <div>
+            <p className="font-mono text-[9px] tracking-[0.18em] uppercase text-ink-faint mb-1">
+              Disclaimer · 免責聲明
+            </p>
+            <textarea
+              value={v.disclaimer}
+              onChange={(e) =>
+                onChange({ ...entries, [k]: { ...v, disclaimer: e.target.value } })
+              }
+              rows={2}
+              placeholder="disclaimer text"
+              className="w-full border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink resize-y"
+            />
+          </div>
         </div>
       ))}
       <button
@@ -141,7 +167,7 @@ function KeyValueList({
         onClick={() => {
           let i = 1;
           while ((`new-${i}` in entries)) i += 1;
-          onChange({ ...entries, [`new-${i}`]: "" });
+          onChange({ ...entries, [`new-${i}`]: { condition: "", disclaimer: "" } });
         }}
         className="font-mono text-[10px] tracking-wider uppercase text-ink-faint hover:text-ink"
       >
@@ -158,7 +184,7 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
   );
 
   const cleanLists = (body: PersonaIn): PersonaIn => {
-    const cleanedDisclaimers: Record<string, string> = {};
+    const cleanedDisclaimers: Record<string, DisclaimerTemplate> = {};
     for (const [k, v] of Object.entries(body.disclaimer_templates)) {
       const trimmed = k.trim();
       if (!trimmed || trimmed.startsWith("new-")) continue;
@@ -282,7 +308,7 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
             values={form.required_phrasings}
             onChange={(next) => setForm({ ...form, required_phrasings: next })}
           />
-          <KeyValueList
+          <DisclaimerTemplateList
             label="Disclaimer templates · 免責聲明"
             entries={form.disclaimer_templates}
             onChange={(next) => setForm({ ...form, disclaimer_templates: next })}

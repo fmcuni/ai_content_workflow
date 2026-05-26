@@ -262,3 +262,50 @@ class WordPressClient:
     async def list_users(self) -> list[WpUser]:
         rows = await self._list_paginated("/wp-json/wp/v2/users")
         return [WpUser(id=int(r["id"]), name=r["name"], slug=r["slug"]) for r in rows]
+
+    async def _get_single(self, path: str) -> dict[str, object] | None:
+        """GET a single WP resource. Returns None on 404, raises WordPressError otherwise.
+
+        Applies the same CloudFront/WAF guard as the list/fetch helpers: a 2xx
+        response with non-JSON content (typically the AWS WAF challenge page)
+        is surfaced as an explicit upstream error rather than a JSONDecodeError.
+        """
+        own = self._client is None
+        client = self._client or httpx.AsyncClient(timeout=self._timeout)
+        try:
+            headers = {"authorization": self._auth_header()}
+            resp = await client.get(
+                f"{self._base_url}{path}",
+                params={"_fields": "id,name,slug"},
+                headers=headers,
+            )
+            if resp.status_code == 404:
+                return None
+            ctype = resp.headers.get("content-type", "")
+            if not ctype.lower().startswith("application/json") or not resp.content:
+                raise WordPressError(
+                    f"WP REST returned non-JSON response ({resp.status_code} "
+                    f"{ctype or 'no content-type'}, {len(resp.content)} bytes, "
+                    f"x-cache={resp.headers.get('x-cache')!r}) — likely a "
+                    f"CloudFront/origin outage."
+                )
+            if resp.is_error:
+                raise WordPressError(f"{resp.status_code}: {resp.text}")
+            return resp.json()
+        finally:
+            if own:
+                await client.aclose()
+
+    async def get_user(self, user_id: int) -> WpUser | None:
+        row = await self._get_single(f"/wp-json/wp/v2/users/{user_id}")
+        if row is None:
+            return None
+        return WpUser(id=int(row["id"]), name=str(row["name"]), slug=str(row["slug"]))
+
+    async def get_category(self, category_id: int) -> WpCategory | None:
+        row = await self._get_single(f"/wp-json/wp/v2/categories/{category_id}")
+        if row is None:
+            return None
+        return WpCategory(
+            id=int(row["id"]), name=str(row["name"]), slug=str(row["slug"])
+        )

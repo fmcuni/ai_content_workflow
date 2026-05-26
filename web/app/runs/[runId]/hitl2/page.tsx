@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type { ExistingPost, Hitl2Comment, Hitl2Request } from "@/lib/types";
+import type { DryPublishResponse, ExistingPost, Hitl2Comment, Hitl2Request } from "@/lib/types";
 
 const MAX_ROUNDS = 3;
 
@@ -87,6 +87,27 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const [comments, setComments] = useState<Hitl2Comment[]>([]);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
+  const [galleyTab, setGalleyTab] = useState<"edit" | "diff" | "audit" | "raw" | "payload">("edit");
+  const [dryPayload, setDryPayload] = useState<DryPublishResponse | null>(null);
+
+  const dryPublish = useMutation({
+    mutationFn: () =>
+      api.dryPublish(runId, {
+        edited_html_body: html,
+        edited_seo_title: form.edited_seo_title ?? null,
+        edited_meta_description: form.edited_meta_description ?? null,
+        wp_publish_status: form.wp_publish_status,
+        wp_author_id: form.wp_author_id ?? null,
+        wp_category_ids: form.wp_category_ids ?? null,
+        wp_tag_ids: form.wp_tag_ids ?? null,
+        wp_featured_media_id: form.wp_featured_media_id ?? null,
+        wp_slug: form.wp_slug ?? null,
+        wp_excerpt: form.wp_excerpt ?? null,
+        wp_publish_at: form.wp_publish_at ?? null,
+      }),
+    onSuccess: (data) => setDryPayload(data),
+    onError: (e: Error) => toast.error(`Dry-publish failed — ${e.message}`),
+  });
 
   useEffect(() => {
     if (render.data) {
@@ -204,11 +225,22 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
         {/* Galley column */}
         <section>
-          <Tabs defaultValue="edit">
+          <Tabs
+            value={galleyTab}
+            onValueChange={(v) => {
+              const next = v as typeof galleyTab;
+              setGalleyTab(next);
+              if (next === "payload" && renderReady && !dryPublish.isPending) {
+                dryPublish.mutate();
+              }
+            }}
+          >
             <TabsList className="border-b border-rule">
               <TabsTrigger value="edit">Edit</TabsTrigger>
               <TabsTrigger value="diff">Diff vs render</TabsTrigger>
               <TabsTrigger value="audit">Audit findings</TabsTrigger>
+              <TabsTrigger value="raw">Raw HTML</TabsTrigger>
+              <TabsTrigger value="payload">WP payload</TabsTrigger>
             </TabsList>
             <TabsContent value="edit" className="pt-6">
               {render.isPending && (
@@ -278,6 +310,99 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 </div>
               )}
             </TabsContent>
+            <TabsContent value="raw" className="pt-6">
+              <div className="flex items-center justify-between mb-2">
+                <p className="kicker">Raw HTML body</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(html);
+                    toast.success("Copied raw HTML");
+                  }}
+                  className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
+                >
+                  ⧉ Copy
+                </button>
+              </div>
+              <pre className="border border-rule bg-paper rounded p-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words font-mono text-ink overflow-x-auto max-h-[70vh]">
+                {html || "(empty)"}
+              </pre>
+            </TabsContent>
+            <TabsContent value="payload" className="pt-6">
+              <div className="flex items-center justify-between mb-2">
+                <p className="kicker">WordPress REST payload</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => dryPublish.mutate()}
+                    disabled={!renderReady || dryPublish.isPending}
+                    className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
+                  >
+                    {dryPublish.isPending ? "↻ Building…" : "↻ Refresh"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!dryPayload) return;
+                      navigator.clipboard.writeText(JSON.stringify(dryPayload, null, 2));
+                      toast.success("Copied payload");
+                    }}
+                    disabled={!dryPayload}
+                    className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
+                  >
+                    ⧉ Copy
+                  </button>
+                </div>
+              </div>
+              {dryPublish.isPending && (
+                <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider animate-pulse">
+                  Building payload…
+                </p>
+              )}
+              {dryPublish.isError && (
+                <p className="font-mono text-[12px] text-accent-deep">
+                  Failed to build payload — {(dryPublish.error as Error).message}
+                </p>
+              )}
+              {dryPayload && (
+                <div className="space-y-4">
+                  <div className="space-y-1 text-[13px]">
+                    <p>
+                      <span className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
+                        Target ·
+                      </span>{" "}
+                      <span className="font-mono">{dryPayload.target_label}</span>{" "}
+                      <span className="text-ink-faint">({dryPayload.target_base_url})</span>
+                    </p>
+                    <p>
+                      <span className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
+                        Request ·
+                      </span>{" "}
+                      <span className="font-mono">
+                        {dryPayload.request_method} {dryPayload.request_url}
+                      </span>
+                    </p>
+                  </div>
+                  <div>
+                    <p className="kicker mb-1">Headers</p>
+                    <pre className="border border-rule bg-paper rounded p-3 text-[12px] font-mono text-ink overflow-x-auto">
+                      {JSON.stringify(dryPayload.request_headers, null, 2)}
+                    </pre>
+                  </div>
+                  <div>
+                    <p className="kicker mb-1">Body</p>
+                    <pre className="border border-rule bg-paper rounded p-3 text-[12px] font-mono text-ink whitespace-pre-wrap break-words overflow-x-auto max-h-[60vh]">
+                      {JSON.stringify(dryPayload.request_body, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+              {!dryPayload && !dryPublish.isPending && !dryPublish.isError && (
+                <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
+                  Switch to this tab to preview the payload.
+                </p>
+              )}
+            </TabsContent>
           </Tabs>
 
           {/* Notes to AI */}
@@ -308,7 +433,12 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             </TabsList>
             <TabsContent value="wp" className="pt-4">
               <Card variant="editorial" className="px-5 py-5">
-                <WordPressMetaForm form={form} onChange={setForm} />
+                <WordPressMetaForm
+                  form={form}
+                  onChange={setForm}
+                  existingAuthorName={existingPost.data?.wp_author_name ?? null}
+                  existingCategoryName={existingPost.data?.wp_category_name ?? null}
+                />
               </Card>
             </TabsContent>
             <TabsContent value="comments" className="pt-4">

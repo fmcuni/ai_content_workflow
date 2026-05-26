@@ -116,6 +116,14 @@ def render_html(markdown: str) -> RenderResult:
     # Remove "## 常見問題" line if it's followed only by what was FAQ
     rest = re.sub(r"##\s*常見問題\s*\n", "", rest)
 
+    # Split off the auto-generated "## 資訊來源" section so it can be re-ordered
+    # to appear AFTER the FAQ widget in the final HTML.
+    sources_md = ""
+    sources_split = re.search(r"\n##\s*資訊來源\s*\n", rest)
+    if sources_split is not None:
+        sources_md = rest[sources_split.start():].lstrip("\n")
+        rest = rest[: sources_split.start()]
+
     # Extract DefinedTerm items, dedup by name (first occurrence wins),
     # then strip the shortcodes so they don't survive into the visible HTML.
     defterm_items: list[tuple[str, str]] = []
@@ -154,6 +162,8 @@ def render_html(markdown: str) -> RenderResult:
     final = jsonld_script + body_html
     if faq_html:
         final += "\n<h2>常見問題</h2>\n" + faq_html + "\n"
+    if sources_md:
+        final += "\n" + md.render(sources_md)
 
     # Excerpt: first <p>... text, ≤160 chars
     p_match = re.search(r"<p>(.*?)</p>", body_html, re.DOTALL)

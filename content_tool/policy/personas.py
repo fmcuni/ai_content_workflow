@@ -19,6 +19,7 @@ _PERSONA_PATCH_KEYS = {
     "required_phrasings",
     "disclaimer_templates",
     "tone_examples",
+    "glossary",
     "is_archived",
 }
 
@@ -40,6 +41,7 @@ def _row_to_pack(row: Persona) -> PersonaPack:
         "required_phrasings": row.required_phrasings,
         "disclaimer_templates": row.disclaimer_templates,
         "tone_examples": row.tone_examples,
+        "glossary": row.glossary or [],
     })
 
 
@@ -80,8 +82,9 @@ async def create_persona(
     voice_rules: list[str],
     banned_terms: list[str],
     required_phrasings: list[str],
-    disclaimer_templates: dict[str, str],
+    disclaimer_templates: dict[str, dict[str, str]],
     tone_examples: dict[str, list[str]],
+    glossary: list[dict[str, Any]] | None = None,
     created_by: str | None = None,
 ) -> Persona:
     row = Persona(
@@ -92,6 +95,7 @@ async def create_persona(
         required_phrasings=required_phrasings,
         disclaimer_templates=disclaimer_templates,
         tone_examples=tone_examples,
+        glossary=glossary or [],
         created_by=created_by,
         updated_by=created_by,
     )

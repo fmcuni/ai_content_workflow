@@ -319,4 +319,34 @@ class RefreshEvaluation(Base):
     latency_ms: Mapped[int | None]
 
 
+class WpUserCache(Base):
+    __tablename__ = "wp_users"
+    __table_args__ = (
+        Index("wp_users_name_idx", "name"),
+        {"schema": "content_tool"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class WpCategoryCache(Base):
+    __tablename__ = "wp_categories"
+    __table_args__ = (
+        Index("wp_categories_name_idx", "name"),
+        {"schema": "content_tool"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 from content_tool.db.persona_model import Persona  # noqa: E402, F401

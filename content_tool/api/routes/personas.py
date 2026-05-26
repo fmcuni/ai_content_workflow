@@ -34,6 +34,7 @@ def _to_out(row: Persona) -> PersonaOut:
         "required_phrasings": row.required_phrasings,
         "disclaimer_templates": row.disclaimer_templates,
         "tone_examples": row.tone_examples,
+        "glossary": row.glossary or [],
         "is_archived": row.is_archived,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -75,8 +76,11 @@ async def create_(
                 voice_rules=payload.voice_rules,
                 banned_terms=payload.banned_terms,
                 required_phrasings=payload.required_phrasings,
-                disclaimer_templates=payload.disclaimer_templates,
+                disclaimer_templates={
+                    k: v.model_dump() for k, v in payload.disclaimer_templates.items()
+                },
                 tone_examples=payload.tone_examples,
+                glossary=[g.model_dump() for g in payload.glossary],
             )
         except IntegrityError as e:
             raise HTTPException(409, f"slug '{payload.slug}' already exists") from e

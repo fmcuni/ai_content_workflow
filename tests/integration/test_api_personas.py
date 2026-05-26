@@ -29,7 +29,7 @@ async def test_create_persona_round_trip(api_client: AsyncClient, pg_session_fac
         "voice_rules": ["clear"],
         "banned_terms": ["X"],
         "required_phrasings": ["Y"],
-        "disclaimer_templates": {"medical": "z"},
+        "disclaimer_templates": {"medical": {"condition": "", "disclaimer": "z"}},
         "tone_examples": {"good": ["a"], "bad": ["b"]},
     }
     try:

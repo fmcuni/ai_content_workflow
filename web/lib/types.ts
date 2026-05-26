@@ -1,6 +1,6 @@
 export type RunStatus =
   | "pending" | "fetching" | "strategy" | "hitl_1"
-  | "production" | "hitl_2" | "persisted" | "failed"
+  | "production" | "hitl_2" | "persisted" | "published" | "failed"
   | "cancelled" | "rejected" | "changes_requested";
 
 export type Mode = "auto" | "small_refresh" | "full_rewrite";
@@ -120,6 +120,29 @@ export interface Hitl2Comment {
   body: string;
 }
 
+export interface DryPublishRequest {
+  edited_html_body?: string | null;
+  edited_seo_title?: string | null;
+  edited_meta_description?: string | null;
+  wp_publish_status?: "draft" | "future" | "publish" | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_tag_ids?: number[] | null;
+  wp_featured_media_id?: number | null;
+  wp_slug?: string | null;
+  wp_excerpt?: string | null;
+  wp_publish_at?: string | null;
+}
+
+export interface DryPublishResponse {
+  target_base_url: string;
+  target_label: string;
+  request_method: "PUT" | "POST";
+  request_url: string;
+  request_headers: Record<string, string>;
+  request_body: Record<string, unknown>;
+}
+
 export interface Hitl2Request {
   decision: "approve" | "request_changes" | "reject";
   notes?: string | null;
@@ -202,8 +225,25 @@ export interface ExistingPost {
   wp_post_id: number;
   link: string | null;
   wp_author_id: number | null;
+  wp_author_name: string | null;
   wp_category_id: number | null;
+  wp_category_name: string | null;
   wp_slug: string | null;
+}
+
+export type GlossaryStatus = "preferred" | "avoid" | "forbidden" | "do_not_translate";
+
+export interface GlossaryEntry {
+  term: string;
+  preferred: string;
+  variants: string[];
+  status: GlossaryStatus;
+  notes: string | null;
+}
+
+export interface DisclaimerTemplate {
+  condition: string;
+  disclaimer: string;
 }
 
 export interface Persona {
@@ -213,8 +253,9 @@ export interface Persona {
   voice_rules: string[];
   banned_terms: string[];
   required_phrasings: string[];
-  disclaimer_templates: Record<string, string>;
+  disclaimer_templates: Record<string, DisclaimerTemplate>;
   tone_examples: Record<string, string[]>;
+  glossary: GlossaryEntry[];
   is_archived: boolean;
   created_at: string;
   updated_at: string;
@@ -228,8 +269,9 @@ export interface PersonaIn {
   voice_rules: string[];
   banned_terms: string[];
   required_phrasings: string[];
-  disclaimer_templates: Record<string, string>;
+  disclaimer_templates: Record<string, DisclaimerTemplate>;
   tone_examples: Record<string, string[]>;
+  glossary?: GlossaryEntry[];
 }
 
 export interface PersonaPatch {
@@ -237,8 +279,9 @@ export interface PersonaPatch {
   voice_rules?: string[];
   banned_terms?: string[];
   required_phrasings?: string[];
-  disclaimer_templates?: Record<string, string>;
+  disclaimer_templates?: Record<string, DisclaimerTemplate>;
   tone_examples?: Record<string, string[]>;
+  glossary?: GlossaryEntry[];
 }
 
 export interface PersonaUsage {

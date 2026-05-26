@@ -1,10 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { personasApi } from "@/lib/api";
 import type { Persona } from "@/lib/types";
-import { RedlineList } from "./RedlineList";
 
 interface StyleCardProps {
   persona: Persona;
@@ -40,13 +40,21 @@ export function StyleCard({ persona, onEdit }: StyleCardProps) {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onEdit}
-          className="text-[12px] tracking-wider uppercase text-ink-soft hover:text-accent transition-colors"
-        >
-          Edit voice →
-        </button>
+        <div className="flex items-center gap-4">
+          <Link
+            href={`/voices/${persona.slug}/glossary`}
+            className="text-[12px] tracking-wider uppercase text-ink-soft hover:text-accent transition-colors"
+          >
+            Glossary ({persona.glossary?.length ?? 0}) →
+          </Link>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-[12px] tracking-wider uppercase text-ink-soft hover:text-accent transition-colors"
+          >
+            Edit voice →
+          </button>
+        </div>
       </header>
 
       <section>
@@ -58,22 +66,63 @@ export function StyleCard({ persona, onEdit }: StyleCardProps) {
         </ul>
       </section>
 
-      <section>
-        <h3 className="kicker mb-3">字詞紅線 · Banned → required</h3>
-        <RedlineList
-          banned={persona.banned_terms}
-          required={persona.required_phrasings}
-        />
-      </section>
+      {(persona.banned_terms.length > 0 || persona.required_phrasings.length > 0) && (
+        <section>
+          <h3 className="kicker mb-3">字詞紅線 · Vocabulary</h3>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_1px_1fr] gap-6">
+            <div>
+              <h4 className="kicker mb-2">避免 · Avoid</h4>
+              {persona.banned_terms.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {persona.banned_terms.map((term, i) => (
+                    <li
+                      key={i}
+                      className="font-display text-[20px] text-ink-faint"
+                    >
+                      <s className="decoration-accent decoration-2">{term}</s>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-ink-faint italic text-[14px]">—</p>
+              )}
+            </div>
+            <div className="bg-rule hidden md:block" />
+            <div>
+              <h4 className="kicker mb-2">保留 · Prefer</h4>
+              {persona.required_phrasings.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {persona.required_phrasings.map((term, i) => (
+                    <li
+                      key={i}
+                      className="font-display text-[20px] text-ink"
+                      style={{ fontVariationSettings: '"opsz" 36' }}
+                    >
+                      {term}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-ink-faint italic text-[14px]">—</p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {Object.keys(persona.disclaimer_templates).length > 0 && (
         <section>
           <h3 className="kicker mb-3">免責聲明 · Disclaimer templates</h3>
-          <dl className="space-y-3">
-            {Object.entries(persona.disclaimer_templates).map(([key, body]) => (
+          <dl className="space-y-4">
+            {Object.entries(persona.disclaimer_templates).map(([key, tpl]) => (
               <div key={key}>
                 <dt className="font-mono text-[11px] tracking-wider uppercase text-ink-faint">{key}</dt>
-                <dd className="font-display italic text-ink-soft mt-1">{body}</dd>
+                {tpl.condition && (
+                  <dd className="font-mono text-[11px] tracking-wider text-ink-faint mt-1">
+                    當 · When: {tpl.condition}
+                  </dd>
+                )}
+                <dd className="font-display italic text-ink-soft mt-1">{tpl.disclaimer}</dd>
               </div>
             ))}
           </dl>

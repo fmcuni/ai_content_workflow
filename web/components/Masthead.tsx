@@ -51,7 +51,7 @@ export function Masthead() {
           className="font-display text-[15px] tracking-[0.16em] uppercase font-medium text-ink hover:text-accent transition-colors"
           style={{ fontVariationSettings: '"opsz" 14, "SOFT" 60' }}
         >
-          Bowtie · Content Desk
+          Bowtie AI Content Workflow
         </Link>
         <div className="font-mono text-[11px] tracking-wider text-ink-faint uppercase">
           {now ? `VOL. ${isoWeek(now)}  ·  ${dateline(now)}` : ""}
