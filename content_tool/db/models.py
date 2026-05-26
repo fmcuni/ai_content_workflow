@@ -319,3 +319,6 @@ class RefreshEvaluation(Base):
     tokens_out: Mapped[int | None]
     est_cost_usd_cents: Mapped[int | None]
     latency_ms: Mapped[int | None]
+
+
+from content_tool.db.persona_model import Persona  # noqa: E402, F401
