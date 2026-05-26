@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from content_tool.db.models import Base
+from content_tool.db.base import Base
 
 
 class Persona(Base):
@@ -30,7 +30,7 @@ class Persona(Base):
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=text("now()")
+        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
     )
     created_by: Mapped[str | None] = mapped_column(String)
     updated_by: Mapped[str | None] = mapped_column(String)
