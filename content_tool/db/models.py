@@ -34,7 +34,7 @@ class Run(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
-    article_url: Mapped[str] = mapped_column(String, nullable=False)
+    article_url: Mapped[str | None] = mapped_column(String)
     topic: Mapped[str] = mapped_column(String, nullable=False)
     keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
     mode: Mapped[str] = mapped_column(String, nullable=False)
@@ -74,6 +74,14 @@ class Run(Base):
     triggered_by_evaluation_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("content_tool.refresh_evaluations.evaluation_id")
     )
+    start_mode: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'refresh'")
+    )
+    topic_candidate_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.topic_candidates.candidate_id"),
+    )
+    target_audience: Mapped[str | None] = mapped_column(String)
 
 
 class GapAnalysisRow(Base):
@@ -349,4 +357,10 @@ class WpCategoryCache(Base):
     )
 
 
-from content_tool.db.persona_model import Persona  # noqa: E402, F401
+from content_tool.db.persona_model import Persona  # noqa: E402
+from content_tool.db.topic_batch_model import (  # noqa: E402
+    TopicBatch,
+    TopicCandidate,
+)
+
+__all__ = ["Persona", "TopicBatch", "TopicCandidate"]
