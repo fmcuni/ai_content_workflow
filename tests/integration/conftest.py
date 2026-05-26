@@ -109,7 +109,7 @@ async def persisted_full_run(
         ))
         s.add(Citation(
             draft_id=draft.draft_id, domain="example.com",
-            vertex_uri="gs://example/chunk-0",
+            vertex_uri="https://vertexaisearch.cloud.google.com/x",
             final_url="https://example.com", policy_decision="allowed",
             was_displayed=True, denied_reason=None,
         ))

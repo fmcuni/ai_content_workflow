@@ -119,17 +119,19 @@ async def _render_user_prompt(
     ga = (await session.execute(
         select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
     )).scalar_one_or_none()
+    if ga is None:
+        raise _MissingInputs("audit needs gap_analysis")
     render = (await session.execute(
         select(Render).where(Render.draft_id == draft.draft_id)
     )).scalar_one_or_none()
+    if render is None:
+        raise _MissingInputs("audit needs a render")
     cits = (await session.execute(
         select(Citation).where(Citation.draft_id == draft.draft_id)
     )).scalars().all()
     audit_row = (await session.execute(
         select(AuditRun).where(AuditRun.draft_id == draft.draft_id)
     )).scalar_one_or_none()
-    if ga is None or render is None:
-        raise _MissingInputs("audit needs gap_analysis + render")
     return audit_agent.build_user_prompt(
         html_body=render.html_body,
         gap_update_plan=ga.payload.get("update_plan", {}),
