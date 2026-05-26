@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { SectionHead } from "@/components/SectionHead";
+import { ComposeDrawer } from "@/components/voices/ComposeDrawer";
 import { Rolodex } from "@/components/voices/Rolodex";
 import { StyleCard } from "@/components/voices/StyleCard";
 import { PressWorkflow } from "@/components/voices/PressWorkflow";
@@ -34,10 +35,7 @@ export default function VoicesPage() {
     ?? null;
 
   return (
-    <div
-      className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 space-y-12"
-      data-compose-mode={composeMode?.kind ?? ""}
-    >
+    <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 space-y-12">
       <SectionHead
         kicker="Style Sheet · Voices"
         hed="House Voices"
@@ -92,6 +90,25 @@ export default function VoicesPage() {
           />
         )}
       </section>
+
+      {composeMode && personas.data && (
+        <ComposeDrawer
+          mode={
+            composeMode.kind === "create"
+              ? { kind: "create" }
+              : (() => {
+                  const found = personas.data.find((p) => p.slug === composeMode.slug);
+                  if (!found) return { kind: "create" } as const;
+                  return { kind: "edit", persona: found } as const;
+                })()
+          }
+          onClose={() => setComposeMode(null)}
+          onSaved={(slug) => {
+            setComposeMode(null);
+            setSelectedSlug(slug);
+          }}
+        />
+      )}
     </div>
   );
 }
