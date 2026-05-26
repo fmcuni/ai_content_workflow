@@ -86,22 +86,96 @@ function StringList({
   );
 }
 
+function KeyValueList({
+  label,
+  entries,
+  onChange,
+}: {
+  label: string;
+  entries: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const rows = Object.entries(entries);
+  return (
+    <div className="space-y-2">
+      <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">{label}</p>
+      {rows.length === 0 && (
+        <p className="font-mono text-[10px] text-ink-faint italic">No templates yet.</p>
+      )}
+      {rows.map(([k, v], i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input
+            value={k}
+            onChange={(e) => {
+              const next: Record<string, string> = {};
+              rows.forEach(([rk, rv], j) => {
+                next[j === i ? e.target.value : rk] = rv;
+              });
+              onChange(next);
+            }}
+            placeholder="key (e.g. medical)"
+            className="w-[140px] border-b border-rule bg-transparent py-1 text-[12px] font-mono uppercase tracking-wider focus:outline-none focus:border-ink"
+          />
+          <input
+            value={v}
+            onChange={(e) => onChange({ ...entries, [k]: e.target.value })}
+            placeholder="template body"
+            className="flex-1 border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const next = { ...entries };
+              delete next[k];
+              onChange(next);
+            }}
+            className="text-ink-faint hover:text-accent-deep text-[14px]"
+            aria-label="remove"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => {
+          let i = 1;
+          while ((`new-${i}` in entries)) i += 1;
+          onChange({ ...entries, [`new-${i}`]: "" });
+        }}
+        className="font-mono text-[10px] tracking-wider uppercase text-ink-faint hover:text-ink"
+      >
+        ＋ add template
+      </button>
+    </div>
+  );
+}
+
 export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
   const qc = useQueryClient();
   const [form, setForm] = useState<PersonaIn>(
     mode.kind === "create" ? emptyForm() : fromPersona(mode.persona),
   );
 
-  const cleanLists = (body: PersonaIn): PersonaIn => ({
-    ...body,
-    voice_rules: body.voice_rules.filter(Boolean),
-    banned_terms: body.banned_terms.filter(Boolean),
-    required_phrasings: body.required_phrasings.filter(Boolean),
-    tone_examples: {
-      good: ((body.tone_examples.good ?? []) as string[]).filter(Boolean),
-      bad: ((body.tone_examples.bad ?? []) as string[]).filter(Boolean),
-    },
-  });
+  const cleanLists = (body: PersonaIn): PersonaIn => {
+    const cleanedDisclaimers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body.disclaimer_templates)) {
+      const trimmed = k.trim();
+      if (!trimmed || trimmed.startsWith("new-")) continue;
+      cleanedDisclaimers[trimmed] = v;
+    }
+    return {
+      ...body,
+      voice_rules: body.voice_rules.filter(Boolean),
+      banned_terms: body.banned_terms.filter(Boolean),
+      required_phrasings: body.required_phrasings.filter(Boolean),
+      disclaimer_templates: cleanedDisclaimers,
+      tone_examples: {
+        good: ((body.tone_examples.good ?? []) as string[]).filter(Boolean),
+        bad: ((body.tone_examples.bad ?? []) as string[]).filter(Boolean),
+      },
+    };
+  };
 
   const createMut = useMutation({
     mutationFn: (body: PersonaIn) => personasApi.create(body),
@@ -207,6 +281,11 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
             label="Required phrasings · 必用詞"
             values={form.required_phrasings}
             onChange={(next) => setForm({ ...form, required_phrasings: next })}
+          />
+          <KeyValueList
+            label="Disclaimer templates · 免責聲明"
+            entries={form.disclaimer_templates}
+            onChange={(next) => setForm({ ...form, disclaimer_templates: next })}
           />
           <StringList
             label="Tone — good · 好"
