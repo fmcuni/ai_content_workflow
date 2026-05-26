@@ -82,12 +82,20 @@ async def llm_audit_published(
     variant is preferable to reusing the full draft-audit prompt verbatim.
     """
     from datetime import date
+    from pathlib import Path
 
-    from content_tool.agents.audit import build_system_prompt, build_user_prompt
+    from content_tool.agents.audit import build_user_prompt
     from content_tool.models.audit import AuditOutput
+    from content_tool.policy.personas import load_persona_from_yaml
 
     effective_persona = persona or "default"
-    sys_prompt = build_system_prompt(effective_persona, date.today())
+    persona_pack = load_persona_from_yaml(effective_persona)
+    _audit_prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "audit.md"
+    sys_prompt = (
+        _audit_prompt_path.read_text(encoding="utf-8")
+        .replace("{persona_block}", persona_pack.to_prompt_block())
+        .replace("{today_date}", date.today().isoformat())
+    )
     user_prompt = build_user_prompt(
         html_body=html,
         gap_update_plan={},

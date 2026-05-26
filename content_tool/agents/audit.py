@@ -15,8 +15,10 @@ from content_tool.policy.personas import load_persona
 _PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "audit.md"
 
 
-def build_system_prompt(persona_name: str, today: date) -> str:
-    persona = load_persona(persona_name)
+async def build_system_prompt(
+    persona_name: str, today: date, *, session: AsyncSession
+) -> str:
+    persona = await load_persona(persona_name, session=session)
     return (
         _PROMPT_PATH.read_text(encoding="utf-8")
         .replace("{persona_block}", persona.to_prompt_block())
@@ -85,7 +87,7 @@ async def run_audit(
         render.html_body, citations_denied_displayed=denied_displayed
     )
 
-    sys_prompt = build_system_prompt(run.persona, today)
+    sys_prompt = await build_system_prompt(run.persona, today, session=session)
     user_prompt = build_user_prompt(
         html_body=render.html_body,
         gap_update_plan=ga.payload.get("update_plan", {}),

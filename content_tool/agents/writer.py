@@ -29,9 +29,11 @@ class WriterRunResult:
     draft_id: UUID
 
 
-def build_system_prompt(route: str, persona_name: str, today: date) -> str:
+async def build_system_prompt(
+    route: str, persona_name: str, today: date, *, session: AsyncSession
+) -> str:
     template = PROMPT_PATHS[route].read_text(encoding="utf-8")
-    persona = load_persona(persona_name)
+    persona = await load_persona(persona_name, session=session)
     return template.replace("{persona_block}", persona.to_prompt_block()).replace(
         "{today_date}", today.isoformat()
     )
@@ -85,7 +87,7 @@ async def run_writer(
     ).scalar_one()
 
     route = run.chosen_route or "small_refresh"
-    sys_prompt = build_system_prompt(route, run.persona, today)
+    sys_prompt = await build_system_prompt(route, run.persona, today, session=session)
     user_prompt = build_user_prompt(
         run=run,
         gap_analysis=ga.payload,
