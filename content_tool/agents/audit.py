@@ -10,18 +10,30 @@ from content_tool.agents.audit_checks import run_deterministic_checks
 from content_tool.db.models import AuditRun, Citation, Draft, GapAnalysisRow, Render, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.audit import AuditFinding, AuditOutput, SeveritySummary
+from content_tool.models.persona import PersonaPack
 from content_tool.policy.personas import load_persona
 
 _PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "audit.md"
 
 
-def build_system_prompt(persona_name: str, today: date) -> str:
-    persona = load_persona(persona_name)
+def build_system_prompt_from_pack(persona: PersonaPack, today: date) -> str:
+    """Render the audit system prompt from a pre-loaded PersonaPack.
+
+    Used by both the live audit (which loads from DB) and the refresh
+    evaluator (which loads from YAML, sessionless).
+    """
     return (
         _PROMPT_PATH.read_text(encoding="utf-8")
         .replace("{persona_block}", persona.to_prompt_block())
         .replace("{today_date}", today.isoformat())
     )
+
+
+async def build_system_prompt(
+    persona_name: str, today: date, *, session: AsyncSession
+) -> str:
+    persona = await load_persona(persona_name, session=session)
+    return build_system_prompt_from_pack(persona, today)
 
 
 def build_user_prompt(
@@ -85,7 +97,7 @@ async def run_audit(
         render.html_body, citations_denied_displayed=denied_displayed
     )
 
-    sys_prompt = build_system_prompt(run.persona, today)
+    sys_prompt = await build_system_prompt(run.persona, today, session=session)
     user_prompt = build_user_prompt(
         html_body=render.html_body,
         gap_update_plan=ga.payload.get("update_plan", {}),

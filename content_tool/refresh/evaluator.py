@@ -70,7 +70,9 @@ async def llm_audit_published(
 ) -> LLMFindings:
     """Run the existing audit prompt against published HTML.
 
-    Reuses build_system_prompt + build_user_prompt from content_tool/agents/audit.py.
+    Builds the system prompt inline against a YAML-loaded PersonaPack (no DB
+    session available in this path); reuses `build_user_prompt` from
+    content_tool/agents/audit.py.
     The production run_audit() is coupled to a DB session and cannot be used here;
     instead we call gemini_client.generate() directly with the same prompt pair.
 
@@ -83,11 +85,16 @@ async def llm_audit_published(
     """
     from datetime import date
 
-    from content_tool.agents.audit import build_system_prompt, build_user_prompt
+    from content_tool.agents.audit import build_system_prompt_from_pack, build_user_prompt
     from content_tool.models.audit import AuditOutput
+    from content_tool.policy.personas import load_persona_from_yaml
 
-    effective_persona = persona or "default"
-    sys_prompt = build_system_prompt(effective_persona, date.today())
+    # YAML-pin: evaluator runs without a DB session. After the personas
+    # table goes live (voices-page Task 6), editors can edit personas
+    # via the UI, but this path will not see those edits until refresh
+    # scanning is given a session. Threaded-session is out of scope here.
+    persona_pack = load_persona_from_yaml(persona or "bowtie-editor")
+    sys_prompt = build_system_prompt_from_pack(persona_pack, date.today())
     user_prompt = build_user_prompt(
         html_body=html,
         gap_update_plan={},

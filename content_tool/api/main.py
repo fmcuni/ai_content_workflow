@@ -12,6 +12,8 @@ from opentelemetry.instrumentation.fastapi import (
 from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
+from content_tool.api.routes.personas import router as personas_router
+from content_tool.api.routes.prompts import router as prompts_router
 from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.routes.wp_options import router as wp_options_router
@@ -99,6 +101,8 @@ def create_app() -> FastAPI:
     app.include_router(articles_router)
     app.include_router(compliance_router)
     app.include_router(costs_router)
+    app.include_router(personas_router)
+    app.include_router(prompts_router)
     app.include_router(refresh_router)
     app.include_router(wp_options_router)
     FastAPIInstrumentor().instrument_app(app)

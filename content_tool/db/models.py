@@ -16,11 +16,9 @@ from sqlalchemy import (  # noqa: F401
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship  # noqa: F401
+from sqlalchemy.orm import Mapped, mapped_column, relationship  # noqa: F401
 
-
-class Base(DeclarativeBase):
-    __table_args__ = {"schema": "content_tool"}  # noqa: RUF012
+from content_tool.db.base import Base
 
 
 class Run(Base):
@@ -319,3 +317,6 @@ class RefreshEvaluation(Base):
     tokens_out: Mapped[int | None]
     est_cost_usd_cents: Mapped[int | None]
     latency_ms: Mapped[int | None]
+
+
+from content_tool.db.persona_model import Persona  # noqa: E402, F401

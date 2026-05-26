@@ -1,7 +1,8 @@
 import type {
   Audit, Article, ArticleDetail, ArticleListResponse, CreateRunRequest, ExistingPost, GapAnalysis,
-  Hitl2Request, Outline, RefreshEvaluation, Render, RunSummary, ScanResponse,
-  WpCategoryOption, WpUserOption,
+  Hitl2Request, Outline, Persona, PersonaIn, PersonaPatch, PersonaUsage,
+  PromptGraph, PromptTemplate, RefreshEvaluation, Render, RunSummary, ScanResponse,
+  UserPromptExample, WpCategoryOption, WpUserOption,
 } from "./types";
 
 const BASE = "/api/runs";
@@ -76,4 +77,30 @@ export const refreshApi = {
     http<RefreshEvaluation>(`${REFRESH_BASE}/scan/${articleId}${force ? "?force=true" : ""}`, { method: "POST" }),
   getEvaluation: (evaluationId: string) =>
     http<RefreshEvaluation>(`${REFRESH_BASE}/evaluations/${evaluationId}`),
+};
+
+const PERSONAS_BASE = "/api/personas";
+const PROMPTS_BASE = "/api/prompts";
+
+export const personasApi = {
+  list: (includeArchived = false) =>
+    http<Persona[]>(`${PERSONAS_BASE}${includeArchived ? "?include_archived=true" : ""}`),
+  get: (slug: string) => http<Persona>(`${PERSONAS_BASE}/${slug}`),
+  create: (body: PersonaIn) =>
+    http<Persona>(PERSONAS_BASE, { method: "POST", body: JSON.stringify(body) }),
+  update: (slug: string, patch: PersonaPatch) =>
+    http<Persona>(`${PERSONAS_BASE}/${slug}`, { method: "PUT", body: JSON.stringify(patch) }),
+  archive: (slug: string) =>
+    http<Persona>(`${PERSONAS_BASE}/${slug}/archive`, { method: "POST" }),
+  restore: (slug: string) =>
+    http<Persona>(`${PERSONAS_BASE}/${slug}/restore`, { method: "POST" }),
+  usage: (slug: string) =>
+    http<PersonaUsage>(`${PERSONAS_BASE}/${slug}/usage`),
+};
+
+export const promptsApi = {
+  graph: () => http<PromptGraph>(`${PROMPTS_BASE}/graph`),
+  template: (id: string) => http<PromptTemplate>(`${PROMPTS_BASE}/templates/${id}`),
+  userExample: (runId: string, agent: string) =>
+    http<UserPromptExample>(`${PROMPTS_BASE}/user-example?run_id=${runId}&agent=${agent}`),
 };
