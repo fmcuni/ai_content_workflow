@@ -205,3 +205,82 @@ export interface ExistingPost {
   wp_category_id: number | null;
   wp_slug: string | null;
 }
+
+export interface Persona {
+  persona_id: string;
+  slug: string;
+  name: string;
+  voice_rules: string[];
+  banned_terms: string[];
+  required_phrasings: string[];
+  disclaimer_templates: Record<string, string>;
+  tone_examples: { good: string[]; bad: string[] };
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+export interface PersonaIn {
+  slug: string;
+  name: string;
+  voice_rules: string[];
+  banned_terms: string[];
+  required_phrasings: string[];
+  disclaimer_templates: Record<string, string>;
+  tone_examples: { good: string[]; bad: string[] };
+}
+
+export interface PersonaPatch {
+  name?: string;
+  voice_rules?: string[];
+  banned_terms?: string[];
+  required_phrasings?: string[];
+  disclaimer_templates?: Record<string, string>;
+  tone_examples?: { good: string[]; bad: string[] };
+}
+
+export interface PersonaUsage {
+  slug: string;
+  by_status: Record<string, number>;
+  total: number;
+}
+
+export type PromptKind = "llm" | "deterministic";
+
+export interface PromptNode {
+  id: string;
+  sub_graph: "strategy" | "production" | "publish";
+  order: number;
+  kind: PromptKind;
+  uses_persona: boolean;
+  system_prompt_template_id: string | null;
+  alt_template_ids?: string[];
+  description: string;
+}
+
+export interface PromptEdge { from: string; to: string; label?: string }
+export interface PromptGate {
+  id: "HITL_1" | "HITL_2";
+  before: string;
+  label: string;
+  description: string;
+}
+
+export interface PromptGraph {
+  nodes: PromptNode[];
+  edges: PromptEdge[];
+  gates: PromptGate[];
+}
+
+export interface PromptTemplate {
+  template_id: string;
+  template: string;
+}
+
+export interface UserPromptExample {
+  run_id: string;
+  agent: string;
+  prompt: string;
+}
