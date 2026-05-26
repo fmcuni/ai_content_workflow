@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Runs" },
   { href: "/library", label: "Library" },
+  { href: "/voices", label: "Voices" },
 ];
 
 function isoWeek(d: Date): number {
