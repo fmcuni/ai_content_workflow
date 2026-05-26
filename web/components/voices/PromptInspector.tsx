@@ -1,18 +1,55 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { promptsApi } from "@/lib/api";
 import type { PromptNode } from "@/lib/types";
+import { UserExamplePicker } from "./UserExamplePicker";
+
+const USER_PROMPT_SCHEMAS: Record<string, { field: string; source: string }[]> = {
+  gap_analysis: [
+    { field: "topic", source: "runs.topic" },
+    { field: "focus_keywords", source: "runs.keywords" },
+    { field: "existing_article", source: "runs.article_url" },
+    { field: "acf_adv_id", source: "runs.acf_adv_id" },
+    { field: "acf_widget_id", source: "runs.acf_widget_id" },
+    { field: "route", source: "runs.mode" },
+    { field: "article_edit_note", source: "runs.edit_note" },
+  ],
+  outline: [
+    { field: "chosen_route", source: "runs.chosen_route" },
+    { field: "acf_adv_id", source: "runs.acf_adv_id" },
+    { field: "acf_widget_id", source: "runs.acf_widget_id" },
+    { field: "gap_analysis", source: "gap_analyses.payload" },
+    { field: "existing_article_markdown", source: "fetched_articles.markdown" },
+  ],
+  writer: [
+    { field: "topic", source: "runs.topic" },
+    { field: "focus_keywords", source: "runs.keywords" },
+    { field: "existing_article_URL", source: "runs.article_url" },
+    { field: "acf_adv_id", source: "runs.acf_adv_id" },
+    { field: "acf_widget_id", source: "runs.acf_widget_id" },
+    { field: "topic_category", source: "runs.topic_category" },
+    { field: "outline", source: "outlines.payload" },
+    { field: "gap_analysis", source: "gap_analyses.payload" },
+    { field: "existing_article_markdown", source: "fetched_articles.markdown" },
+    { field: "refine_notes", source: "audit_runs.findings (must_fix) + reviewer comments" },
+  ],
+  audit: [
+    { field: "final_html", source: "renders.html_body" },
+    { field: "gap_analysis.update_plan", source: "gap_analyses.payload.update_plan" },
+    { field: "citation_intents", source: "drafts.citation_intents" },
+    { field: "citations", source: "citations table (resolved)" },
+    { field: "deterministic_findings", source: "audit_runs.deterministic_findings" },
+  ],
+};
 
 interface PromptInspectorProps {
   node: PromptNode;
-  /** runId picker UI is added in Task 18. */
-  userPromptSlot?: React.ReactNode;
 }
 
-export function PromptInspector({ node, userPromptSlot }: PromptInspectorProps) {
+export function PromptInspector({ node }: PromptInspectorProps) {
   const templateIds = [
     node.system_prompt_template_id,
     ...(node.alt_template_ids ?? []),
@@ -60,9 +97,19 @@ export function PromptInspector({ node, userPromptSlot }: PromptInspectorProps) 
       </div>
       <div>
         <p className="kicker mb-2">User prompt</p>
-        {userPromptSlot ?? (
-          <p className="text-ink-faint text-[12px]">User prompt picker coming next.</p>
-        )}
+        <UserExamplePicker
+          agent={node.id}
+          schemaHint={
+            <dl className="grid grid-cols-[160px_1fr] gap-x-3 gap-y-1 text-[12px]">
+              {(USER_PROMPT_SCHEMAS[node.id] ?? []).map((s) => (
+                <Fragment key={s.field}>
+                  <dt className="font-mono uppercase tracking-wider text-ink-faint">{s.field}</dt>
+                  <dd className="text-ink-soft">{s.source}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          }
+        />
       </div>
     </div>
   );
