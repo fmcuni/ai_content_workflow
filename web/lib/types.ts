@@ -214,7 +214,7 @@ export interface Persona {
   banned_terms: string[];
   required_phrasings: string[];
   disclaimer_templates: Record<string, string>;
-  tone_examples: { good: string[]; bad: string[] };
+  tone_examples: Record<string, string[]>;
   is_archived: boolean;
   created_at: string;
   updated_at: string;
@@ -229,7 +229,7 @@ export interface PersonaIn {
   banned_terms: string[];
   required_phrasings: string[];
   disclaimer_templates: Record<string, string>;
-  tone_examples: { good: string[]; bad: string[] };
+  tone_examples: Record<string, string[]>;
 }
 
 export interface PersonaPatch {
@@ -238,7 +238,7 @@ export interface PersonaPatch {
   banned_terms?: string[];
   required_phrasings?: string[];
   disclaimer_templates?: Record<string, string>;
-  tone_examples?: { good: string[]; bad: string[] };
+  tone_examples?: Record<string, string[]>;
 }
 
 export interface PersonaUsage {
