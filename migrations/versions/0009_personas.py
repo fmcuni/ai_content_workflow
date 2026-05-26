@@ -5,16 +5,54 @@ Revises: 0008
 Create Date: 2026-05-26
 """
 
-from pathlib import Path
-
 import sqlalchemy as sa
-import yaml
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
 revision = "0009"
 down_revision = "0008"
+
+# Inline snapshot of config/personas/bowtie-editor.yaml taken 2026-05-26.
+# Inlining makes this migration a self-contained historical record that does
+# not depend on the file being present at upgrade time.
+_BOWTIE_EDITOR_SEED = {
+    "name": "Bowtie 編輯",
+    "voice_rules": [
+        "用字自然、清晰、專業",
+        "避免空泛套話與過度推銷",
+        "避免內地用語（信息、软件、网络、视频）",
+        "優先使用香港讀者熟悉的詞彙與例子",
+    ],
+    "banned_terms": [
+        "信息",
+        "软件",
+        "网络",
+        "视频",
+        "优势",
+        "注释",
+    ],
+    "required_phrasings": [
+        "自願醫保",
+        "強積金",
+        "危疾保",
+        "扣稅",
+    ],
+    "disclaimer_templates": {
+        "medical": "本文僅供參考，並非醫療建議。如有疑問請諮詢註冊醫生。",
+        "insurance": "本文僅供參考，實際保障條款以保單為準。",
+    },
+    "tone_examples": {
+        "good": [
+            "如果你最近開始留意自願醫保扣稅，以下幾點值得先弄清楚...",
+            "簡單來說，第三期的存活率比想像中高，但前提是要...",
+        ],
+        "bad": [
+            "本文将为您详细介绍...",
+            "希望本文能够帮助到大家。",
+        ],
+    },
+}
 
 
 def upgrade() -> None:
@@ -40,23 +78,22 @@ def upgrade() -> None:
         schema="content_tool",
     )
 
-    # Seed bowtie-editor from the YAML file so existing runs continue to resolve.
-    yaml_path = Path(__file__).resolve().parents[2] / "config" / "personas" / "bowtie-editor.yaml"
-    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    seed = _BOWTIE_EDITOR_SEED
     op.execute(
         sa.text(
             "INSERT INTO content_tool.personas "
             "(slug, name, voice_rules, banned_terms, required_phrasings, "
             " disclaimer_templates, tone_examples) "
-            "VALUES (:slug, :name, :vr, :bt, :rp, :dt, :te)"
+            "VALUES (:slug, :name, :vr, :bt, :rp, :dt, :te) "
+            "ON CONFLICT (slug) DO NOTHING"
         ).bindparams(
             sa.bindparam("slug", "bowtie-editor"),
-            sa.bindparam("name", raw["name"]),
-            sa.bindparam("vr", raw["voice_rules"], type_=postgresql.JSONB),
-            sa.bindparam("bt", raw["banned_terms"], type_=postgresql.JSONB),
-            sa.bindparam("rp", raw["required_phrasings"], type_=postgresql.JSONB),
-            sa.bindparam("dt", raw["disclaimer_templates"], type_=postgresql.JSONB),
-            sa.bindparam("te", raw["tone_examples"], type_=postgresql.JSONB),
+            sa.bindparam("name", seed["name"]),
+            sa.bindparam("vr", seed["voice_rules"], type_=postgresql.JSONB),
+            sa.bindparam("bt", seed["banned_terms"], type_=postgresql.JSONB),
+            sa.bindparam("rp", seed["required_phrasings"], type_=postgresql.JSONB),
+            sa.bindparam("dt", seed["disclaimer_templates"], type_=postgresql.JSONB),
+            sa.bindparam("te", seed["tone_examples"], type_=postgresql.JSONB),
         )
     )
 
