@@ -110,3 +110,63 @@ async def test_usage_endpoint_counts_runs(api_client: AsyncClient):
     assert body["slug"] == "bowtie-editor"
     assert "by_status" in body
     assert "total" in body
+
+
+@pytest.mark.asyncio
+async def test_get_unknown_slug_404(api_client: AsyncClient):
+    r = await api_client.get("/personas/does-not-exist")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_unknown_slug_404(api_client: AsyncClient):
+    r = await api_client.put("/personas/does-not-exist", json={"name": "X"})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_archive_unknown_slug_404(api_client: AsyncClient):
+    r = await api_client.post("/personas/does-not-exist/archive")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_restore_unknown_slug_404(api_client: AsyncClient):
+    r = await api_client.post("/personas/does-not-exist/restore")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_usage_unknown_slug_404(api_client: AsyncClient):
+    r = await api_client.get("/personas/does-not-exist/usage")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_put_with_slug_field_is_silently_ignored(
+    api_client: AsyncClient, pg_session_factory
+):
+    create = {
+        "slug": "immutable-test", "name": "Original",
+        "voice_rules": [], "banned_terms": [], "required_phrasings": [],
+        "disclaimer_templates": {}, "tone_examples": {"good": [], "bad": []},
+    }
+    await api_client.post("/personas", json=create)
+    try:
+        r = await api_client.put(
+            "/personas/immutable-test",
+            json={"slug": "renamed", "name": "Updated"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["slug"] == "immutable-test"  # slug NOT changed
+        assert body["name"] == "Updated"
+        # And the "renamed" slug shouldn't exist
+        r2 = await api_client.get("/personas/renamed")
+        assert r2.status_code == 404
+    finally:
+        async with pg_session_factory() as s:
+            await s.execute(
+                delete(Persona).where(Persona.slug == "immutable-test")
+            )
+            await s.commit()
