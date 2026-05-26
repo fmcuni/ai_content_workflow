@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { SectionHead } from "@/components/SectionHead";
 import { Rolodex } from "@/components/voices/Rolodex";
+import { StyleCard } from "@/components/voices/StyleCard";
 import { personasApi, promptsApi } from "@/lib/api";
 
 export default function VoicesPage() {
@@ -66,9 +67,18 @@ export default function VoicesPage() {
         </label>
       </section>
 
-      {/* Movement 2: Style Card — replaced in Task 15 */}
+      {/* Movement 2: Style Card */}
       <section aria-label="style-card">
-        <p className="text-ink-faint text-[12px]">Style Card placeholder</p>
+        {personas.data && activeSlug && (() => {
+          const selected = personas.data.find((p) => p.slug === activeSlug);
+          if (!selected) return null;
+          return (
+            <StyleCard
+              persona={selected}
+              onEdit={() => setComposeMode({ kind: "edit", slug: selected.slug })}
+            />
+          );
+        })()}
       </section>
 
       {/* Movement 3+4: Press Workflow — replaced in Task 16+ */}
