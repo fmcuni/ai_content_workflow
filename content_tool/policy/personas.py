@@ -12,6 +12,16 @@ from content_tool.models.persona import PersonaPack
 
 _DEFAULT_PERSONA_DIR = Path(__file__).resolve().parents[2] / "config" / "personas"
 
+_PERSONA_PATCH_KEYS = {
+    "name",
+    "voice_rules",
+    "banned_terms",
+    "required_phrasings",
+    "disclaimer_templates",
+    "tone_examples",
+    "is_archived",
+}
+
 
 def load_persona_from_yaml(
     name: str, base_dir: Path = _DEFAULT_PERSONA_DIR
@@ -105,6 +115,8 @@ async def update_persona(
     for key, value in patch.items():
         if key == "slug":
             continue
+        if key not in _PERSONA_PATCH_KEYS:
+            raise ValueError(f"unknown persona field: {key!r}")
         setattr(row, key, value)
     row.updated_at = datetime.now(UTC)
     row.updated_by = updated_by
@@ -114,8 +126,8 @@ async def update_persona(
 
 
 async def set_archived(
-    *, session: AsyncSession, slug: str, archived: bool
+    *, session: AsyncSession, slug: str, archived: bool, updated_by: str | None = None,
 ) -> Persona:
     return await update_persona(
-        session=session, slug=slug, patch={"is_archived": archived}
+        session=session, slug=slug, patch={"is_archived": archived}, updated_by=updated_by,
     )
