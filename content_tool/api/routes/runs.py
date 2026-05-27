@@ -151,6 +151,7 @@ async def list_runs(
                 "iteration_count": r.iteration_count,
                 "start_mode": r.start_mode,
                 "target_audience": r.target_audience,
+                "keywords": r.keywords,
             }
             for r in rows
         ]

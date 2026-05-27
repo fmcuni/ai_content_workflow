@@ -60,6 +60,7 @@ interface DeskItem {
   categoryNote?: string;
   title: string;
   subtitle: string;
+  keywords?: string[];
   rowHref: string;
   action: string | null;
   createdAt: string;
@@ -117,6 +118,7 @@ function runToItem(r: RunSummary): DeskItem {
     categoryNote,
     title: r.topic,
     subtitle,
+    keywords: r.keywords,
     rowHref: action ? runActionHref(r) : `/runs/${r.run_id}`,
     action,
     createdAt: r.created_at,
@@ -175,6 +177,18 @@ function DeskRow({ item, accent }: { item: DeskItem; accent?: boolean }) {
             {item.title}
           </p>
           <p className="font-sans text-[12px] text-ink-faint truncate mt-1">{item.subtitle}</p>
+          {item.keywords && item.keywords.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5 mt-1.5">
+              {item.keywords.map((kw) => (
+                <li
+                  key={kw}
+                  className="font-mono text-[10px] tracking-[0.04em] text-ink-soft border border-rule rounded-sm px-1.5 py-0.5 bg-paper-deep/40"
+                >
+                  {kw}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-1.5 text-right">
           <StatusStamp item={item} />

@@ -19,6 +19,7 @@ export interface RunSummary {
   start_mode?: StartMode;
   topic_candidate_id?: string | null;
   target_audience?: string | null;
+  keywords?: string[];
   error?: { type: string; message: string } | null;
 }
 
