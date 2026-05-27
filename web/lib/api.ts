@@ -1,10 +1,12 @@
 import type {
   ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
-  Hitl2Request, Outline, PatchCandidateIn, Persona, PersonaIn, PersonaPatch, PersonaUsage,
-  PromoteRequest, PromoteResponse, PromptGraph, PromptTemplate, RefreshEvaluation, Render,
-  RepublishResponse, RunSummary, ScanResponse, TopicBatch, TopicBatchCreateResponse, TopicBatchIn,
-  TopicCandidate, UserPromptExample, WpCategoryOption, WpUserOption,
+  Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
+  PersonaPatch, PersonaUsage,
+  PromoteRequest, PromoteResponse, PromptGraph, PromptTemplate, RefreshEvaluation,
+  RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse, TopicBatch,
+  TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample, WpCategoryOption,
+  WpUserOption,
 } from "./types";
 
 const BASE = "/api/runs";
@@ -52,6 +54,13 @@ export const api = {
     http(`${BASE}/${runId}/hitl-2`, { method: "POST", body: JSON.stringify(body) }),
   restartRun: (runId: string) =>
     http<{ ok: boolean }>(`${BASE}/${runId}/restart`, { method: "POST" }),
+  deleteRun: (runId: string) =>
+    http<{ ok: boolean }>(`${BASE}/${runId}`, { method: "DELETE" }),
+  regenerate: (runId: string, body: RegenerateRequest) =>
+    http<{ ok: boolean; iteration: number; draft_id: string }>(
+      `${BASE}/${runId}/regenerate`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   dryPublish: (runId: string, body?: DryPublishRequest) =>
     http<DryPublishResponse>(`${BASE}/${runId}/dry-publish`, {
       method: "POST",
@@ -63,6 +72,20 @@ export const api = {
     http<ExistingPost>(`${BASE}/${runId}/existing-post/refresh`, { method: "POST" }),
   listWpUsers: () => http<WpUserOption[]>("/api/wp-options/users"),
   listWpCategories: () => http<WpCategoryOption[]>("/api/wp-options/categories"),
+  saveHitl2Snapshot: (runId: string, body: Hitl2SnapshotIn) =>
+    http<Hitl2Snapshot>(`${BASE}/${runId}/hitl2-snapshots`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listHitl2Snapshots: (runId: string) =>
+    http<Hitl2Snapshot[]>(`${BASE}/${runId}/hitl2-snapshots`),
+  // Fire-and-forget save for tab close / reload, where an awaited fetch would be
+  // cancelled. sendBeacon survives page teardown; returns false if it couldn't queue.
+  beaconHitl2Snapshot: (runId: string, body: Hitl2SnapshotIn): boolean => {
+    if (typeof navigator === "undefined" || !navigator.sendBeacon) return false;
+    const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
+    return navigator.sendBeacon(`${BASE}/${runId}/hitl2-snapshots`, blob);
+  },
 };
 
 const ARTICLES_BASE = "/api/articles";
@@ -155,6 +178,8 @@ export const topicBatchesApi = {
     ),
   close: (batchId: string) =>
     http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}/close`, { method: "POST" }),
+  delete: (batchId: string) =>
+    http<{ ok: boolean }>(`${TOPIC_BATCHES_BASE}/${batchId}`, { method: "DELETE" }),
 };
 
 export const promptsApi = {

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { personasApi, topicBatchesApi } from "@/lib/api";
 import type {
   Persona,
@@ -30,6 +31,8 @@ interface LocalRowState {
   acf_widget_id: number;
   promote_mode: "create" | "refresh";
   selected: boolean;
+  edit_note: string;
+  noteOpen: boolean;
 }
 
 function rowFromCandidate(c: TopicCandidate, fallbackPersona: string): LocalRowState {
@@ -41,6 +44,8 @@ function rowFromCandidate(c: TopicCandidate, fallbackPersona: string): LocalRowS
     acf_widget_id: c.acf_widget_id ?? 1,
     promote_mode: c.promote_mode ?? "create",
     selected: c.status === "candidate" && c.existing === "no",
+    edit_note: c.operator_note ?? "",
+    noteOpen: false,
   };
 }
 
@@ -339,6 +344,11 @@ function CandidateRow({
       .filter(Boolean);
     onPatchServer({ keywords: kws, editor_email: "" });
   }
+  function commitNote(value: string) {
+    onLocal({ edit_note: value });
+    onPatchServer({ operator_note: value, editor_email: "" });
+  }
+  const hasNote = local.edit_note.trim().length > 0;
 
   const selectClasses =
     "h-9 w-full bg-transparent text-[13px] text-ink border-0 border-b border-rule rounded-none px-0 py-1.5 outline-none focus-visible:border-b-2 focus-visible:border-accent appearance-none cursor-pointer";
@@ -394,6 +404,21 @@ function CandidateRow({
             <p className="mt-0.5 font-mono text-[10px] text-ink-faint">
               last edit · {c.last_edited_by}
             </p>
+          )}
+          {(editable || hasNote) && (
+            <button
+              type="button"
+              onClick={() => onLocal({ noteOpen: !local.noteOpen })}
+              aria-expanded={local.noteOpen}
+              className={cn(
+                "mt-1 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] transition-colors",
+                hasNote ? "text-accent-deep" : "text-ink-faint hover:text-ink",
+              )}
+            >
+              <span>{local.noteOpen ? "▾" : "▸"}</span>
+              <span>edit note{hasNote ? " ·" : ""}</span>
+              {hasNote && <span className="size-1.5 rounded-full bg-accent-deep" />}
+            </button>
           )}
         </div>
 
@@ -520,6 +545,27 @@ function CandidateRow({
           )}
         </div>
       </div>
+
+      {local.noteOpen && (
+        <div className="border-t border-rule bg-paper-deep/40 px-3 py-3">
+          <label className="flex flex-col gap-1">
+            <span className="kicker">Edit note · per-article instruction</span>
+            {editable ? (
+              <Textarea
+                value={local.edit_note}
+                onChange={(e) => commitNote(e.target.value)}
+                rows={2}
+                placeholder="What the desk wants on this article (steers the outline & draft)."
+                className="bg-paper text-[13px]"
+              />
+            ) : (
+              <p className="text-[13px] text-ink whitespace-pre-wrap">
+                {local.edit_note || "—"}
+              </p>
+            )}
+          </label>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,20 +15,26 @@ from content_tool.api.schemas import (
     DryPublishResponse,
     ExistingPostOut,
     Hitl2Request,
+    Hitl2SnapshotIn,
+    Hitl2SnapshotOut,
     OutlineEditRequest,
+    RegenerateRequest,
     RepublishResponse,
     ResumeRequest,
 )
 from content_tool.api.sse import sse_stream
 from content_tool.db.models import (
     AuditRun,
+    ComplianceLog,
     Draft,
     FetchedArticle,
     GapAnalysisRow,
+    Hitl2Snapshot,
     OutlineRow,
     RefreshEvaluation,
     Render,
     Run,
+    TopicCandidate,
 )
 from content_tool.refresh.inventory import upsert_article
 
@@ -155,6 +161,10 @@ async def list_runs(
                 "start_mode": r.start_mode,
                 "target_audience": r.target_audience,
                 "keywords": r.keywords,
+                "persona": r.persona,
+                "acf_adv_id": r.acf_adv_id,
+                "acf_widget_id": r.acf_widget_id,
+                "edit_note": r.edit_note,
             }
             for r in rows
         ]
@@ -172,6 +182,11 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             "topic": row.topic,
             "article_url": row.article_url,
             "mode": row.mode,
+            "keywords": row.keywords,
+            "persona": row.persona,
+            "acf_adv_id": row.acf_adv_id,
+            "acf_widget_id": row.acf_widget_id,
+            "edit_note": row.edit_note,
             "chosen_route": row.chosen_route,
             "iteration_count": row.iteration_count,
             # Timestamps / identity
@@ -200,6 +215,53 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             # Generic graph error
             "error": row.error,
         }
+
+
+# Statuses where the LangGraph is still actively driving the run; deleting its
+# rows mid-flight would race the executor, so these are refused.
+_IN_MOTION_STATUSES = frozenset({"pending", "fetching", "strategy", "production"})
+
+
+@router.delete("/{run_id}")
+async def delete_run(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    runner=Depends(get_runner),  # noqa: ANN001, B008
+) -> dict:
+    """Hard-delete a run and everything derived from it.
+
+    Content artifacts (gap analysis, fetched article, outline, drafts →
+    citations / renders / audits) fall away via ``ON DELETE CASCADE``. The
+    ``compliance_log`` row and the soft back-references that point *at* this run
+    (``topic_candidates.promoted_run_id``, ``refresh_evaluations.resulting_run_id``)
+    do not cascade, so they are cleared explicitly first. Any in-flight run is
+    first cancelled (its background task stopped and checkpoint dropped) so the
+    delete can't race the executor.
+    """
+    from sqlalchemy import delete, update
+
+    # Stop the executor before touching rows — no-op for runs with no live task.
+    await runner.cancel(run_id)
+
+    async with sf() as session:
+        row = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "run not found")
+
+        await session.execute(
+            update(TopicCandidate)
+            .where(TopicCandidate.promoted_run_id == run_id)
+            .values(promoted_run_id=None)
+        )
+        await session.execute(
+            update(RefreshEvaluation)
+            .where(RefreshEvaluation.resulting_run_id == run_id)
+            .values(resulting_run_id=None)
+        )
+        await session.execute(delete(ComplianceLog).where(ComplianceLog.run_id == run_id))
+        await session.execute(delete(Run).where(Run.run_id == run_id))
+        await session.commit()
+    return {"ok": True}
 
 
 @router.get("/{run_id}/events")
@@ -329,6 +391,86 @@ async def hitl_2(
 
     await runner.resume(run_id, state_update)
     return {"ok": True}
+
+
+# How many autosave / version-history snapshots to retain per run. Older rows
+# are pruned on each save so the history list stays bounded.
+_HITL2_SNAPSHOT_KEEP = 50
+
+
+@router.post("/{run_id}/hitl2-snapshots", response_model=Hitl2SnapshotOut)
+async def save_hitl2_snapshot(
+    run_id: UUID,
+    payload: Hitl2SnapshotIn,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> Hitl2Snapshot:
+    """Persist one autosave / version-history snapshot for the HITL_2 galley.
+
+    Captures the reviewer's combined working state (editor body, SEO/WP
+    metadata, notes, anchored comments). Prunes to the newest
+    ``_HITL2_SNAPSHOT_KEEP`` rows so history stays bounded.
+    """
+    from sqlalchemy import delete
+
+    async with sf() as session:
+        run = (
+            await session.execute(select(Run).where(Run.run_id == run_id))
+        ).scalar_one_or_none()
+        if not run:
+            raise HTTPException(404, "run not found")
+
+        snap = Hitl2Snapshot(
+            snapshot_id=uuid4(),
+            run_id=run_id,
+            created_by="placeholder-editor",  # Plan 4 binds real identity
+            trigger=payload.trigger,
+            html_body=payload.html_body,
+            seo_title=payload.seo_title,
+            meta_description=payload.meta_description,
+            notes=payload.notes,
+            comments=[c.model_dump() for c in payload.comments] if payload.comments else None,
+            wp_publish_status=payload.wp_publish_status,
+            wp_author_id=payload.wp_author_id,
+            wp_category_ids=payload.wp_category_ids,
+            wp_tag_ids=payload.wp_tag_ids,
+            wp_featured_media_id=payload.wp_featured_media_id,
+            wp_slug=payload.wp_slug,
+            wp_excerpt=payload.wp_excerpt,
+            wp_publish_at=payload.wp_publish_at,
+        )
+        session.add(snap)
+        await session.flush()
+
+        stale = (
+            select(Hitl2Snapshot.snapshot_id)
+            .where(Hitl2Snapshot.run_id == run_id)
+            .order_by(Hitl2Snapshot.created_at.desc())
+            .offset(_HITL2_SNAPSHOT_KEEP)
+        )
+        await session.execute(
+            delete(Hitl2Snapshot).where(Hitl2Snapshot.snapshot_id.in_(stale))
+        )
+        await session.commit()
+        await session.refresh(snap)
+        return snap
+
+
+@router.get("/{run_id}/hitl2-snapshots", response_model=list[Hitl2SnapshotOut])
+async def list_hitl2_snapshots(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> list[Hitl2Snapshot]:
+    """List the run's autosave / version-history snapshots, newest first."""
+    async with sf() as session:
+        rows = (
+            await session.execute(
+                select(Hitl2Snapshot)
+                .where(Hitl2Snapshot.run_id == run_id)
+                .order_by(Hitl2Snapshot.created_at.desc())
+                .limit(_HITL2_SNAPSHOT_KEEP)
+            )
+        ).scalars().all()
+        return list(rows)
 
 
 @router.get("/{run_id}/gap-analysis")
@@ -533,6 +675,115 @@ async def republish(
         "link": result.get("link"),
         "status": result["status"],
     }
+
+
+def _refine_notes_from_feedback(payload: RegenerateRequest) -> list[dict] | None:
+    """Translate reviewer feedback into the writer's ``refine_notes`` shape.
+
+    Mirrors the HITL_2 path in ``graph/production.py`` so post-hoc regeneration
+    feeds the writer the same way an in-flight ``request_changes`` would.
+    """
+    notes: list[dict] = []
+    for c in payload.comments or []:
+        notes.append({
+            "source": "reviewer",
+            "severity": "high",
+            "must_fix": True,
+            "issue": f'On span "{c.anchor_text}": {c.body}',
+        })
+    if payload.notes:
+        notes.append({
+            "source": "reviewer-overall",
+            "severity": "high",
+            "must_fix": True,
+            "issue": f"Overall reviewer note: {payload.notes}",
+        })
+    return notes or None
+
+
+@router.post("/{run_id}/regenerate")
+async def regenerate_run(
+    run_id: UUID,
+    payload: RegenerateRequest,
+    request: Request,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Re-run the AI on a finished run using editor comments, like HITL_2.
+
+    Runs writer → resolve_citations → render → audit at a fresh iteration
+    (preserving prior drafts) so the new render becomes the latest. The operator
+    then verifies and re-pushes from the standalone edit page — nothing is
+    published here. Refused while the run is still in flight.
+    """
+    from content_tool.agents.audit import run_audit
+    from content_tool.agents.render_html import run_render_html
+    from content_tool.agents.resolve_citations import run_resolve_citations
+    from content_tool.agents.writer import run_writer
+
+    gemini = getattr(request.app.state, "gemini_client", None)
+    if gemini is None:
+        raise HTTPException(503, "Gemini client not configured")
+
+    draft_q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+    async with sf() as session:
+        run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one_or_none()
+        if not run:
+            raise HTTPException(404, "run not found")
+        if run.status in _IN_MOTION_STATUSES or run.status in {"hitl_1", "hitl_2"}:
+            raise HTTPException(409, "run is still in flight — use the HITL gates instead")
+        latest_draft = (await session.execute(draft_q)).scalar_one_or_none()
+        if not latest_draft:
+            raise HTTPException(409, "run has no draft to regenerate")
+        topic_category = run.topic_category
+        today = run.today_date
+        prev_hitl_2_iteration = run.hitl_2_iteration
+        new_iter = latest_draft.iteration + 1
+
+    refine_notes = _refine_notes_from_feedback(payload)
+
+    async with sf() as session:
+        result = await run_writer(
+            session=session,
+            gemini=gemini,
+            run_id=run_id,
+            iteration=new_iter,
+            today=today,
+            refine_notes=refine_notes,
+        )
+    draft_id = result.draft_id
+    async with sf() as session:
+        await run_resolve_citations(
+            session=session, draft_id=draft_id, topic_category=topic_category
+        )
+    async with sf() as session:
+        await run_render_html(session=session, draft_id=draft_id)
+    async with sf() as session:
+        await run_audit(
+            session=session,
+            gemini=gemini,
+            draft_id=draft_id,
+            topic_category=topic_category,
+            today=today,
+        )
+
+    from sqlalchemy import update
+
+    async with sf() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.run_id == run_id)
+            .values(
+                iteration_count=new_iter,
+                hitl_2_notes=payload.notes,
+                hitl_2_comments=(
+                    [c.model_dump() for c in payload.comments] if payload.comments else None
+                ),
+                hitl_2_iteration=prev_hitl_2_iteration + 1,
+            )
+        )
+        await session.commit()
+
+    return {"ok": True, "iteration": new_iter, "draft_id": str(draft_id)}
 
 
 @router.get("/{run_id}/audit")

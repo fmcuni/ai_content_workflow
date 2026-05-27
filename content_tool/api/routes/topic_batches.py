@@ -144,6 +144,34 @@ class TopicBatchExecutor:
     async def start(self, batch_id: UUID, payload: TopicBatchIn) -> None:
         self._tasks[batch_id] = asyncio.create_task(self._run(batch_id, payload))
 
+    async def cancel(self, batch_id: UUID) -> None:
+        """Stop any in-flight generation task for this batch and drop its state.
+
+        Mirrors ``RunExecutor.cancel`` — used before a hard-delete so the graph
+        isn't still writing candidate rows that are about to be removed. Safe to
+        call when there is no live task.
+        """
+        task = self._tasks.pop(batch_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(
+                    "error awaiting cancelled batch task", extra={"batch_id": str(batch_id)}
+                )
+        try:
+            async with make_checkpointer(self._postgres_url) as cp:
+                await cp.adelete_thread(str(batch_id))
+        except Exception:
+            logger.exception(
+                "failed to delete batch checkpoint thread", extra={"batch_id": str(batch_id)}
+            )
+        self._history.pop(batch_id, None)
+        self._subscribers.pop(batch_id, None)
+
     async def _run(self, batch_id: UUID, payload: TopicBatchIn) -> None:
         try:
             async with make_checkpointer(self._postgres_url) as cp:
@@ -494,6 +522,7 @@ async def promote_candidates(
                 "start_mode": item.mode,
                 "topic_candidate_id": cand.candidate_id,
                 "target_audience": batch.target_audience,
+                "edit_note": (cand.operator_note or "").strip() or None,
             }
             if item.mode == "refresh":
                 run_payload_kwargs["article_url"] = cand.existing_url
@@ -555,6 +584,41 @@ async def skip_candidate(
         await session.commit()
         await session.refresh(cand)
         return _candidate_to_out(cand)
+
+
+@router.delete("/{batch_id}")
+async def delete_topic_batch(
+    batch_id: UUID,
+    sf: async_sessionmaker[Any] = Depends(get_session_factory),  # noqa: B008
+    executor: TopicBatchExecutor = Depends(get_batch_executor),  # noqa: B008
+) -> dict[str, bool]:
+    """Hard-delete a topic batch and its candidates.
+
+    Candidates fall away via ``ON DELETE CASCADE``. Runs promoted from this
+    batch are *kept* — their soft back-reference ``runs.topic_candidate_id`` is
+    cleared first so the candidate rows can be removed without violating the FK.
+    Any in-flight generation task is cancelled before the rows are touched.
+    """
+    from sqlalchemy import delete
+
+    from content_tool.db.models import Run
+
+    # Stop the generator before touching rows — no-op when there's no live task.
+    await executor.cancel(batch_id)
+
+    async with sf() as session:
+        await _load_batch_or_404(session, batch_id)
+        candidate_ids = select(TopicCandidate.candidate_id).where(
+            TopicCandidate.batch_id == batch_id
+        )
+        await session.execute(
+            update(Run)
+            .where(Run.topic_candidate_id.in_(candidate_ids))
+            .values(topic_candidate_id=None)
+        )
+        await session.execute(delete(TopicBatch).where(TopicBatch.batch_id == batch_id))
+        await session.commit()
+    return {"ok": True}
 
 
 @router.post("/{batch_id}/close", response_model=TopicBatchOut)

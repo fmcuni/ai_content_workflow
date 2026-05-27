@@ -20,6 +20,10 @@ export interface RunSummary {
   topic_candidate_id?: string | null;
   target_audience?: string | null;
   keywords?: string[];
+  persona?: string | null;
+  acf_adv_id?: number | null;
+  acf_widget_id?: number | null;
+  edit_note?: string | null;
   error?: { type: string; message: string } | null;
 }
 
@@ -282,6 +286,36 @@ export interface Hitl2Request {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+}
+
+export interface RegenerateRequest {
+  notes?: string | null;
+  comments?: Hitl2Comment[] | null;
+}
+
+export type Hitl2SnapshotTrigger = "interval" | "navigate" | "unload" | "manual";
+
+export interface Hitl2SnapshotIn {
+  trigger: Hitl2SnapshotTrigger;
+  html_body: string;
+  seo_title?: string | null;
+  meta_description?: string | null;
+  notes?: string | null;
+  comments?: Hitl2Comment[] | null;
+  wp_publish_status?: string | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_tag_ids?: number[] | null;
+  wp_featured_media_id?: number | null;
+  wp_slug?: string | null;
+  wp_excerpt?: string | null;
+  wp_publish_at?: string | null;
+}
+
+export interface Hitl2Snapshot extends Hitl2SnapshotIn {
+  snapshot_id: string;
+  created_at: string;
+  created_by: string | null;
 }
 
 export interface ArticleEditRequest {

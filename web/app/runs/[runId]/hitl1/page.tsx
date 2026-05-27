@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { SectionHead } from "@/components/SectionHead";
 import { GapAnalysisView } from "@/components/GapAnalysisView";
 import { OutlineEditor } from "@/components/OutlineEditor";
+import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { api } from "@/lib/api";
 import type { Outline } from "@/lib/types";
 
@@ -51,6 +52,8 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
         hed="Editor's review"
         dek="Confirm the gap analysis and approve the proposed outline — or override the route."
       />
+
+      {run.data && <RunTaskDetails run={run.data} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
         <section>

@@ -268,6 +268,11 @@ export function TipTapEditor({
       attributes: {
         class:
           "editorial-prose max-w-none min-h-[480px] focus:outline-none px-6 py-5 border border-rule rounded-b bg-paper",
+        // Opt out of WebKit/macOS text substitutions inside the editor: the
+        // "double-space → full stop" shortcut and auto-capitalisation inject
+        // half-width ". " / capitals that are wrong for Chinese prose.
+        autocorrect: "off",
+        autocapitalize: "off",
       },
       handleClickOn: (_view, _pos, _node, _nodePos, event) => {
         const target = event.target as HTMLElement;
@@ -287,6 +292,11 @@ export function TipTapEditor({
   // otherwise the editor stays empty until it is unmounted and remounted.
   useEffect(() => {
     if (!editor) return;
+    // Never re-set content mid-IME-composition: CJK input (pinyin/cangjie/zhuyin)
+    // stays "open" across several keystrokes, and setContent during that window
+    // wipes the in-progress characters. Western typing commits per keystroke so
+    // it rarely hits this; Chinese editing hits it constantly.
+    if (editor.view.composing) return;
     if (editor.getHTML() === value) return;
     editor.commands.setContent(value, { emitUpdate: false });
   }, [editor, value]);

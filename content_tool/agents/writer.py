@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
@@ -64,6 +65,11 @@ def build_user_prompt(
         f"# gap_analysis\n{json.dumps(gap_analysis, ensure_ascii=False)}\n\n"
         f"# existing_article_markdown\n{existing_markdown}\n"
     )
+    if run.edit_note:
+        base += (
+            f"\n# editor_instruction（編輯指示 · 最優先）\n"  # noqa: RUF001
+            f"{run.edit_note}\n"
+        )
     if refine_notes:
         base += (
             f"\n# refine_notes（上一輪 audit 必修問題）\n"  # noqa: RUF001
@@ -128,27 +134,52 @@ async def run_writer(
     )
     out = WriterOutput.model_validate(result.parsed)
 
-    draft = Draft(
+    citation_intents = [c.model_dump() for c in out.citation_intents]
+    # Upsert so re-running the writer (e.g. after a restart, which re-enters the
+    # production subgraph at the same iteration) refreshes the draft instead of
+    # violating the (run_id, iteration) unique constraint. Reset final_markup —
+    # it is derived from markup_raw by resolve_citations downstream, so any value
+    # from a prior run is stale. RETURNING gives us the persisted row's draft_id,
+    # which on conflict is the existing row's id (the discarded INSERT id differs).
+    values = dict(
         run_id=run_id,
         iteration=iteration,
         diagnose=out.diagnose,
         markup_raw=out.markup,
-        citation_intents=[c.model_dump() for c in out.citation_intents],
+        citation_intents=citation_intents,
         grounding_chunks=result.grounding_chunks,
         tokens_in=result.tokens_in,
         tokens_out=result.tokens_out,
         thinking_tokens=result.thinking_tokens,
         latency_ms=result.latency_ms,
     )
-    session.add(draft)
+    stmt = (
+        pg_insert(Draft)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=[Draft.run_id, Draft.iteration],
+            set_={
+                "diagnose": out.diagnose,
+                "markup_raw": out.markup,
+                "final_markup": None,
+                "citation_intents": citation_intents,
+                "grounding_chunks": result.grounding_chunks,
+                "tokens_in": result.tokens_in,
+                "tokens_out": result.tokens_out,
+                "thinking_tokens": result.thinking_tokens,
+                "latency_ms": result.latency_ms,
+            },
+        )
+        .returning(Draft.draft_id)
+    )
+    draft_id = (await session.execute(stmt)).scalar_one()
     await session.commit()
-    await session.refresh(draft)
 
     return WriterRunResult(
         iteration=iteration,
         diagnose=out.diagnose,
         markup_raw=out.markup,
-        citation_intents=[c.model_dump() for c in out.citation_intents],
+        citation_intents=citation_intents,
         grounding_chunks=result.grounding_chunks,
-        draft_id=draft.draft_id,
+        draft_id=draft_id,
     )

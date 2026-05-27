@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateRunRequest(BaseModel):
@@ -70,6 +70,53 @@ class Hitl2Request(BaseModel):
     wp_slug: str | None = None
     wp_excerpt: str | None = None
     wp_publish_at: datetime | None = None
+
+
+class Hitl2SnapshotIn(BaseModel):
+    """Autosave / version-history capture of the HITL_2 reviewer's working state.
+
+    One combined point-in-time snapshot of the editor body, SEO/WP metadata,
+    overall notes, and anchored comments. ``trigger`` records what caused the
+    save (``interval`` | ``navigate`` | ``unload`` | ``manual``) for the
+    history list.
+    """
+
+    trigger: Literal["interval", "navigate", "unload", "manual"] = "manual"
+    html_body: str
+    seo_title: str | None = None
+    meta_description: str | None = None
+    notes: str | None = None
+    comments: list[Hitl2Comment] | None = None
+    wp_publish_status: str | None = None
+    wp_author_id: int | None = None
+    wp_category_ids: list[int] | None = None
+    wp_tag_ids: list[int] | None = None
+    wp_featured_media_id: int | None = None
+    wp_slug: str | None = None
+    wp_excerpt: str | None = None
+    wp_publish_at: datetime | None = None
+
+
+class Hitl2SnapshotOut(Hitl2SnapshotIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    snapshot_id: UUID
+    created_at: datetime
+    created_by: str | None = None
+
+
+class RegenerateRequest(BaseModel):
+    """Operator-initiated AI regeneration of a finished run's article.
+
+    Mirrors the HITL_2 ``request_changes`` feedback shape (overall ``notes`` +
+    anchored ``comments``) but runs post-hoc on a terminal run: it re-runs the
+    writer → resolve_citations → render → audit pipeline at a fresh iteration
+    instead of resuming the LangGraph checkpoint. The new draft becomes the
+    latest, so the standalone edit / re-push page picks it up.
+    """
+
+    notes: str | None = None
+    comments: list[Hitl2Comment] | None = None
 
 
 class OutlineEditRequest(BaseModel):

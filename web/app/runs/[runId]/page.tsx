@@ -9,6 +9,7 @@ import { SectionHead } from "@/components/SectionHead";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { CostMeter } from "@/components/CostMeter";
+import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { useRunEvents } from "@/lib/sse";
 import { api, topicBatchesApi } from "@/lib/api";
 
@@ -125,6 +126,8 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
         )}
       </div>
 
+      {run && <RunTaskDetails run={run} />}
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-10">
         {/* Live progress */}
         <section>
@@ -191,6 +194,14 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
                 >
                   Edit outline & article →
                 </Link>
+                {run.status !== "failed" && (
+                  <Link
+                    href={`/runs/${runId}/regenerate`}
+                    className={buttonVariants({ variant: "secondary", size: "lg" }) + " w-full mt-3"}
+                  >
+                    Regenerate with comments ↺
+                  </Link>
+                )}
               </div>
             )}
             {run && !TERMINAL_STATUSES.has(run.status) && run.status !== "hitl_1" && run.status !== "hitl_2" && (

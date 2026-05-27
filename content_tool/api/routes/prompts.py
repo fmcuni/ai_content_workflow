@@ -1,9 +1,10 @@
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_tool.agents import audit as audit_agent
 from content_tool.agents import gap_analysis as gap_agent
@@ -62,8 +63,8 @@ class _MissingInputs(Exception):
     pass
 
 
-def _get_session_factory(request: Request):  # noqa: ANN201
-    return request.app.state.session_factory
+def _get_session_factory(request: Request) -> async_sessionmaker[Any]:
+    return request.app.state.session_factory  # type: ignore[no-any-return]
 
 
 async def _render_user_prompt(
@@ -90,6 +91,7 @@ async def _render_user_prompt(
                 target_audience=run.target_audience,
                 acf_adv_id=run.acf_adv_id,
                 acf_widget_id=run.acf_widget_id,
+                edit_note=run.edit_note,
             )
         ga = (await session.execute(
             select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
@@ -177,7 +179,7 @@ async def _render_user_prompt(
 @router.get("/user-example")
 async def user_example(
     run_id: UUID = Query(...),  # noqa: B008
-    agent: str = Query(...),  # noqa: B008
+    agent: str = Query(...),
     sf=Depends(_get_session_factory),  # noqa: ANN001, B008
 ) -> dict:
     if agent not in _USER_PROMPT_AGENTS:

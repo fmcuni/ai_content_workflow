@@ -68,6 +68,7 @@ def build_user_prompt_create_mode(
     target_audience: str | None,
     acf_adv_id: int,
     acf_widget_id: int,
+    edit_note: str | None = None,
 ) -> str:
     """Create-mode user prompt — there is no fetched article and no gap
     analysis to feed the model, just the brief from the operator (Front III)
@@ -75,6 +76,11 @@ def build_user_prompt_create_mode(
     """
     kw = ", ".join(keywords) if keywords else "(無)"
     audience = target_audience or "(未指定)"
+    note_block = (
+        f"編輯指示（最優先）：{edit_note}\n"  # noqa: RUF001
+        if edit_note
+        else ""
+    )
     # Full-width colons are intentional — the prompt is rendered for CJK
     # readers and the model is conditioned on this style throughout the
     # prompts/ folder.
@@ -84,6 +90,7 @@ def build_user_prompt_create_mode(
         f"目標讀者：{audience}\n"  # noqa: RUF001
         f"acf_adv_id: {acf_adv_id}\n"
         f"acf_widget_id: {acf_widget_id}\n"
+        f"{note_block}"
     )
 
 
@@ -108,6 +115,7 @@ async def run_outline(
             target_audience=run.target_audience,
             acf_adv_id=run.acf_adv_id,
             acf_widget_id=run.acf_widget_id,
+            edit_note=run.edit_note,
         )
     else:
         fa = (

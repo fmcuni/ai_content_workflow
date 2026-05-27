@@ -132,6 +132,33 @@ class RunExecutor:
         await self._set_status(run_id, "pending", clear_error=True)
         await self.start(run_id)
 
+    async def cancel(self, run_id: UUID) -> None:
+        """Stop any in-flight background task for this run and drop its state.
+
+        Called before a hard-delete so the executor isn't still streaming into
+        rows that are about to be removed (which would race the delete and try
+        to re-INSERT derived rows against a now-missing run). Cancelling the
+        task and awaiting it guarantees the graph has stopped before we touch
+        the DB. Safe to call when there is no live task.
+        """
+        task = self._tasks.pop(run_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("error awaiting cancelled run task", extra={"run_id": str(run_id)})
+        # Drop the LangGraph checkpoint thread so no orphaned state lingers.
+        try:
+            async with make_checkpointer(self._postgres_url) as cp:
+                await cp.adelete_thread(str(run_id))
+        except Exception:
+            logger.exception("failed to delete checkpoint thread", extra={"run_id": str(run_id)})
+        self._history.pop(run_id, None)
+        self._subscribers.pop(run_id, None)
+
     async def _clear_derived_rows(self, run_id: UUID) -> None:
         """Drop rows the graph nodes wrote on prior attempts.
 

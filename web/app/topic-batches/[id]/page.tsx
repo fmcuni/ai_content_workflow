@@ -86,6 +86,8 @@ export default function TopicBatchDetail({
         }
       />
 
+      {batch && <BriefConstraints batch={batch} />}
+
       {isError && (
         <div className="border border-accent/40 bg-accent/[0.06] px-4 py-3 text-[12px] text-accent-deep font-mono">
           {(error as Error).message}
@@ -98,6 +100,65 @@ export default function TopicBatchDetail({
       )}
       {batch && batch.status === "done" && <BatchDoneSummary batch={batch} />}
     </div>
+  );
+}
+
+function BriefConstraints({ batch }: { batch: TopicBatch }) {
+  const hasCover = batch.must_cover.length > 0;
+  const hasAvoid = batch.must_avoid.length > 0;
+  const hasFocus = Boolean(batch.priority_focus && batch.priority_focus.trim().length > 0);
+  if (!hasCover && !hasAvoid && !hasFocus) return null;
+
+  return (
+    <section className="border border-rule rounded bg-paper-deep/30 px-4 py-3 space-y-4">
+      <p className="kicker">Brief constraints</p>
+
+      {hasFocus && (
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint mb-1">
+            Priority focus
+          </p>
+          <p className="text-[13px] text-ink whitespace-pre-wrap">{batch.priority_focus}</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+        {hasCover && (
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ok mb-1.5">
+              Must cover
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {batch.must_cover.map((item) => (
+                <li
+                  key={item}
+                  className="font-mono text-[11px] tracking-[0.04em] text-ink-soft border border-ok/40 rounded-sm px-1.5 py-0.5 bg-ok/[0.06]"
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {hasAvoid && (
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-accent-deep mb-1.5">
+              Must avoid
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {batch.must_avoid.map((item) => (
+                <li
+                  key={item}
+                  className="font-mono text-[11px] tracking-[0.04em] text-ink-soft border border-accent/40 rounded-sm px-1.5 py-0.5 bg-accent/[0.06]"
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

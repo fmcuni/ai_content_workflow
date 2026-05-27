@@ -1,12 +1,21 @@
 "use client";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { toast } from "sonner";
 
 import { PaperStamp } from "@/components/PaperStamp";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { SectionHead } from "@/components/SectionHead";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { api, topicBatchesApi } from "@/lib/api";
 import type { BatchStatus, RunStatus, RunSummary, TopicBatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -53,6 +62,7 @@ const BATCH_META: Record<BatchStatus, { label: string; tone: StampTone; pulse?: 
 
 interface DeskItem {
   key: string;
+  id: string;
   kind: "run" | "batch";
   status: string;
   lane: Lane;
@@ -61,9 +71,11 @@ interface DeskItem {
   title: string;
   subtitle: string;
   keywords?: string[];
+  meta?: string[];
   rowHref: string;
   action: string | null;
   createdAt: string;
+  deletable: boolean;
 }
 
 function runAction(r: RunSummary): string | null {
@@ -109,8 +121,15 @@ function runToItem(r: RunSummary): DeskItem {
         ? `New article · ${r.target_audience}`
         : "New article"
       : r.article_url;
+  // Task brief at a glance: voice, mode (rewrite only), advertiser + widget.
+  const meta: string[] = [];
+  if (r.persona) meta.push(`Voice · ${r.persona}`);
+  if (category === "rewrite") meta.push(`Mode · ${r.mode}`);
+  if (r.acf_adv_id != null) meta.push(`Adv ${r.acf_adv_id}`);
+  if (r.acf_widget_id != null) meta.push(`Widget ${r.acf_widget_id}`);
   return {
     key: `run:${r.run_id}`,
+    id: r.run_id,
     kind: "run",
     status: r.status,
     lane,
@@ -119,9 +138,13 @@ function runToItem(r: RunSummary): DeskItem {
     title: r.topic,
     subtitle,
     keywords: r.keywords,
+    meta,
     rowHref: action ? runActionHref(r) : `/runs/${r.run_id}`,
     action,
     createdAt: r.created_at,
+    // Every run is removable — deleting an in-motion run cancels its executor
+    // server-side first, so no lane is exempt.
+    deletable: true,
   };
 }
 
@@ -130,6 +153,7 @@ function batchToItem(b: TopicBatch): DeskItem {
   const action = lane === "desk" ? batchAction(b) : null;
   return {
     key: `batch:${b.batch_id}`,
+    id: b.batch_id,
     kind: "batch",
     status: b.status,
     lane,
@@ -139,6 +163,7 @@ function batchToItem(b: TopicBatch): DeskItem {
     rowHref: `/topic-batches/${b.batch_id}`,
     action,
     createdAt: b.created_at,
+    deletable: true,
   };
 }
 
@@ -148,16 +173,26 @@ function StatusStamp({ item }: { item: DeskItem }) {
   return <PaperStamp tone={meta.tone} pulse={meta.pulse}>{meta.label}</PaperStamp>;
 }
 
-function DeskRow({ item, accent }: { item: DeskItem; accent?: boolean }) {
+function DeskRow({
+  item,
+  accent,
+  onDelete,
+}: {
+  item: DeskItem;
+  accent?: boolean;
+  onDelete?: (item: DeskItem) => void;
+}) {
   const { day, time } = ledgerDate(item.createdAt);
   const cat = CATEGORY_META[item.category];
+  const canDelete = item.deletable && Boolean(onDelete);
   return (
-    <li className="border-b border-rule group">
+    <li className="relative border-b border-rule group">
       <Link
         href={item.rowHref}
         className={cn(
           "grid grid-cols-[64px_1fr_auto] gap-4 md:gap-6 py-4 items-center transition-colors hover:bg-paper-deep/60",
-          accent && "border-l-2 border-l-accent pl-4"
+          accent && "border-l-2 border-l-accent pl-4",
+          canDelete && "pr-10"
         )}
       >
         <div>
@@ -177,6 +212,11 @@ function DeskRow({ item, accent }: { item: DeskItem; accent?: boolean }) {
             {item.title}
           </p>
           <p className="font-sans text-[12px] text-ink-faint truncate mt-1">{item.subtitle}</p>
+          {item.meta && item.meta.length > 0 ? (
+            <p className="font-mono text-[10.5px] text-ink-soft tracking-[0.02em] mt-1 truncate">
+              {item.meta.join("  ·  ")}
+            </p>
+          ) : null}
           {item.keywords && item.keywords.length > 0 ? (
             <ul className="flex flex-wrap gap-1.5 mt-1.5">
               {item.keywords.map((kw) => (
@@ -199,6 +239,17 @@ function DeskRow({ item, accent }: { item: DeskItem; accent?: boolean }) {
           ) : null}
         </div>
       </Link>
+      {canDelete ? (
+        <button
+          type="button"
+          aria-label={`Remove ${item.title}`}
+          title={item.kind === "batch" ? "Remove topic batch" : "Remove run"}
+          onClick={() => onDelete!(item)}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 flex size-7 items-center justify-center rounded-full text-ink-faint opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-rose-50 hover:text-rose-600 transition-opacity"
+        >
+          <span aria-hidden className="text-[15px] leading-none">×</span>
+        </button>
+      ) : null}
     </li>
   );
 }
@@ -208,11 +259,13 @@ function LaneSection({
   hint,
   items,
   accent,
+  onDelete,
 }: {
   title: string;
   hint: string;
   items: DeskItem[];
   accent?: boolean;
+  onDelete?: (item: DeskItem) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -225,7 +278,7 @@ function LaneSection({
       </div>
       <ul className="border-t border-rule">
         {items.map((it) => (
-          <DeskRow key={it.key} item={it} accent={accent} />
+          <DeskRow key={it.key} item={it} accent={accent} onDelete={onDelete} />
         ))}
       </ul>
     </section>
@@ -249,6 +302,9 @@ function DeskClear() {
 }
 
 export default function Home() {
+  const queryClient = useQueryClient();
+  const [pendingDelete, setPendingDelete] = useState<DeskItem | null>(null);
+
   const runsQ = useQuery({
     queryKey: ["runs"],
     queryFn: () => api.listRuns(),
@@ -258,6 +314,18 @@ export default function Home() {
     queryKey: ["topic-batches"],
     queryFn: () => topicBatchesApi.list(),
     refetchInterval: 15_000,
+  });
+
+  const deleteItem = useMutation({
+    mutationFn: (item: DeskItem) =>
+      item.kind === "batch" ? topicBatchesApi.delete(item.id) : api.deleteRun(item.id),
+    onSuccess: (_data, item) => {
+      toast.success(item.kind === "batch" ? "Topic batch removed" : "Run removed");
+      setPendingDelete(null);
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["topic-batches"] });
+    },
+    onError: (e: Error) => toast.error(`Couldn't remove — ${e.message}`),
   });
 
   const isLoading = runsQ.isLoading;
@@ -280,12 +348,12 @@ export default function Home() {
       ) : (
         <div className="space-y-10">
           {desk.length > 0 ? (
-            <LaneSection title="On your desk" hint="Waiting on you" items={desk} accent />
+            <LaneSection title="On your desk" hint="Waiting on you" items={desk} accent onDelete={setPendingDelete} />
           ) : (
             <DeskClear />
           )}
-          <LaneSection title="In motion" hint="Running now" items={motion} />
-          <LaneSection title="Filed" hint="Recently completed" items={filed} />
+          <LaneSection title="In motion" hint="Running now" items={motion} onDelete={setPendingDelete} />
+          <LaneSection title="Filed" hint="Recently completed" items={filed} onDelete={setPendingDelete} />
         </div>
       );
   }
@@ -308,6 +376,59 @@ export default function Home() {
       {isError && <p className="text-accent-deep text-[13px] mt-6">Failed to load runs.</p>}
 
       <div className="mt-8">{content}</div>
+
+      <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Remove this {pendingDelete?.kind === "batch" ? "topic batch" : "run"}?
+            </DialogTitle>
+            <DialogDescription>
+              {pendingDelete ? (
+                pendingDelete.kind === "batch" ? (
+                  <>
+                    &ldquo;<span className="text-ink">{pendingDelete.title}</span>&rdquo; and all of
+                    its topic candidates will be permanently deleted. This cannot be undone. Any
+                    article already promoted from this batch is kept — it only loses its link back
+                    to the batch.
+                    {pendingDelete.lane === "motion" ? (
+                      <> This batch is still generating — it will be stopped before removal.</>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    &ldquo;<span className="text-ink">{pendingDelete.title}</span>&rdquo; and all of
+                    its derived work (outline, drafts, render, audit, compliance log) will be
+                    permanently deleted. This cannot be undone. The live WordPress post, if any, is
+                    not affected.
+                    {pendingDelete.lane === "motion" ? (
+                      <> This run is still in motion — it will be stopped before removal.</>
+                    ) : null}
+                  </>
+                )
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setPendingDelete(null)}
+              disabled={deleteItem.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => pendingDelete && deleteItem.mutate(pendingDelete)}
+              disabled={deleteItem.isPending}
+            >
+              {deleteItem.isPending
+                ? "Removing…"
+                : `Remove ${pendingDelete?.kind === "batch" ? "batch" : "run"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -14,6 +14,8 @@ import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
 import { WordPressMetaForm } from "@/components/WordPressMetaForm";
 import { CommentsSidebar } from "@/components/CommentsSidebar";
+import { RunTaskDetails } from "@/components/RunTaskDetails";
+import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import {
   Dialog,
   DialogContent,
@@ -23,9 +25,71 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type { DryPublishResponse, ExistingPost, Hitl2Comment, Hitl2Request } from "@/lib/types";
+import type {
+  DryPublishResponse,
+  ExistingPost,
+  Hitl2Comment,
+  Hitl2Request,
+  Hitl2Snapshot,
+  Hitl2SnapshotIn,
+  Hitl2SnapshotTrigger,
+} from "@/lib/types";
 
 const MAX_ROUNDS = 3;
+const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Stable comparison key for a snapshot, ignoring the (non-content) trigger. */
+function snapshotKey(s: Hitl2SnapshotIn): string {
+  return JSON.stringify([
+    s.html_body,
+    s.seo_title ?? null,
+    s.meta_description ?? null,
+    s.notes ?? null,
+    s.comments ?? [],
+    s.wp_publish_status ?? null,
+    s.wp_author_id ?? null,
+    s.wp_category_ids ?? null,
+    s.wp_tag_ids ?? null,
+    s.wp_featured_media_id ?? null,
+    s.wp_slug ?? null,
+    s.wp_excerpt ?? null,
+    s.wp_publish_at ?? null,
+  ]);
+}
+
+/**
+ * True when the editor body carries no real content. TipTap emits an empty
+ * string (or a bare `<p></p>`) while it is torn down on unmount; persisting that
+ * would clobber good work and, once reloaded, leave the editor blank.
+ */
+function isBlankBody(html: string | null | undefined): boolean {
+  if (!html) return true;
+  return html.replace(/<[^>]*>/g, "").replace(/ /g, "").trim().length === 0;
+}
+
+/**
+ * Shape a saved snapshot into the same form `snapshotIn` produces after
+ * `applySnapshot` loads it, so the hydration baseline key matches the live one
+ * exactly (and a freshly-restored page reads as clean, not dirty).
+ */
+function snapshotInFromSaved(s: Hitl2Snapshot): Hitl2SnapshotIn {
+  return {
+    trigger: "manual",
+    html_body: s.html_body,
+    seo_title: s.seo_title ?? null,
+    meta_description: s.meta_description ?? null,
+    notes: s.notes ?? null,
+    comments: s.comments ?? [],
+    wp_publish_status: s.wp_publish_status ?? "draft",
+    wp_author_id: s.wp_author_id ?? null,
+    wp_category_ids: s.wp_category_ids ?? null,
+    wp_tag_ids: s.wp_tag_ids ?? null,
+    wp_featured_media_id: s.wp_featured_media_id ?? null,
+    wp_slug: s.wp_slug ?? null,
+    wp_excerpt: s.wp_excerpt ?? null,
+    wp_publish_at: s.wp_publish_at ?? null,
+  };
+}
 
 export default function Hitl2Page({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -46,6 +110,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   const prefilledRef = useRef<ExistingPost | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Set once a HITL_2 decision is submitted, so autosave-on-exit doesn't write a
+  // redundant snapshot as the page navigates away after approve/request/reject.
+  const submittedRef = useRef(false);
+  // Hydration runs once, after the snapshot list resolves. When a saved snapshot
+  // exists it seeds the editor and these refs stop the render/WP prefills from
+  // clobbering the restored work.
+  const hydrationDoneRef = useRef(false);
+  const hydratedFromSnapshotRef = useRef(false);
 
   const refresh = useMutation({
     mutationFn: () => api.refreshExistingPost(runId),
@@ -111,9 +183,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   useEffect(() => {
     if (render.data) {
+      // Diff baseline is always the pristine render, even when restoring a snapshot.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHtml(render.data.html_body);
       setOriginalHtml(render.data.html_body);
+      if (hydratedFromSnapshotRef.current) return; // snapshot owns the editor body
+      setHtml(render.data.html_body);
       setForm((f) => ({
         ...f,
         edited_seo_title: render.data!.seo_title,
@@ -126,7 +200,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   useEffect(() => {
     if (!existingPost.data) return;
     if (prefilledRef.current !== null) return; // already prefilled
-    prefilledRef.current = existingPost.data;
+    prefilledRef.current = existingPost.data; // WP baseline for "Re-read from WP"
+    if (hydratedFromSnapshotRef.current) return; // snapshot already set the form
     const ep = existingPost.data;
     setForm((f) => ({
       ...f,
@@ -157,7 +232,10 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         comments: liveComments,
       });
     },
-    onSuccess: () => router.push(`/runs/${runId}`),
+    onSuccess: () => {
+      submittedRef.current = true;
+      router.push(`/runs/${runId}`);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -180,15 +258,238 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     setRightTab("comments");
   };
 
+  // --- Autosave + version history -----------------------------------------
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+
+  const snapshotIn = useMemo<Hitl2SnapshotIn>(
+    () => ({
+      trigger: "manual",
+      html_body: html,
+      seo_title: form.edited_seo_title ?? null,
+      meta_description: form.edited_meta_description ?? null,
+      notes: form.notes ?? null,
+      comments,
+      wp_publish_status: form.wp_publish_status,
+      wp_author_id: form.wp_author_id ?? null,
+      wp_category_ids: form.wp_category_ids ?? null,
+      wp_tag_ids: form.wp_tag_ids ?? null,
+      wp_featured_media_id: form.wp_featured_media_id ?? null,
+      wp_slug: form.wp_slug ?? null,
+      wp_excerpt: form.wp_excerpt ?? null,
+      wp_publish_at: form.wp_publish_at ?? null,
+    }),
+    [html, form, comments],
+  );
+  const currentKey = useMemo(() => snapshotKey(snapshotIn), [snapshotIn]);
+
+  // Baseline is derived from the same source data the prefill effects consume,
+  // so a freshly-loaded page never reads as dirty before any real edit.
+  const baselineKey = useMemo(() => {
+    if (!render.data || !existingPost.isFetched) return null;
+    return snapshotKey({
+      trigger: "manual",
+      html_body: render.data.html_body,
+      seo_title: render.data.seo_title,
+      meta_description: render.data.meta_description,
+      notes: null,
+      comments: [],
+      wp_publish_status: "draft",
+      wp_author_id: existingPost.data?.wp_author_id ?? null,
+      wp_category_ids:
+        existingPost.data?.wp_category_id != null ? [existingPost.data.wp_category_id] : null,
+      wp_tag_ids: null,
+      wp_featured_media_id: null,
+      wp_slug: existingPost.data?.wp_slug ?? null,
+      wp_excerpt: render.data.excerpt_suggestion ?? null,
+      wp_publish_at: null,
+    });
+  }, [render.data, existingPost.data, existingPost.isFetched]);
+
+  // `lastSavedKey` drives the dirty indicator (state, read during render);
+  // `lastSavedKeyRef` mirrors it for the unmount / pagehide handlers that run
+  // outside render and must see the latest value without re-subscribing.
+  const [lastSavedKey, setLastSavedKey] = useState<string | null>(null);
+  const lastSavedKeyRef = useRef<string | null>(null);
+  const snapshotRef = useRef(snapshotIn);
+  useEffect(() => {
+    snapshotRef.current = snapshotIn;
+  });
+  useEffect(() => {
+    lastSavedKeyRef.current = lastSavedKey;
+  }, [lastSavedKey]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (baselineKey != null && lastSavedKey == null) setLastSavedKey(baselineKey);
+  }, [baselineKey, lastSavedKey]);
+
+  const isDirty = lastSavedKey != null && currentKey !== lastSavedKey;
+
+  const saveSnapshot = useCallback(
+    async (trigger: Hitl2SnapshotTrigger): Promise<"saved" | "unchanged" | "error"> => {
+      if (submittedRef.current || lastSavedKeyRef.current == null) return "unchanged";
+      const snap = snapshotRef.current;
+      // Never persist a blank body — TipTap reports empty mid-teardown, and a
+      // blank save would overwrite good work and reload to an empty editor.
+      if (isBlankBody(snap.html_body)) return "unchanged";
+      const key = snapshotKey(snap);
+      if (key === lastSavedKeyRef.current) return "unchanged"; // nothing changed
+      try {
+        setSaveState("saving");
+        await api.saveHitl2Snapshot(runId, { ...snap, trigger });
+        lastSavedKeyRef.current = key;
+        setLastSavedKey(key);
+        setSavedAt(new Date());
+        setSaveState("saved");
+        qc.invalidateQueries({ queryKey: ["hitl2-snapshots", runId] });
+        return "saved";
+      } catch {
+        setSaveState("error");
+        return "error";
+      }
+    },
+    [runId, qc],
+  );
+
+  const handleManualSave = useCallback(async () => {
+    const result = await saveSnapshot("manual");
+    if (result === "saved") toast.success("Saved version");
+    else if (result === "error") toast.error("Couldn't save — try again");
+    else toast("Already up to date");
+  }, [saveSnapshot]);
+
+  // Every 5 minutes, persist a snapshot if anything changed.
+  useEffect(() => {
+    const id = setInterval(() => void saveSnapshot("interval"), AUTOSAVE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [saveSnapshot]);
+
+  // Leaving the page — client-side nav, link click, or unmount — flushes a save.
+  useEffect(() => () => void saveSnapshot("navigate"), [saveSnapshot]);
+
+  // Tab close / reload: an awaited fetch would be cancelled, so beacon instead.
+  useEffect(() => {
+    const handler = () => {
+      if (submittedRef.current || lastSavedKeyRef.current == null) return;
+      const snap = snapshotRef.current;
+      if (isBlankBody(snap.html_body)) return;
+      if (snapshotKey(snap) === lastSavedKeyRef.current) return;
+      api.beaconHitl2Snapshot(runId, { ...snap, trigger: "unload" });
+    };
+    window.addEventListener("pagehide", handler);
+    return () => window.removeEventListener("pagehide", handler);
+  }, [runId]);
+
+  const applySnapshot = useCallback((s: Hitl2Snapshot) => {
+    setHtml(s.html_body);
+    setComments(s.comments ?? []);
+    setForm((f) => ({
+      ...f,
+      notes: s.notes ?? undefined,
+      edited_seo_title: s.seo_title ?? null,
+      edited_meta_description: s.meta_description ?? null,
+      wp_publish_status: (s.wp_publish_status as Hitl2Request["wp_publish_status"]) ?? "draft",
+      wp_author_id: s.wp_author_id ?? null,
+      wp_category_ids: s.wp_category_ids ?? null,
+      wp_tag_ids: s.wp_tag_ids ?? null,
+      wp_featured_media_id: s.wp_featured_media_id ?? null,
+      wp_slug: s.wp_slug ?? null,
+      wp_excerpt: s.wp_excerpt ?? null,
+      wp_publish_at: s.wp_publish_at ?? null,
+    }));
+  }, []);
+
+  // On load, reopen the editor at the most recent saved snapshot (autosave or
+  // manual) rather than the pristine render, and treat it as the clean baseline.
+  useEffect(() => {
+    if (hydrationDoneRef.current || !render.data) return;
+    let cancelled = false;
+    void (async () => {
+      // Pull a FRESH list, not the reactive cache: returning via client-side nav
+      // (e.g. from the index page) would otherwise hydrate from a stale cache that
+      // predates the navigate-away autosave, loading an older version.
+      const list = await qc.fetchQuery({
+        queryKey: ["hitl2-snapshots", runId],
+        queryFn: () => api.listHitl2Snapshots(runId),
+        staleTime: 0,
+      });
+      // Mark done only after the fetch resolves so StrictMode's double-invoke
+      // (which cancels the first pass) doesn't leave hydration permanently skipped.
+      if (cancelled || hydrationDoneRef.current) return;
+      hydrationDoneRef.current = true;
+      // Skip any blank-body rows left by the teardown bug; load the newest real save.
+      const latest = list.find((s) => !isBlankBody(s.html_body));
+      if (!latest) return;
+      hydratedFromSnapshotRef.current = true;
+      applySnapshot(latest);
+      const key = snapshotKey(snapshotInFromSaved(latest));
+      lastSavedKeyRef.current = key;
+      setLastSavedKey(key);
+      setSavedAt(new Date(latest.created_at));
+      setSaveState("saved");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [render.data, runId, qc, applySnapshot]);
+
+  const restoreSnapshot = async (s: Hitl2Snapshot) => {
+    await saveSnapshot("manual"); // preserve current work before overwriting
+    applySnapshot(s);
+    setHistoryOpen(false);
+    toast.success(`Restored version from ${new Date(s.created_at).toLocaleString()}`);
+  };
+
+  const saveStatusLabel =
+    saveState === "saving"
+      ? "Saving…"
+      : saveState === "error"
+      ? "Autosave failed"
+      : isDirty
+      ? "Unsaved changes"
+      : savedAt
+      ? `Saved ${savedAt.toLocaleTimeString()}`
+      : "Autosave on";
+
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 pb-32">
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <Link
           href={`/runs/${runId}`}
           className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
         >
           ← Run · {shortId}
         </Link>
+        <div className="flex items-center gap-3">
+          <span
+            className={`font-mono text-[11px] uppercase tracking-wider ${
+              saveState === "error"
+                ? "text-accent-deep"
+                : isDirty
+                ? "text-accent"
+                : "text-ink-faint"
+            }`}
+          >
+            {saveState === "saving" && "↻ "}
+            {saveStatusLabel}
+          </span>
+          <button
+            type="button"
+            onClick={handleManualSave}
+            disabled={!isDirty || saveState === "saving"}
+            className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-ink-faint"
+          >
+            {saveState === "saving" ? "↻ Saving…" : "⤓ Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
+          >
+            ⟲ Version history
+          </button>
+        </div>
       </div>
 
       <SectionHead
@@ -221,6 +522,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         hed="Editor's review"
         dek="Final pass on the draft. Approve and push to WordPress as draft, request changes, or reject."
       />
+
+      {run.data && <RunTaskDetails run={run.data} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
         {/* Galley column */}
@@ -494,6 +797,13 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           </Button>
         </div>
       </div>
+
+      <Hitl2VersionHistory
+        runId={runId}
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onRestore={restoreSnapshot}
+      />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>

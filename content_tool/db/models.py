@@ -156,6 +156,49 @@ class Draft(Base):
     latency_ms: Mapped[int | None]
 
 
+class Hitl2Snapshot(Base):
+    """Autosave / version-history snapshot of the HITL_2 reviewer's working state.
+
+    Each row is one point-in-time capture of the editor body, SEO/WP metadata,
+    overall notes, and anchored comments — written on a 5-minute interval, when
+    the reviewer leaves the page, or on tab close. Browsable + restorable from
+    the galley page. Bounded to the newest ~50 rows per run by the writer.
+    """
+
+    __tablename__ = "hitl2_snapshots"
+    __table_args__ = (
+        Index("hitl2_snapshots_run_created_idx", "run_id", "created_at"),
+        {"schema": "content_tool"},
+    )
+
+    snapshot_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    created_by: Mapped[str | None] = mapped_column(String)
+    trigger: Mapped[str] = mapped_column(String, nullable=False)
+    html_body: Mapped[str] = mapped_column(String, nullable=False)
+    seo_title: Mapped[str | None] = mapped_column(String)
+    meta_description: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(String)
+    comments: Mapped[list | None] = mapped_column(JSONB)
+    wp_publish_status: Mapped[str | None] = mapped_column(String)
+    wp_author_id: Mapped[int | None]
+    wp_category_ids: Mapped[list | None] = mapped_column(JSONB)
+    wp_tag_ids: Mapped[list | None] = mapped_column(JSONB)
+    wp_featured_media_id: Mapped[int | None]
+    wp_slug: Mapped[str | None] = mapped_column(String)
+    wp_excerpt: Mapped[str | None] = mapped_column(String)
+    wp_publish_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+
 class Citation(Base):
     __tablename__ = "citations"
 
