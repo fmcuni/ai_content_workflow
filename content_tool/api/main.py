@@ -42,7 +42,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         thinking_level=settings.gemini_thinking_level,
     )
     seo_plugin = None
-    if settings.wp_base_url:
+    configured = settings.wp_seo_plugin.strip().lower()
+    if configured in ("yoast", "rankmath"):
+        seo_plugin = configured  # explicit override; skip network detection
+    elif settings.wp_base_url:
         try:
             seo_plugin = await detect_seo_plugin(
                 settings.wp_base_url,
@@ -55,6 +58,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 exc_info=True,
             )
             seo_plugin = None
+    if seo_plugin is None:
+        logger.warning(
+            "No SEO plugin resolved; meta description will NOT be sent on publish. "
+            "Set WP_SEO_PLUGIN=yoast to force it."
+        )
     wp_client = WordPressClient(
         settings.wp_base_url,
         username=settings.wp_username,

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     wp_username: str = ""                     # WP user the editor authenticates as
     wp_app_password: str = ""                 # Application Password
     wp_timeout: float = 15.0
+    wp_seo_plugin: str = ""                   # "", "yoast", "rankmath" — "" = auto-detect
 
     # Refresh route
     refresh_config_path: str = "config/refresh.yaml"

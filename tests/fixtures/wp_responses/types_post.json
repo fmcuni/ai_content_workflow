@@ -1,7 +1,0 @@
-{
-  "post": {
-    "supports": {"title": true, "editor": true, "custom-fields": true},
-    "rest_base": "posts",
-    "meta_fields": ["_yoast_wpseo_metadesc", "_yoast_wpseo_title", "_yoast_wpseo_focuskw"]
-  }
-}

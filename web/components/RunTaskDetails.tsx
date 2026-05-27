@@ -27,6 +27,14 @@ export function RunTaskDetails({ run }: { run: RunSummary }) {
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <div className="col-span-2 md:col-span-4 min-w-0">
           <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+            Topic
+          </dt>
+          <dd className="font-sans text-[14px] text-ink mt-0.5 break-words">
+            {run.topic || <span className="text-ink-faint italic">—</span>}
+          </dd>
+        </div>
+        <div className="col-span-2 md:col-span-4 min-w-0">
+          <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
             Focus keywords
           </dt>
           <dd className="mt-1">
