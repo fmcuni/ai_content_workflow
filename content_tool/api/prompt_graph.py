@@ -184,11 +184,10 @@ _CREATE_GRAPH: dict = {
             "kind": "llm",
             "uses_persona": True,
             "system_prompt_template_id": "writer_create",
-            "alt_template_ids": ["writer_small_refresh", "writer_full_rewrite"],
             "description": (
                 "Writes a brand-new Markdown draft in the persona's voice using the "
-                "create-mode template. If the editor overrides the route at HITL_1, the "
-                "matching small_refresh / full_rewrite template is used instead."
+                "create-mode template. Create-mode always uses this template — there is "
+                "no existing article to small_refresh / full_rewrite."
             ),
         },
         *_PRODUCTION_TAIL,

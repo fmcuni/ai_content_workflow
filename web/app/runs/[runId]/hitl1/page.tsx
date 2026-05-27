@@ -16,8 +16,10 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
   const { runId } = use(params);
   const shortId = runId.slice(0, 8);
   const router = useRouter();
+  const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.getRun(runId) });
   const ga = useQuery({ queryKey: ["ga", runId], queryFn: () => api.getGapAnalysis(runId) });
   const ol = useQuery({ queryKey: ["outline", runId], queryFn: () => api.getOutline(runId) });
+  const isCreate = run.data?.start_mode === "create";
   const [edited, setEdited] = useState<Outline | null>(null);
 
   const approve = useMutation({
@@ -68,8 +70,12 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
             {edited ? "EDITS PENDING" : "AWAITING DECISION"}
           </p>
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
-            <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
+            {!isCreate && (
+              <>
+                <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
+                <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
+              </>
+            )}
             <Button variant="primary" disabled={isBusy} onClick={() => approve.mutate()}>
               {approve.isPending ? "Submitting…" : edited ? "Approve with edits ↪" : "Approve ↪"}
             </Button>

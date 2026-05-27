@@ -99,10 +99,11 @@ async def run_writer(
     fa_markdown = fa.markdown if fa is not None else ""
     ga_payload: dict = ga.payload if ga is not None else {}
 
-    # Create-mode runs author a brand-new article and never run gap analysis,
-    # so there's no chosen_route — use the dedicated create prompt unless the
-    # editor explicitly overrode the route at HITL_1.
-    route = run.chosen_route or ("create" if run.start_mode == "create" else "small_refresh")
+    # Create-mode runs author a brand-new article with no existing content to
+    # small_refresh / full_rewrite, so they always use the create prompt — a
+    # forced route at HITL_1 doesn't apply here. Refresh runs follow the route
+    # gap analysis chose (defaulting to small_refresh).
+    route = "create" if run.start_mode == "create" else (run.chosen_route or "small_refresh")
     writer_context = (
         f"{run.topic}\n{' '.join(run.keywords)}\n"
         f"{json.dumps(o.payload, ensure_ascii=False)}\n{fa_markdown}"

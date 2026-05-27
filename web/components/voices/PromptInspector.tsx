@@ -59,8 +59,8 @@ const USER_PROMPT_SCHEMAS: Record<GraphMode, Record<string, SchemaRow[]>> = {
       { field: "acf_adv_id", source: "runs.acf_adv_id" },
       { field: "acf_widget_id", source: "runs.acf_widget_id" },
     ],
-    // Writer reuses the refresh template, but gap_analysis + existing markdown
-    // arrive empty (the writer is the first content node in create-mode).
+    // Writer uses the dedicated create-mode template; gap_analysis + existing
+    // markdown arrive empty (the writer is the first content node in create-mode).
     writer: [
       { field: "topic", source: "runs.topic" },
       { field: "focus_keywords", source: "runs.keywords" },
