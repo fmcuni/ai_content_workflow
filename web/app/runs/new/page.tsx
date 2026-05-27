@@ -12,6 +12,8 @@ import { RefreshFindingsPanel } from "@/components/RefreshFindingsPanel";
 import { api, articlesApi, personasApi, refreshApi } from "@/lib/api";
 import type { CreateRunRequest, Mode, Persona } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { BriefForm } from "@/components/topics/BriefForm";
+import { CreateLedger } from "@/components/topics/CreateLedger";
 
 type RowStatus = "idle" | "submitting" | "done" | "error";
 
@@ -64,18 +66,18 @@ const FRONTS: { key: FrontKey; numeral: string; kicker: string; title: string; d
   {
     key: "topics",
     numeral: "II",
-    kicker: "Front Two · In the wings",
+    kicker: "Front Two · Live",
     title: "Expand Topics",
-    dek: "Grow an existing topic cluster with adjacent coverage.",
-    active: false,
+    dek: "Brief the desk on a research theme; it returns a vetted batch of candidates.",
+    active: true,
   },
   {
     key: "create",
     numeral: "III",
-    kicker: "Front Three · In the wings",
+    kicker: "Front Three · Live",
     title: "Create New Articles",
-    dek: "Commission fresh pieces from a topic brief.",
-    active: false,
+    dek: "Commission fresh pieces. Each row becomes a create-mode run, published as a draft.",
+    active: true,
   },
 ];
 
@@ -295,8 +297,11 @@ function NewRunForm() {
         })}
       </nav>
 
-      {evaluation && <RefreshFindingsPanel ev={evaluation} />}
-      {article && !evaluation && (
+      {front === "topics" && <BriefForm />}
+      {front === "create" && <CreateLedger />}
+
+      {front === "articles" && evaluation && <RefreshFindingsPanel ev={evaluation} />}
+      {front === "articles" && article && !evaluation && (
         <blockquote className="border-l-2 border-accent pl-5 space-y-1.5 text-[13px]">
           <p className="kicker">Brief from Archive · Row 1 pre-filled</p>
           <p className="font-display text-[18px] text-ink leading-snug">
@@ -313,6 +318,7 @@ function NewRunForm() {
         </blockquote>
       )}
 
+      {front === "articles" && (
       <section aria-labelledby="ledger-title" className="space-y-4">
         <div className="flex items-end justify-between gap-4 border-b border-ink pb-3">
           <div>
@@ -467,6 +473,7 @@ function NewRunForm() {
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

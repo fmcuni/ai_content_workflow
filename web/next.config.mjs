@@ -34,6 +34,7 @@ const nextConfig = {
       { source: "/api/wp-options/:path*", destination: `${apiBase}/wp-options/:path*` },
       { source: "/api/personas/:path*", destination: `${apiBase}/personas/:path*` },
       { source: "/api/prompts/:path*", destination: `${apiBase}/prompts/:path*` },
+      { source: "/api/topic-batches/:path*", destination: `${apiBase}/topic-batches/:path*` },
     ];
   },
 };

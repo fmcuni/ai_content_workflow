@@ -1,9 +1,10 @@
 import type {
-  Audit, Article, ArticleDetail, ArticleListResponse, CreateRunRequest,
+  Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus, CreateRunRequest,
   DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis,
-  Hitl2Request, Outline, Persona, PersonaIn, PersonaPatch, PersonaUsage,
-  PromptGraph, PromptTemplate, RefreshEvaluation, Render, RunSummary, ScanResponse,
-  UserPromptExample, WpCategoryOption, WpUserOption,
+  Hitl2Request, Outline, PatchCandidateIn, Persona, PersonaIn, PersonaPatch, PersonaUsage,
+  PromoteRequest, PromoteResponse, PromptGraph, PromptTemplate, RefreshEvaluation, Render,
+  RunSummary, ScanResponse, TopicBatch, TopicBatchCreateResponse, TopicBatchIn,
+  TopicCandidate, UserPromptExample, WpCategoryOption, WpUserOption,
 } from "./types";
 
 const BASE = "/api/runs";
@@ -102,6 +103,42 @@ export const personasApi = {
     http<Persona>(`${PERSONAS_BASE}/${slug}/restore`, { method: "POST" }),
   usage: (slug: string) =>
     http<PersonaUsage>(`${PERSONAS_BASE}/${slug}/usage`),
+};
+
+const TOPIC_BATCHES_BASE = "/api/topic-batches";
+
+export const topicBatchesApi = {
+  create: (body: TopicBatchIn) =>
+    http<TopicBatchCreateResponse>(TOPIC_BATCHES_BASE, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  list: (status?: BatchStatus) =>
+    http<TopicBatch[]>(`${TOPIC_BATCHES_BASE}${status ? `?status=${status}` : ""}`),
+  detail: (batchId: string) =>
+    http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}`),
+  eventsUrl: (batchId: string) => {
+    // SSE goes direct to the FastAPI host (Next rewrites buffer streams).
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "";
+    return `${apiBase}/topic-batches/${batchId}/events`;
+  },
+  patchCandidate: (batchId: string, candidateId: string, body: PatchCandidateIn) =>
+    http<TopicCandidate>(
+      `${TOPIC_BATCHES_BASE}/${batchId}/candidates/${candidateId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  promote: (batchId: string, body: PromoteRequest) =>
+    http<PromoteResponse>(`${TOPIC_BATCHES_BASE}/${batchId}/promote`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  skip: (batchId: string, candidateId: string, editorEmail: string) =>
+    http<TopicCandidate>(
+      `${TOPIC_BATCHES_BASE}/${batchId}/candidates/${candidateId}/skip`,
+      { method: "POST", body: JSON.stringify({ editor_email: editorEmail }) },
+    ),
+  close: (batchId: string) =>
+    http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}/close`, { method: "POST" }),
 };
 
 export const promptsApi = {

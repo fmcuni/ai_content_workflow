@@ -16,10 +16,15 @@ export interface RunSummary {
   chosen_route: Route | null;
   iteration_count: number;
   hitl_2_iteration?: number;
+  start_mode?: StartMode;
+  topic_candidate_id?: string | null;
+  target_audience?: string | null;
 }
 
+export type StartMode = "refresh" | "create";
+
 export interface CreateRunRequest {
-  article_url: string;
+  article_url?: string | null;
   topic: string;
   keywords: string[];
   mode: Mode;
@@ -30,6 +35,123 @@ export interface CreateRunRequest {
   topic_category?: string | null;
   editor_email: string;
   triggered_by_evaluation_id?: string | null;
+  start_mode?: StartMode;
+  topic_candidate_id?: string | null;
+  target_audience?: string | null;
+}
+
+export type BatchStatus =
+  | "pending"
+  | "generating"
+  | "analysing"
+  | "ready_for_review"
+  | "partially_promoted"
+  | "done"
+  | "failed";
+
+export type CandidateStatus = "candidate" | "promoted" | "skipped" | "errored";
+
+export type ExistingVerdict = "yes" | "no" | "not_sure";
+export type HotTopicVerdict = "yes" | "no";
+
+export interface TopicCandidate {
+  candidate_id: string;
+  batch_id: string;
+  position: number;
+  status: CandidateStatus;
+  topic: string;
+  keywords: string[];
+  original_topic: string;
+  original_keywords: string[];
+  existing: ExistingVerdict | null;
+  existing_note: string | null;
+  existing_url: string | null;
+  hot_topic: HotTopicVerdict | null;
+  hot_topic_note: string | null;
+  persona_slug: string | null;
+  acf_adv_id: number | null;
+  acf_widget_id: number | null;
+  operator_note: string | null;
+  promote_mode: "create" | "refresh" | null;
+  promoted_run_id: string | null;
+  last_error: string | null;
+  last_edited_by: string | null;
+  last_edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TopicBatch {
+  batch_id: string;
+  status: BatchStatus;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  research_theme: string;
+  target_audience: string;
+  topic_count: number;
+  keywords_per_topic: number;
+  must_cover: string[];
+  must_avoid: string[];
+  priority_focus: string | null;
+  notes: string | null;
+  persona_default: string | null;
+  acf_adv_id_default: number | null;
+  acf_widget_id_default: number | null;
+  cost_cents: number;
+  last_error: string | null;
+  candidates?: TopicCandidate[] | null;
+}
+
+export interface TopicBatchIn {
+  research_theme: string;
+  target_audience: string;
+  topic_count: number;
+  keywords_per_topic: number;
+  must_cover: string[];
+  must_avoid: string[];
+  priority_focus?: string | null;
+  notes?: string | null;
+  persona_default?: string | null;
+  acf_adv_id_default?: number | null;
+  acf_widget_id_default?: number | null;
+  editor_email: string;
+}
+
+export interface TopicBatchCreateResponse {
+  batch_id: string;
+  status: BatchStatus;
+}
+
+export interface PatchCandidateIn {
+  topic?: string;
+  keywords?: string[];
+  persona_slug?: string;
+  acf_adv_id?: number;
+  acf_widget_id?: number;
+  operator_note?: string;
+  editor_email: string;
+}
+
+export interface PromotionItem {
+  candidate_id: string;
+  mode: "create" | "refresh";
+}
+
+export interface PromoteRequest {
+  promotions: PromotionItem[];
+  editor_email: string;
+}
+
+export interface PromoteResponseItem {
+  candidate_id: string;
+  run_id: string;
+  mode: "create" | "refresh";
+}
+
+export interface PromoteResponse {
+  items: PromoteResponseItem[];
+  batch_status: BatchStatus;
 }
 
 export interface GapAnalysis {

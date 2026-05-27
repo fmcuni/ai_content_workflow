@@ -10,7 +10,7 @@ import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { CostMeter } from "@/components/CostMeter";
 import { useRunEvents } from "@/lib/sse";
-import { api } from "@/lib/api";
+import { api, topicBatchesApi } from "@/lib/api";
 
 function BylineItems({ items }: { items: (React.ReactNode | null)[] }) {
   const visible = items.filter((x): x is React.ReactNode => x !== null && x !== undefined && x !== false);
@@ -35,12 +35,46 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
   });
   const events = useRunEvents(runId);
 
+  // Run row exposes candidate_id but not batch_id. Walk recent batches to
+  // locate the parent — there is no candidate-lookup endpoint today.
+  const { data: batch } = useQuery({
+    queryKey: ["topic-batch-for-run", run?.topic_candidate_id],
+    queryFn: async () => {
+      const candidateId = run?.topic_candidate_id;
+      if (!candidateId) return null;
+      const list = await topicBatchesApi.list();
+      for (const b of list) {
+        const detail = await topicBatchesApi.detail(b.batch_id);
+        if (detail.candidates?.some((c) => c.candidate_id === candidateId)) {
+          return detail;
+        }
+      }
+      return null;
+    },
+    enabled: !!run?.topic_candidate_id,
+    staleTime: 60_000,
+  });
+
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Link href="/" className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider">
           ← All runs
         </Link>
+        {batch && (
+          <>
+            <span className="text-ink-faint font-mono text-[11px]">·</span>
+            <Link
+              href={`/topic-batches/${batch.batch_id}`}
+              className="font-mono text-[11px] text-ink-soft hover:text-ink uppercase tracking-wider"
+            >
+              From brief №{batch.batch_id.slice(0, 8)} ·{" "}
+              <span className="normal-case tracking-normal text-ink">
+                &ldquo;{batch.research_theme}&rdquo;
+              </span>
+            </Link>
+          </>
+        )}
       </div>
 
       <SectionHead
