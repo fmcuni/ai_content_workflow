@@ -185,6 +185,12 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             "wp_pushed_post_id": row.wp_pushed_post_id,
             "wp_pushed_at": row.wp_pushed_at.isoformat() if row.wp_pushed_at else None,
             "wp_push_error": row.wp_push_error,
+            # Topic-expansion linkage (Front II / III)
+            "start_mode": row.start_mode,
+            "topic_candidate_id": (
+                str(row.topic_candidate_id) if row.topic_candidate_id else None
+            ),
+            "target_audience": row.target_audience,
             # Generic graph error
             "error": row.error,
         }
@@ -402,7 +408,7 @@ async def dry_publish(
         run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
         fa = (await session.execute(
             select(FetchedArticle).where(FetchedArticle.run_id == run_id)
-        )).scalar_one()
+        )).scalar_one_or_none()
         draft = (await session.execute(
             select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
         )).scalar_one()
@@ -464,12 +470,13 @@ async def dry_publish(
     if publish_at is not None:
         body["date_gmt"] = publish_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
+    wp_post_id = fa.wp_post_id if fa is not None else None
     url = (
-        f"{target_base}/wp-json/wp/v2/posts/{fa.wp_post_id}"
-        if fa.wp_post_id
+        f"{target_base}/wp-json/wp/v2/posts/{wp_post_id}"
+        if wp_post_id
         else f"{target_base}/wp-json/wp/v2/posts"
     )
-    method = "PUT" if fa.wp_post_id else "POST"
+    method = "PUT" if wp_post_id else "POST"
 
     return {
         "target_base_url": target_base,

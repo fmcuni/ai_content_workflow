@@ -228,6 +228,11 @@ async def _build_initial_state(sf: async_sessionmaker[Any], run_id: UUID) -> dic
             "hitl_2_notes": None,
             "status": "pending",
             "error": None,
+            "start_mode": row.start_mode,
+            "topic_candidate_id": (
+                str(row.topic_candidate_id) if row.topic_candidate_id else None
+            ),
+            "target_audience": row.target_audience,
         }
 
 
