@@ -2,9 +2,9 @@
 import * as React from "react";
 import { use } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { SectionHead } from "@/components/SectionHead";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
@@ -29,11 +29,17 @@ function BylineItems({ items }: { items: (React.ReactNode | null)[] }) {
 export default function RunDetail({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
   const shortId = runId.slice(0, 8);
+  const queryClient = useQueryClient();
   const { data: run } = useQuery({
     queryKey: ["run", runId], queryFn: () => api.getRun(runId),
     refetchInterval: 3000,
   });
   const events = useRunEvents(runId);
+
+  const restart = useMutation({
+    mutationFn: () => api.restartRun(runId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["run", runId] }),
+  });
 
   // Run row exposes candidate_id but not batch_id. Walk recent batches to
   // locate the parent — there is no candidate-lookup endpoint today.
@@ -140,7 +146,31 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
                 </Link>
               </div>
             )}
-            {run && run.status !== "hitl_1" && run.status !== "hitl_2" && (
+            {run?.status === "failed" && (
+              <div>
+                <p className="kicker mb-2">Run failed</p>
+                {run.error?.message && (
+                  <p className="font-mono text-[12px] text-rose-700 bg-rose-50 border border-rose-200 rounded-md p-3 mb-3 whitespace-pre-wrap break-words">
+                    {run.error.message}
+                  </p>
+                )}
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
+                  disabled={restart.isPending}
+                  onClick={() => restart.mutate()}
+                >
+                  {restart.isPending ? "Restarting…" : "Restart run"}
+                </Button>
+                {restart.isError && (
+                  <p className="font-mono text-[12px] text-rose-700 mt-2">
+                    Couldn&apos;t restart — {String(restart.error)}
+                  </p>
+                )}
+              </div>
+            )}
+            {run && run.status !== "hitl_1" && run.status !== "hitl_2" && run.status !== "failed" && (
               <p className="font-display italic text-ink-faint text-[15px]">Nothing required of the desk.</p>
             )}
           </div>

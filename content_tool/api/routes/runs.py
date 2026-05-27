@@ -243,6 +243,30 @@ async def resume_run(
     return {"ok": True}
 
 
+@router.post("/{run_id}/restart")
+async def restart_run(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    runner=Depends(get_runner),  # noqa: ANN001, B008
+) -> dict:
+    """Re-run a failed run from the top.
+
+    Only ``failed`` runs are restartable — an in-flight or completed run must
+    not have its checkpoint wiped out from under it.
+    """
+    async with sf() as session:
+        row = (
+            await session.execute(select(Run).where(Run.run_id == run_id))
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "run not found")
+        if row.status != "failed":
+            raise HTTPException(409, "only failed runs can be restarted")
+
+    await runner.restart(run_id)
+    return {"ok": True}
+
+
 @router.post("/{run_id}/hitl-2")
 async def hitl_2(
     run_id: UUID, payload: Hitl2Request,

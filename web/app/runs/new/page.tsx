@@ -54,6 +54,12 @@ function blankRow(persona = DEFAULT_PERSONA): LedgerRow {
 
 type FrontKey = "articles" | "topics" | "create";
 
+const FRONT_KEYS: ReadonlySet<FrontKey> = new Set<FrontKey>(["articles", "topics", "create"]);
+
+function parseFront(raw: string | null): FrontKey {
+  return raw && FRONT_KEYS.has(raw as FrontKey) ? (raw as FrontKey) : "articles";
+}
+
 const FRONTS: { key: FrontKey; numeral: string; kicker: string; title: string; dek: string; active: boolean }[] = [
   {
     key: "articles",
@@ -87,7 +93,7 @@ function NewRunForm() {
   const articleId = params.get("article_id");
   const evaluationId = params.get("evaluation_id");
 
-  const [front, setFront] = useState<FrontKey>("articles");
+  const [front, setFront] = useState<FrontKey>(() => parseFront(params.get("front")));
   const [rows, setRows] = useState<LedgerRow[]>(() => [blankRow(), blankRow(), blankRow()]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRaw, setBulkRaw] = useState("");

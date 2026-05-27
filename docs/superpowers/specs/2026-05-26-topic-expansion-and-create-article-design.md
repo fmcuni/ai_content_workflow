@@ -247,7 +247,7 @@ Existing `POST /runs` (in [content_tool/api/routes/runs.py](../../../content_too
 
 - Per-batch cost = sum of (topic-gen call + dedup×N + hot-topic×N). Recorded on `topic_batches.cost_cents`.
 - Per-run cost continues to use the existing path; promoted runs link back via `runs.topic_candidate_id → topic_candidates.batch_id`.
-- New endpoint `GET /costs/batch/{batch_id}` returns analysis cost + sum of promoted-run costs.
+- `GET /costs/batch/{batch_id}` (analysis cost + sum of promoted-run costs) is a **follow-up, not shipped in v1** — see the implementation note under Decisions and plan Task 8. Only `GET /costs/run/{run_id}` exists today.
 - Tracing: each Gemini call in `topic_expansion` opens an OTEL span with the batch id and (for dedup/hot-topic) the candidate id.
 
 ## Prompts (new)
@@ -282,14 +282,14 @@ All four follow the existing `{placeholder}`-substitution convention so they liv
 
 1. **Concurrency cap = `Semaphore(5)`, hard-coded.** Constructed in the `topic_expansion` graph factory, scoped to one batch run. Yields ~4-minute wall-clock for a 30-candidate batch (60 Gemini calls in waves of 5) against typical paid-tier Gemini quotas. Cost is independent of N — concurrency only changes wall-clock and 429-risk. Revisit only if we see rate-limit errors in production; bumping to 10 later is a one-line change.
 2. **Retries = per-candidate ×2 with exponential backoff, then mark error.** If a dedup or hot-topic call fails after retries, the candidate is persisted with the failing verdict left `NULL` and `last_error` populated. The HITL_T1 grid renders these rows with a visible error chip so the operator can manually skip or commission them. The batch never fails because of a single bad candidate.
-3. **No per-batch cost ceiling in v1.** We have no real cost number yet — the n8n didn't track it. After the first three batches we'll have concrete figures to decide a sensible cap; until then a guessed number would either block legit work or be meaninglessly high. Costs are still tracked on `topic_batches.cost_cents` and visible via `GET /costs/batch/{id}` from day 1.
+3. **No per-batch cost ceiling in v1.** We have no real cost number yet — the n8n didn't track it. After the first three batches we'll have concrete figures to decide a sensible cap; until then a guessed number would either block legit work or be meaninglessly high. Costs are still tracked on `topic_batches.cost_cents`. **Note (implementation):** the `GET /costs/batch/{id}` endpoint was *not* shipped in v1 — only `GET /costs/run/{run_id}` exists today. Batch cost aggregation is tracked as a separate follow-up (see plan Task 8).
 4. **Promote-into-refresh shipped in v1.** The HITL_T1 grid exposes a `Create new` ↔ `Refresh existing` toggle on rows where `existing ∈ {"yes", "not_sure"}` and `existing_url` is non-empty. `POST /promote` accepts `{promotions: [{candidate_id, mode}]}`; in `refresh` mode it dispatches a normal refresh run against `existing_url` instead of a create-mode run. `topic_candidates.promote_mode` records the operator's choice.
 5. **Edit history shipped in v1, minimal form.** `topic_candidates` carries `original_topic`, `original_keywords` (LLM snapshots, frozen at fan_out time), plus `last_edited_by` + `last_edited_at` (set on each PATCH). The HITL_T1 grid surfaces an `edited · original "…"` kicker beneath rows the operator has rewritten. Full per-field diff history is *not* tracked — the LLM original + the current value is what we need to answer "did the operator rewrite this?" Anything richer can land later without a migration if we add a `topic_candidate_edits` table.
 
-## Items still to decide during implementation
+## Items decided during implementation (resolved 2026-05-27)
 
-These are smaller knobs that don't need a pre-implementation decision — the right answer will be clearer once we have running code:
+These smaller knobs were left open pre-implementation; the choices made once the code was running:
 
-- Exact retry backoff curve (likely 2s, 8s — match `writer.py` if it already has one).
-- Whether the HITL_T1 grid auto-refreshes via SSE after `ready_for_review` or only refetches on operator action (probably SSE-driven for consistency with the run page).
-- Whether `POST /promote` is synchronous (wait for all child run creations to succeed) or fire-and-forget with optimistic UI. Likely synchronous for v1 — N is small (≤30) and error reporting is simpler.
+- **Retry backoff curve = 3 attempts (2 retries), exponential `base * 2**attempt` with base `1.0s` plus jitter → delays ≈ 1s, 2s.** Implemented as `_retry_with_backoff` in `content_tool/graph/topic_expansion.py` (`_MAX_ATTEMPTS = 3`, `_BASE_BACKOFF_S = 1.0`), shared by `topic_gen`, dedup, and hot-topic calls. Lighter than the guessed "2s, 8s" — the dedup/hot agents have no internal retry of their own, so this is the single retry layer.
+- **HITL_T1 grid is SSE-driven.** `web/app/topic-batches/[id]/page.tsx` opens the `/topic-batches/{id}/events` stream via `fetchEventSource` and invalidates the React Query cache on each event, with a `refetchInterval` fallback while the batch is still in flight — consistent with the run page.
+- **`POST /promote` is synchronous and atomic.** All child run rows are created and validated inside one transaction (if any promotion can't be dispatched, the whole request is rejected), then the runners are started after commit. N is small (≤30) and error reporting is simpler this way.

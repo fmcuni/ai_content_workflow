@@ -10,10 +10,12 @@ import { StyleCard } from "@/components/voices/StyleCard";
 import { PressWorkflow } from "@/components/voices/PressWorkflow";
 import { PromptInspector } from "@/components/voices/PromptInspector";
 import { personasApi, promptsApi } from "@/lib/api";
+import type { GraphMode } from "@/lib/types";
 
 export default function VoicesPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [graphMode, setGraphMode] = useState<GraphMode>("refresh");
   const [composeMode, setComposeMode] = useState<
     | null
     | { kind: "create" }
@@ -26,8 +28,8 @@ export default function VoicesPage() {
   });
 
   const graph = useQuery({
-    queryKey: ["prompt-graph"],
-    queryFn: () => promptsApi.graph(),
+    queryKey: ["prompt-graph", graphMode],
+    queryFn: () => promptsApi.graph(graphMode),
   });
 
   const activeSlug = selectedSlug
@@ -86,7 +88,9 @@ export default function VoicesPage() {
         {graph.data && (
           <PressWorkflow
             graph={graph.data}
-            renderInspector={(node) => <PromptInspector node={node} />}
+            mode={graphMode}
+            onModeChange={setGraphMode}
+            renderInspector={(node) => <PromptInspector node={node} mode={graphMode} />}
           />
         )}
       </section>

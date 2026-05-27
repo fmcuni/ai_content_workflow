@@ -19,6 +19,7 @@ export interface RunSummary {
   start_mode?: StartMode;
   topic_candidate_id?: string | null;
   target_audience?: string | null;
+  error?: { type: string; message: string } | null;
 }
 
 export type StartMode = "refresh" | "create";
@@ -414,9 +415,13 @@ export interface PersonaUsage {
 
 export type PromptKind = "llm" | "deterministic";
 
+export type GraphMode = "refresh" | "create" | "topic_expansion";
+
 export interface PromptNode {
   id: string;
-  sub_graph: "strategy" | "production" | "publish";
+  // strategy | production | publish for run pipelines; generate | analyse for
+  // the topic-expansion subgraph.
+  sub_graph: string;
   order: number;
   kind: PromptKind;
   uses_persona: boolean;
@@ -427,13 +432,18 @@ export interface PromptNode {
 
 export interface PromptEdge { from: string; to: string; label?: string }
 export interface PromptGate {
-  id: "HITL_1" | "HITL_2";
+  id: string;
+  // Node id the gate sits before, or "__end__" for a review that follows the
+  // whole subgraph (e.g. HITL_T1).
   before: string;
   label: string;
   description: string;
 }
 
 export interface PromptGraph {
+  mode?: GraphMode;
+  label?: string;
+  summary?: string;
   nodes: PromptNode[];
   edges: PromptEdge[];
   gates: PromptGate[];

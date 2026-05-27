@@ -1,6 +1,6 @@
 import type {
   Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus, CreateRunRequest,
-  DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis,
+  DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Outline, PatchCandidateIn, Persona, PersonaIn, PersonaPatch, PersonaUsage,
   PromoteRequest, PromoteResponse, PromptGraph, PromptTemplate, RefreshEvaluation, Render,
   RunSummary, ScanResponse, TopicBatch, TopicBatchCreateResponse, TopicBatchIn,
@@ -36,6 +36,8 @@ export const api = {
   ) => http(`${BASE}/${runId}/resume`, { method: "POST", body: JSON.stringify(body) }),
   resumeHitl2: (runId: string, body: Hitl2Request) =>
     http(`${BASE}/${runId}/hitl-2`, { method: "POST", body: JSON.stringify(body) }),
+  restartRun: (runId: string) =>
+    http<{ ok: boolean }>(`${BASE}/${runId}/restart`, { method: "POST" }),
   dryPublish: (runId: string, body?: DryPublishRequest) =>
     http<DryPublishResponse>(`${BASE}/${runId}/dry-publish`, {
       method: "POST",
@@ -142,7 +144,8 @@ export const topicBatchesApi = {
 };
 
 export const promptsApi = {
-  graph: () => http<PromptGraph>(`${PROMPTS_BASE}/graph`),
+  graph: (mode: GraphMode = "refresh") =>
+    http<PromptGraph>(`${PROMPTS_BASE}/graph?mode=${mode}`),
   template: (id: string) => http<PromptTemplate>(`${PROMPTS_BASE}/templates/${id}`),
   userExample: (runId: string, agent: string) =>
     http<UserPromptExample>(`${PROMPTS_BASE}/user-example?run_id=${runId}&agent=${agent}`),

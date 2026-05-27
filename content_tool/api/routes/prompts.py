@@ -9,7 +9,7 @@ from content_tool.agents import audit as audit_agent
 from content_tool.agents import gap_analysis as gap_agent
 from content_tool.agents import outline as outline_agent
 from content_tool.agents import writer as writer_agent
-from content_tool.api.prompt_graph import PROMPT_GRAPH
+from content_tool.api.prompt_graph import PROMPT_GRAPHS
 from content_tool.db.models import (
     AuditRun,
     Citation,
@@ -28,14 +28,21 @@ _TEMPLATE_FILES = {
     "audit": "audit.md",
     "gap_analysis": "gap_analysis.md",
     "outline": "outline.md",
+    "outline_create_mode": "outline_create_mode.md",
     "writer_small_refresh": "writer_small_refresh.md",
     "writer_full_rewrite": "writer_full_rewrite.md",
+    "topic_gen": "topic_gen.md",
+    "topic_dedup": "topic_dedup.md",
+    "topic_hot": "topic_hot.md",
 }
 
 
 @router.get("/graph")
-async def graph() -> dict:
-    return PROMPT_GRAPH
+async def graph(mode: str = Query("refresh")) -> dict:
+    g = PROMPT_GRAPHS.get(mode)
+    if g is None:
+        raise HTTPException(404, f"unknown graph mode '{mode}'")
+    return g
 
 
 @router.get("/templates/{template_id}")
@@ -73,6 +80,16 @@ async def _render_user_prompt(
         )
 
     if agent == "outline":
+        # Create-mode runs have no fetched article or gap analysis — the
+        # outline is built straight from the brief (mirrors outline.py).
+        if run.start_mode == "create":
+            return outline_agent.build_user_prompt_create_mode(
+                topic=run.topic,
+                keywords=list(run.keywords or []),
+                target_audience=run.target_audience,
+                acf_adv_id=run.acf_adv_id,
+                acf_widget_id=run.acf_widget_id,
+            )
         ga = (await session.execute(
             select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
         )).scalar_one_or_none()
@@ -99,13 +116,16 @@ async def _render_user_prompt(
         fa = (await session.execute(
             select(FetchedArticle).where(FetchedArticle.run_id == run.run_id)
         )).scalar_one_or_none()
-        if ga is None or ol is None or fa is None:
-            raise _MissingInputs("writer needs gap_analysis + outline + fetched_article")
+        # In create-mode the writer is the first content node: gap analysis and
+        # the fetched article are absent, so fall back to empty payloads exactly
+        # like run_writer does. The outline is always required.
+        if ol is None or (run.start_mode != "create" and (ga is None or fa is None)):
+            raise _MissingInputs("writer needs outline (+ gap_analysis + fetched_article in refresh)")  # noqa: E501
         return writer_agent.build_user_prompt(
             run=run,
-            gap_analysis=ga.payload,
+            gap_analysis=ga.payload if ga is not None else {},
             outline=ol.payload,
-            existing_markdown=fa.markdown,
+            existing_markdown=fa.markdown if fa is not None else "",
             refine_notes=None,
         )
 

@@ -199,9 +199,9 @@
 
 ## Task 9: Docs + handoff
 
-- [ ] Update `CLAUDE.md` with a one-line addition under "Architecture" noting the two new entry modes (Front II batch + Front III single-create) and the `start_mode` switch.
-- [ ] Update the spec doc's "Open questions" section with actual decisions taken during implementation (e.g. final concurrency cap, retry behaviour, cost ceiling if added).
-- [ ] No README changes required.
+- [x] Update `CLAUDE.md` with a one-line addition under "Architecture" noting the two new entry modes (Front II batch + Front III single-create) and the `start_mode` switch.
+- [x] Update the spec doc's "Open questions" section with actual decisions taken during implementation (e.g. final concurrency cap, retry behaviour, cost ceiling if added).
+- [x] No README changes required.
 
 ---
 

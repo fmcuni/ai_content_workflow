@@ -76,9 +76,12 @@ class RunExecutor:
         status: str,
         *,
         error: dict[str, Any] | None = None,
+        clear_error: bool = False,
     ) -> None:
         values: dict[str, Any] = {"status": status}
-        if error is not None:
+        if clear_error:
+            values["error"] = None
+        elif error is not None:
             values["error"] = error
         try:
             async with self._sf() as session:
@@ -109,6 +112,21 @@ class RunExecutor:
 
     async def resume(self, run_id: UUID, update: dict[str, Any]) -> None:
         self._tasks[run_id] = asyncio.create_task(self._run(run_id, resume=True, update=update))
+
+    async def restart(self, run_id: UUID) -> None:
+        """Re-run a failed run from the top.
+
+        A crashed run keeps its partial LangGraph checkpoint, so re-invoking
+        ``start`` alone would resume the broken super-step. Delete the thread's
+        checkpoint first so the graph executes from the beginning with a freshly
+        built initial state, clear the persisted error, and drop the stale event
+        history so the live timeline doesn't replay the previous crash.
+        """
+        async with make_checkpointer(self._postgres_url) as cp:
+            await cp.adelete_thread(str(run_id))
+        self._history.pop(run_id, None)
+        await self._set_status(run_id, "pending", clear_error=True)
+        await self.start(run_id)
 
     async def _run(
         self,

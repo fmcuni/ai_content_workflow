@@ -65,6 +65,15 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
   resumed via `POST /runs/{id}/resume`. UI streams progress over SSE.
 - Approval at HITL_2 publishes via `wordpress/client.py` and writes the
   compliance audit log.
+- Entry modes via `start_mode`: refresh runs follow the path above; **Front II**
+  ("Expand Topics") runs the `topic_expansion` subgraph (theme → topic-gen →
+  dedup + hot-topic → HITL_T1 review → fan-out to runs); **Front III** ("Create
+  New Articles") uses `start_mode="create"` — skip `fetch_article`/`gap_analysis`,
+  enter at `outline`, and publish to WordPress as **drafts**. **Promoted topics**
+  (Front II → `POST /topic-batches/{id}/promote`) fan out per the selected promotion
+  `mode`: `create` promotions follow the Front III path above, while `refresh`
+  promotions use `start_mode="refresh"` with the candidate's `existing_url` and run
+  the full refresh path (fetch + gap analysis).
 
 ## Conventions
 
