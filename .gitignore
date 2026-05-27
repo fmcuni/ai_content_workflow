@@ -38,6 +38,7 @@ out/
 .idea/
 .claude/
 .playwright-cli/
+.playwright-mcp/
 *.swp
 *.swo
 .DS_Store
@@ -51,3 +52,7 @@ data/
 tmp/
 *.sqlite
 *.db
+
+# Local debug artifacts (screenshots, captures)
+index-keywords.png
+/*.png
