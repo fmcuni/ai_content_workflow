@@ -12,6 +12,7 @@ from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, Outlin
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.writer import WriterOutput
 from content_tool.policy.personas import load_persona
+from content_tool.policy.source_policy import DEFAULT_POLICY_PATH, SourcePolicy
 
 _PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
 PROMPT_PATHS = {
@@ -38,12 +39,16 @@ async def build_system_prompt(
     *,
     session: AsyncSession,
     context_text: str | None = None,
+    policy_path: Path = DEFAULT_POLICY_PATH,
 ) -> str:
     template = PROMPT_PATHS[route].read_text(encoding="utf-8")
     persona = await load_persona(persona_name, session=session)
-    return template.replace(
-        "{persona_block}", persona.to_prompt_block(context_text)
-    ).replace("{today_date}", today.isoformat())
+    policy = SourcePolicy.load_from(policy_path)
+    return (
+        template.replace("{persona_block}", persona.to_prompt_block(context_text))
+        .replace("{today_date}", today.isoformat())
+        .replace("{source_policy_block}", policy.to_prompt_block())
+    )
 
 
 def build_user_prompt(

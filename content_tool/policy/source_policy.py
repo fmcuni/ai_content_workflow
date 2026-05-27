@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -7,6 +8,8 @@ import yaml
 
 Decision = Literal["allowed", "denied", "community_exception"]
 DeniedReason = Literal["bowtie_owned", "competitor", "other"]
+
+DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[2] / "config" / "source_policy.yaml"
 
 
 @dataclass
@@ -72,3 +75,35 @@ class SourcePolicy:
             return PolicyDecision("denied", reason="competitor", matched_rule=apex)
 
         return PolicyDecision("allowed", matched_rule=apex)
+
+    def to_prompt_block(self) -> str:
+        """Render the source-selection rules as a 繁體中文 prompt block.
+
+        Single source of truth: the writer prompts inject this so their
+        guidance can never drift from ``config/source_policy.yaml``.
+        """
+        tlds = " / ".join(self.prefer_tlds) if self.prefer_tlds else "（未設定）"
+        domains = "、".join(sorted(self.prefer_domains)) if self.prefer_domains else "（未設定）"
+        cats = "、".join(sorted(self.community_topic_categories)) or "（未設定）"
+        comm_domains = "、".join(sorted(self.community_allowed_domains)) or "（未設定）"
+        return "\n".join(
+            [
+                "引用與資料來源規則（由 source_policy 統一管理）：",
+                "- 主動使用 googleSearch 與 urlContext 工具核實時間敏感資訊（年份、收費、政策、"
+                "法規、資格、流程、醫療或保險條款）。",
+                "- 你需要自行判斷並篩選「真確、權威」的資料來源，而不是機械式比對清單。"
+                "評估每個來源時，請依下列原則排序取捨：",
+                "  1. 權威性：官方、政府、學術、法定機構或國際衛生組織等具公信力的一手來源優先。",
+                "  2. 一手原則：盡量引用發出資訊的原始機構，而非二手轉述或內容農場。",
+                "  3. 香港相關性與時效：優先採用適用於香港、且為最新版本的資料。",
+                "  4. 可信中立：避免無署名、無法核實、明顯 SEO 拼湊或商業推銷性質的來源。",
+                f"- 高度建議優先採用（例子，非窮舉清單）：TLD {tlds}；機構 {domains}。"
+                "若有更權威、更貼題的官方一手來源，亦可採用。",
+                "- 硬性禁止：不可引用 bowtie.com.hk 或任何保險公司網站作為資料來源。",
+                f"- 社區來源例外：只有當 topic_category 屬於「{cats}」時，"
+                f"方可引用社區／論壇來源（例如 {comm_domains}）；其他題材一律不可引用社區來源。",
+                "- 引用必須在文中自然 ground 到具體段落，不可堆砌或泛泛而引。",
+                "- 不要在 markup 中手寫 `## 資訊來源` 區塊；該區塊由後處理流程根據 grounding "
+                "metadata 自動生成。",
+            ]
+        )
