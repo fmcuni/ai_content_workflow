@@ -12,7 +12,14 @@ from sqlalchemy import select
 from content_tool.api.main import create_app
 from content_tool.api.sse import RunExecutor
 from content_tool.db.connection import make_engine, make_session_factory
-from content_tool.db.models import Run
+from content_tool.db.models import (
+    AuditRun,
+    Citation,
+    Draft,
+    OutlineRow,
+    Render,
+    Run,
+)
 from content_tool.gemini.fake import FakeGeminiClient
 
 
@@ -250,5 +257,83 @@ async def test_resume_persists_override_route(postgres_url, monkeypatch):
                 await session.execute(select(Run).where(Run.run_id == run_id))
             ).scalar_one()
             assert row.chosen_route == "full_rewrite"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_clear_derived_rows_on_restart(postgres_url):
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+    run_id = uuid4()
+    draft_id = uuid4()
+
+    async with sf() as session:
+        session.add(
+            Run(
+                run_id=run_id,
+                created_by="x",
+                status="failed",
+                article_url="https://e.com",
+                topic="手腕受傷",
+                keywords=["TFCC"],
+                mode="auto",
+                acf_adv_id=1,
+                acf_widget_id=2,
+                persona="bowtie-editor",
+                today_date=date(2026, 5, 21),
+                chosen_route="small_refresh",
+            )
+        )
+        await session.commit()
+        session.add(OutlineRow(run_id=run_id, payload={"h1": "x"}, edited_by_human=False))
+        session.add(
+            Draft(
+                run_id=run_id,
+                draft_id=draft_id,
+                iteration=0,
+                diagnose="d",
+                markup_raw="<p>x</p>",
+                citation_intents=[],
+            )
+        )
+        await session.commit()
+        # Two renders for one draft — the shape that breaks audit's scalar_one().
+        session.add(
+            Render(draft_id=draft_id, seo_title="t", meta_description="m", html_body="<p>x</p>")
+        )
+        session.add(
+            Render(draft_id=draft_id, seo_title="t2", meta_description="m2", html_body="<p>y</p>")
+        )
+        session.add(Citation(draft_id=draft_id, vertex_uri="vtx://1", policy_decision="allow"))
+        session.add(
+            AuditRun(
+                draft_id=draft_id,
+                overall_pass=True,
+                llm_findings={},
+                deterministic_findings={},
+            )
+        )
+        await session.commit()
+
+    runner = RunExecutor(
+        postgres_url=postgres_url, session_factory=sf, gemini=FakeGeminiClient(canned_responses={})
+    )
+    await runner._clear_derived_rows(run_id)
+
+    async with sf() as session:
+
+        async def gone(stmt) -> bool:
+            return (await session.execute(stmt)).first() is None
+
+        assert await gone(select(OutlineRow).where(OutlineRow.run_id == run_id))
+        assert await gone(select(Draft).where(Draft.run_id == run_id))
+        # draft_id children removed via ON DELETE CASCADE.
+        assert await gone(select(Render).where(Render.draft_id == draft_id))
+        assert await gone(select(Citation).where(Citation.draft_id == draft_id))
+        assert await gone(select(AuditRun).where(AuditRun.draft_id == draft_id))
+        # The run row itself survives so it can be re-executed.
+        run_row = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
+        assert run_row.run_id == run_id
 
     await engine.dispose()

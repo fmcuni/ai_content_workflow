@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from content_tool.db.models import Run
+from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
@@ -90,7 +90,10 @@ class RunExecutor:
                 )
                 await session.commit()
         except Exception:
-            logger.exception("failed to persist run status update", extra={"run_id": str(run_id), "status": status})
+            logger.exception(
+                "failed to persist run status update",
+                extra={"run_id": str(run_id), "status": status},
+            )
 
     async def _emit(self, run_id: UUID, event: str, payload: dict[str, Any]) -> None:
         data = json.dumps(
@@ -124,9 +127,26 @@ class RunExecutor:
         """
         async with make_checkpointer(self._postgres_url) as cp:
             await cp.adelete_thread(str(run_id))
+        await self._clear_derived_rows(run_id)
         self._history.pop(run_id, None)
         await self._set_status(run_id, "pending", clear_error=True)
         await self.start(run_id)
+
+    async def _clear_derived_rows(self, run_id: UUID) -> None:
+        """Drop rows the graph nodes wrote on prior attempts.
+
+        Restarting re-runs every node from the top, and each node INSERTs its
+        output (outline, draft, render, citations, audit). Without clearing the
+        previous attempt's rows they accumulate, so reads like
+        ``select(Render).where(...).scalar_one()`` raise "Multiple rows were
+        found". Deleting the run's drafts cascades to citations, renders, and
+        audit_runs; outlines/gap_analyses/fetched_articles are cleared directly.
+        compliance_log is intentionally left alone (only written post-publish).
+        """
+        async with self._sf() as session:
+            for model in (Draft, OutlineRow, GapAnalysisRow, FetchedArticle):
+                await session.execute(delete(model).where(model.run_id == run_id))
+            await session.commit()
 
     async def _run(
         self,
@@ -161,8 +181,8 @@ class RunExecutor:
                 # subgraphs=True yields (namespace_tuple, {node_name: update})
                 # for every node in the strategy/production sub-graphs. Without
                 # it the root graph emits a single "production.done" for the
-                # entire 1–5min production stage and the live timeline appears
-                # frozen. Namespace is e.g. ("production:abc",) — strip the
+                # entire 1-5min production stage and the live timeline appears
+                # frozen. Namespace is e.g. ("production:abc",) - strip the
                 # langgraph-generated id and keep just the parent label.
                 async for ns, chunk in graph.astream(
                     inputs,
