@@ -12,6 +12,18 @@ import { CostMeter } from "@/components/CostMeter";
 import { useRunEvents } from "@/lib/sse";
 import { api, topicBatchesApi } from "@/lib/api";
 
+// Finished runs whose stored outline / article can still be edited post-hoc
+// and re-pushed. In-flight stages (pending/fetching/strategy/production/
+// publishing) and the HITL gates are intentionally excluded.
+const TERMINAL_STATUSES = new Set([
+  "persisted",
+  "published",
+  "failed",
+  "cancelled",
+  "rejected",
+  "changes_requested",
+]);
+
 function BylineItems({ items }: { items: (React.ReactNode | null)[] }) {
   const visible = items.filter((x): x is React.ReactNode => x !== null && x !== undefined && x !== false);
   return (
@@ -170,7 +182,18 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
                 )}
               </div>
             )}
-            {run && run.status !== "hitl_1" && run.status !== "hitl_2" && run.status !== "failed" && (
+            {run && TERMINAL_STATUSES.has(run.status) && (
+              <div>
+                <p className="kicker mb-2">Post-hoc edit</p>
+                <Link
+                  href={`/runs/${runId}/edit`}
+                  className={buttonVariants({ variant: run.status === "failed" ? "secondary" : "primary", size: "lg" }) + " w-full"}
+                >
+                  Edit outline & article →
+                </Link>
+              </div>
+            )}
+            {run && !TERMINAL_STATUSES.has(run.status) && run.status !== "hitl_1" && run.status !== "hitl_2" && (
               <p className="font-display italic text-ink-faint text-[15px]">Nothing required of the desk.</p>
             )}
           </div>

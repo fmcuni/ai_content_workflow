@@ -72,6 +72,42 @@ class Hitl2Request(BaseModel):
     wp_publish_at: datetime | None = None
 
 
+class OutlineEditRequest(BaseModel):
+    """Post-hoc outline edit for a finished run (no graph resume).
+
+    Persists to ``outlines.human_edits`` so the durable record reflects the
+    edit. Used by the standalone edit page, not the HITL_1 gate.
+    """
+
+    outline: dict
+
+
+class ArticleEditRequest(BaseModel):
+    """Post-hoc article edit for a finished run (no graph resume).
+
+    Writes the body/SEO fields onto the latest Render row and the WP metadata
+    onto the Run row, so a subsequent re-push reads the edited content.
+    """
+
+    html_body: str
+    seo_title: str
+    meta_description: str
+    wp_publish_status: Literal["draft", "future", "publish"] | None = None
+    wp_author_id: int | None = None
+    wp_category_ids: list[int] | None = None
+    wp_tag_ids: list[int] | None = None
+    wp_featured_media_id: int | None = None
+    wp_slug: str | None = None
+    wp_excerpt: str | None = None
+    wp_publish_at: datetime | None = None
+
+
+class RepublishResponse(BaseModel):
+    wp_post_id: int
+    link: str | None = None
+    status: str
+
+
 class DryPublishRequest(BaseModel):
     """Optional in-progress edits from the HITL2 reviewer.
 

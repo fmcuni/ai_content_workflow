@@ -8,12 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from content_tool.api.schemas import (
+    ArticleEditRequest,
     CreateRunRequest,
     CreateRunResponse,
     DryPublishRequest,
     DryPublishResponse,
     ExistingPostOut,
     Hitl2Request,
+    OutlineEditRequest,
+    RepublishResponse,
     ResumeRequest,
 )
 from content_tool.api.sse import sse_stream
@@ -347,7 +350,11 @@ async def get_outline(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  #
         ).scalar_one_or_none()
         if not row:
             raise HTTPException(404, "not found")
-        return {"payload": row.payload, "edited_by_human": row.edited_by_human}
+        return {
+            "payload": row.payload,
+            "edited_by_human": row.edited_by_human,
+            "human_edits": row.human_edits,
+        }
 
 
 @router.get("/{run_id}/drafts/latest")
@@ -388,6 +395,144 @@ async def get_latest_render(run_id: UUID, sf=Depends(get_session_factory)) -> di
             "excerpt_suggestion": render.excerpt_suggestion,
             "slug_suggestion": render.slug_suggestion,
         }
+
+
+@router.put("/{run_id}/outline")
+async def edit_outline(
+    run_id: UUID,
+    payload: OutlineEditRequest,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Persist a post-hoc outline edit to ``outlines.human_edits``.
+
+    Unlike ``/resume`` (which drives the HITL_1 gate), this is a plain record
+    update for finished runs and never touches the LangGraph checkpoint.
+    """
+    from sqlalchemy import update
+
+    async with sf() as session:
+        row = (
+            await session.execute(select(OutlineRow).where(OutlineRow.run_id == run_id))
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "no outline for this run")
+        await session.execute(
+            update(OutlineRow)
+            .where(OutlineRow.run_id == run_id)
+            .values(edited_by_human=True, human_edits=payload.outline)
+        )
+        await session.commit()
+    return {"ok": True}
+
+
+@router.put("/{run_id}/article")
+async def edit_article(
+    run_id: UUID,
+    payload: ArticleEditRequest,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Persist a post-hoc article edit for a finished run.
+
+    Writes body/SEO onto the latest Render row and WP metadata onto the Run
+    row, so a subsequent ``/republish`` pushes the edited content. Only WP
+    fields explicitly provided are overwritten.
+    """
+    from sqlalchemy import update
+
+    q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+    async with sf() as session:
+        latest_draft = (await session.execute(q)).scalar_one_or_none()
+        if not latest_draft:
+            raise HTTPException(404, "no draft for this run")
+        render = (
+            await session.execute(select(Render).where(Render.draft_id == latest_draft.draft_id))
+        ).scalar_one_or_none()
+        if not render:
+            raise HTTPException(404, "no render for this run")
+
+        await session.execute(
+            update(Render)
+            .where(Render.render_id == render.render_id)
+            .values(
+                html_body=payload.html_body,
+                seo_title=payload.seo_title,
+                meta_description=payload.meta_description,
+            )
+        )
+
+        wp_values: dict = {
+            field: getattr(payload, field)
+            for field in (
+                "wp_publish_status",
+                "wp_author_id",
+                "wp_category_ids",
+                "wp_tag_ids",
+                "wp_featured_media_id",
+                "wp_slug",
+                "wp_excerpt",
+                "wp_publish_at",
+            )
+            if getattr(payload, field) is not None
+        }
+        if wp_values:
+            await session.execute(update(Run).where(Run.run_id == run_id).values(**wp_values))
+        await session.commit()
+    return {"ok": True}
+
+
+@router.post("/{run_id}/republish", response_model=RepublishResponse)
+async def republish(
+    run_id: UUID,
+    request: Request,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Re-push the (already persisted) render + WP metadata to WordPress.
+
+    Operator-initiated overwrite of a finished run's post. Reads the durable
+    Render / Run values — call ``PUT /article`` first to save edits. Runs the
+    publish directly (no graph), reusing ``publish_to_wordpress`` so refresh
+    runs update their existing post and create runs update their minted draft.
+    """
+    from content_tool.agents.publish import publish_to_wordpress
+    from content_tool.wordpress.client import WordPressError
+
+    wp_client = getattr(request.app.state, "wp_client", None)
+    if wp_client is None:
+        raise HTTPException(503, "WordPress client not configured")
+    seo_plugin = request.app.state.seo_plugin
+
+    draft_q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+    async with sf() as session:
+        run = (
+            await session.execute(select(Run).where(Run.run_id == run_id))
+        ).scalar_one_or_none()
+        if not run:
+            raise HTTPException(404, "run not found")
+        latest_draft = (await session.execute(draft_q)).scalar_one_or_none()
+        if not latest_draft:
+            raise HTTPException(409, "run has no draft to publish")
+        render = (
+            await session.execute(select(Render).where(Render.draft_id == latest_draft.draft_id))
+        ).scalar_one_or_none()
+        if not render:
+            raise HTTPException(409, "run has no render to publish")
+
+        try:
+            result = await publish_to_wordpress(
+                session=session,
+                run_id=run_id,
+                wp_client=wp_client,
+                seo_plugin=seo_plugin,
+                if_unmodified_since=None,
+            )
+        except WordPressError as e:
+            raise HTTPException(502, f"WordPress upstream error: {e}") from e
+
+    return {
+        "wp_post_id": result["id"],
+        "link": result.get("link"),
+        "status": result["status"],
+    }
 
 
 @router.get("/{run_id}/audit")

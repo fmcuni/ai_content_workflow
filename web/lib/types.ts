@@ -284,6 +284,26 @@ export interface Hitl2Request {
   wp_publish_at?: string | null;
 }
 
+export interface ArticleEditRequest {
+  html_body: string;
+  seo_title: string;
+  meta_description: string;
+  wp_publish_status?: "draft" | "future" | "publish" | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_tag_ids?: number[] | null;
+  wp_featured_media_id?: number | null;
+  wp_slug?: string | null;
+  wp_excerpt?: string | null;
+  wp_publish_at?: string | null;
+}
+
+export interface RepublishResponse {
+  wp_post_id: number;
+  link: string | null;
+  status: string;
+}
+
 export type RecommendedAction = "refresh" | "monitor" | "ok";
 export type EvaluationOutcome = "open" | "triggered" | "dismissed" | "superseded";
 

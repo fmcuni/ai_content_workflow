@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -55,12 +55,14 @@ async def publish_to_wordpress(
 
     date_gmt: str | None = None
     if run.wp_publish_at is not None:
-        date_gmt = run.wp_publish_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        date_gmt = run.wp_publish_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
     if is_create_mode:
-        # Brand-new post: no post_id, force status="draft" (the operator
-        # promotes drafts to publish manually in WP after review).
-        post_id: int | None = None
+        # Brand-new post on first publish (no post_id), force status="draft"
+        # (the operator promotes drafts to publish manually in WP after review).
+        # On a post-hoc re-push the run already minted a draft, so reuse its id
+        # to UPDATE that post instead of creating a duplicate.
+        post_id: int | None = run.wp_pushed_post_id
         status = "draft"
     else:
         post_id = fa.wp_post_id if fa is not None else None
@@ -102,7 +104,7 @@ async def publish_to_wordpress(
         ))
         await session.commit()
         raise
-    except Exception as e:  # noqa: BLE001 — also catches transport-level errors
+    except Exception as e:  # also catches transport-level errors
         await session.execute(update(Run).where(Run.run_id == run_id).values(
             status="failed",
             wp_push_error={

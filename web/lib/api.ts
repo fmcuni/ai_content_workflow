@@ -1,9 +1,9 @@
 import type {
-  Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus, CreateRunRequest,
-  DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
+  ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
+  CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Outline, PatchCandidateIn, Persona, PersonaIn, PersonaPatch, PersonaUsage,
   PromoteRequest, PromoteResponse, PromptGraph, PromptTemplate, RefreshEvaluation, Render,
-  RunSummary, ScanResponse, TopicBatch, TopicBatchCreateResponse, TopicBatchIn,
+  RepublishResponse, RunSummary, ScanResponse, TopicBatch, TopicBatchCreateResponse, TopicBatchIn,
   TopicCandidate, UserPromptExample, WpCategoryOption, WpUserOption,
 } from "./types";
 
@@ -26,7 +26,21 @@ export const api = {
     http<{ run_id: string; status: string }>(BASE, { method: "POST", body: JSON.stringify(req) }),
   getGapAnalysis: (runId: string) => http<GapAnalysis>(`${BASE}/${runId}/gap-analysis`),
   getOutline: (runId: string) =>
-    http<{ payload: Outline; edited_by_human: boolean }>(`${BASE}/${runId}/outline`),
+    http<{ payload: Outline; edited_by_human: boolean; human_edits: Outline | null }>(
+      `${BASE}/${runId}/outline`,
+    ),
+  saveOutline: (runId: string, outline: Outline) =>
+    http<{ ok: boolean }>(`${BASE}/${runId}/outline`, {
+      method: "PUT",
+      body: JSON.stringify({ outline }),
+    }),
+  saveArticle: (runId: string, body: ArticleEditRequest) =>
+    http<{ ok: boolean }>(`${BASE}/${runId}/article`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  republish: (runId: string) =>
+    http<RepublishResponse>(`${BASE}/${runId}/republish`, { method: "POST" }),
   getLatestRender: (runId: string) => http<Render>(`${BASE}/${runId}/render`),
   getLatestAudit: (runId: string) => http<Audit>(`${BASE}/${runId}/audit`),
   resumeHitl1: (
