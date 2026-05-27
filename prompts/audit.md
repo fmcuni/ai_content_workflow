@@ -18,8 +18,9 @@
 3. 評估香港在地化：是否出現內地用語、不通順的繁中、文化錯位。
 4. 評估 coverage：gap_analysis.update_plan.must_add / must_update / must_remove / faq_to_add / facts_to_verify 是否已處理；若以 deterministic 啟發式判斷為「需 LLM 判斷」的條目，需由你判斷。
 5. 評估 citation_intents 是否被 allowed citations 支持。
-6. severity 分級：
-   - high：捏造事實、引用被拒絕來源、shortcode 結構錯誤、JSON-LD 不合法
+6. 評估品牌與銷售中立：文章不可硬銷或推廣 Bowtie 或任何保險公司／保險產品（不得有報價、購買引導、品牌 CTA、產品名稱推薦或「立即投保」等推銷語句）；中立說明「為何需要保障／保險」的風險與需求背景則可接受。
+7. severity 分級：
+   - high：捏造事實、引用被拒絕來源、shortcode 結構錯誤、JSON-LD 不合法、硬銷或推廣特定品牌／保險產品
    - medium：覆蓋率不足、語氣不符、缺少 disclaimer
    - low：可改善但不影響上線
 

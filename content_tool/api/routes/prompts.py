@@ -31,6 +31,7 @@ _TEMPLATE_FILES = {
     "outline_create_mode": "outline_create_mode.md",
     "writer_small_refresh": "writer_small_refresh.md",
     "writer_full_rewrite": "writer_full_rewrite.md",
+    "writer_create": "writer_create.md",
     "topic_gen": "topic_gen.md",
     "topic_dedup": "topic_dedup.md",
     "topic_hot": "topic_hot.md",

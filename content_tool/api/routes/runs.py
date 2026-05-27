@@ -149,6 +149,8 @@ async def list_runs(
                 "created_at": r.created_at.isoformat(),
                 "chosen_route": r.chosen_route,
                 "iteration_count": r.iteration_count,
+                "start_mode": r.start_mode,
+                "target_audience": r.target_audience,
             }
             for r in rows
         ]

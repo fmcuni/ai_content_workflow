@@ -16,6 +16,7 @@ _PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
 PROMPT_PATHS = {
     "small_refresh": _PROMPT_DIR / "writer_small_refresh.md",
     "full_rewrite": _PROMPT_DIR / "writer_full_rewrite.md",
+    "create": _PROMPT_DIR / "writer_create.md",
 }
 
 
@@ -98,7 +99,10 @@ async def run_writer(
     fa_markdown = fa.markdown if fa is not None else ""
     ga_payload: dict = ga.payload if ga is not None else {}
 
-    route = run.chosen_route or "small_refresh"
+    # Create-mode runs author a brand-new article and never run gap analysis,
+    # so there's no chosen_route — use the dedicated create prompt unless the
+    # editor explicitly overrode the route at HITL_1.
+    route = run.chosen_route or ("create" if run.start_mode == "create" else "small_refresh")
     writer_context = (
         f"{run.topic}\n{' '.join(run.keywords)}\n"
         f"{json.dumps(o.payload, ensure_ascii=False)}\n{fa_markdown}"

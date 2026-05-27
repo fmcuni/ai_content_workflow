@@ -183,12 +183,12 @@ _CREATE_GRAPH: dict = {
             "order": 1,
             "kind": "llm",
             "uses_persona": True,
-            "system_prompt_template_id": "writer_small_refresh",
-            "alt_template_ids": ["writer_full_rewrite"],
+            "system_prompt_template_id": "writer_create",
+            "alt_template_ids": ["writer_small_refresh", "writer_full_rewrite"],
             "description": (
-                "Writes the full Markdown draft in the persona's voice. Create-mode has no "
-                "gap analysis, so it defaults to small_refresh unless the editor overrides "
-                "the route at HITL_1."
+                "Writes a brand-new Markdown draft in the persona's voice using the "
+                "create-mode template. If the editor overrides the route at HITL_1, the "
+                "matching small_refresh / full_rewrite template is used instead."
             ),
         },
         *_PRODUCTION_TAIL,
