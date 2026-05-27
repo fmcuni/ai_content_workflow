@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import FetchedArticle, GapAnalysisRow, OutlineRow, Run
@@ -132,6 +133,17 @@ async def run_outline(
     )
     outline = Outline.model_validate(result.parsed)
 
-    session.add(OutlineRow(run_id=run_id, payload=outline.model_dump(), edited_by_human=False))
+    # Upsert so re-running the node (e.g. after a restart) refreshes the outline
+    # instead of violating outlines_pkey. Preserve any prior human edits.
+    payload = outline.model_dump()
+    stmt = (
+        pg_insert(OutlineRow)
+        .values(run_id=run_id, payload=payload, edited_by_human=False)
+        .on_conflict_do_update(
+            index_elements=[OutlineRow.run_id],
+            set_={"payload": payload},
+        )
+    )
+    await session.execute(stmt)
     await session.commit()
     return outline
