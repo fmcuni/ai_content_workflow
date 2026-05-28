@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -20,6 +21,26 @@ PROMPT_PATHS = {
     "full_rewrite": _PROMPT_DIR / "writer_full_rewrite.md",
     "create": _PROMPT_DIR / "writer_create.md",
 }
+
+_META_LINE_RE = re.compile(r"^%%meta desc=.*?%%\s*$", re.MULTILINE)
+
+
+def _markup_structural_issues(markup: str) -> list[str]:
+    """Return human-readable descriptions of any structural rules the writer
+    broke that would cause ``render_html`` to hard-fail. Empty list = clean.
+    """
+    issues: list[str] = []
+    lines = markup.splitlines()
+    first = lines[0] if lines else ""
+    if not first.startswith("# "):
+        issues.append(
+            "第一行必須係 `# H1 標題`，唔可以有空行、code fence、註解或任何其他內容喺前面。"  # noqa: RUF001
+        )
+    if not _META_LINE_RE.search(markup):
+        issues.append(
+            "緊接 H1 嘅下一行必須係 `%%meta desc=<具體、自然、可讀嘅描述>%%`，唔可以漏。"  # noqa: RUF001
+        )
+    return issues
 
 
 @dataclass
@@ -138,6 +159,40 @@ async def run_writer(
         tools=["googleSearch", "urlContext"],
     )
     out = WriterOutput.model_validate(result.parsed)
+    issues = _markup_structural_issues(out.markup)
+    if issues:
+        # Gemini sometimes drops the leading H1 or the %%meta desc=...%% line
+        # even though the prompt requires them. Regenerate once with the
+        # specific failures called out, then accumulate token usage so cost
+        # tracking reflects both attempts.
+        correction = (
+            "\n\n# 上一次輸出唔合格，必須修正以下結構問題並重新輸出完整 markup："  # noqa: RUF001
+            "（唔好只輸出修補段，要重寫整篇）\n"  # noqa: RUF001
+            + "\n".join(f"- {i}" for i in issues)
+        )
+        retry = await gemini.generate(
+            agent="writer",
+            system_prompt=sys_prompt,
+            user_prompt=user_prompt + correction,
+            response_schema=WriterOutput.model_json_schema(),
+            tools=["googleSearch", "urlContext"],
+        )
+        retry_out = WriterOutput.model_validate(retry.parsed)
+        retry_issues = _markup_structural_issues(retry_out.markup)
+        if retry_issues:
+            raise ValueError(
+                "writer output failed structural rules after retry: "
+                + "; ".join(retry_issues)
+            )
+        out = retry_out
+        result.tokens_in = (result.tokens_in or 0) + (retry.tokens_in or 0)
+        result.tokens_out = (result.tokens_out or 0) + (retry.tokens_out or 0)
+        result.thinking_tokens = (
+            (result.thinking_tokens or 0) + (retry.thinking_tokens or 0)
+        )
+        result.latency_ms = (result.latency_ms or 0) + (retry.latency_ms or 0)
+        result.grounding_chunks = retry.grounding_chunks
+    markup = out.markup
 
     citation_intents = [c.model_dump() for c in out.citation_intents]
     # Upsert so re-running the writer (e.g. after a restart, which re-enters the
@@ -150,7 +205,7 @@ async def run_writer(
         run_id=run_id,
         iteration=iteration,
         diagnose=out.diagnose,
-        markup_raw=out.markup,
+        markup_raw=markup,
         citation_intents=citation_intents,
         grounding_chunks=result.grounding_chunks,
         tokens_in=result.tokens_in,
@@ -165,7 +220,7 @@ async def run_writer(
             index_elements=[Draft.run_id, Draft.iteration],
             set_={
                 "diagnose": out.diagnose,
-                "markup_raw": out.markup,
+                "markup_raw": markup,
                 "final_markup": None,
                 "citation_intents": citation_intents,
                 "grounding_chunks": result.grounding_chunks,
@@ -183,7 +238,7 @@ async def run_writer(
     return WriterRunResult(
         iteration=iteration,
         diagnose=out.diagnose,
-        markup_raw=out.markup,
+        markup_raw=markup,
         citation_intents=citation_intents,
         grounding_chunks=result.grounding_chunks,
         draft_id=draft_id,
