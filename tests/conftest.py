@@ -21,12 +21,21 @@ from content_tool.wordpress.client import WordPressClient
 
 @pytest.fixture(scope="session")
 def postgres_container():
+    # Opt-in: skip testcontainer when an external DB URL is provided
+    # (e.g. local Supabase during the Phase A rehearsal).
+    if os.environ.get("EXTERNAL_POSTGRES_URL"):
+        yield None
+        return
     with PostgresContainer("postgres:16", driver="asyncpg") as pg:
         yield pg
 
 
 @pytest.fixture(scope="session")
 def postgres_url(postgres_container) -> str:
+    external = os.environ.get("EXTERNAL_POSTGRES_URL")
+    if external:
+        return external
+    assert postgres_container is not None
     return postgres_container.get_connection_url()
 
 
