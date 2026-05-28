@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from markdown_it import MarkdownIt
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import Draft, Render
@@ -23,14 +23,18 @@ class RenderResult:
 _META_RE = re.compile(r"^%%meta desc=(.*?)%%\s*$", re.MULTILINE)
 _ADV_RE = re.compile(r"%%adv_panel id=(\d+)%%")
 _WIDGET_RE = re.compile(r"%%page_widget id=(\d+)%%")
+# Tolerate leading spaces/tabs around the delimiter lines so writers can nest
+# these blocks inside markdown lists (which require 2+ leading spaces) without
+# silently dropping the schema. `[ \t]*` — not `\s*` — so we don't gobble blank
+# lines between independent blocks.
 _FAQ_BLOCK_RE = re.compile(
-    r"%%acf_faq type=q%%\s*\n(.*?)\n%%acf_faq type=a%%\s*\n(.*?)\n%%end%%",
+    r"%%acf_faq type=q%%[ \t]*\n(.*?)\n[ \t]*%%acf_faq type=a%%[ \t]*\n(.*?)\n[ \t]*%%end%%",
     re.DOTALL,
 )
 # %%defterm name=<term>%%\n<description>\n%%end%%
 # `name` is a single token (no spaces / quotes) per the writer-prompt contract.
 _DEFTERM_BLOCK_RE = re.compile(
-    r"%%defterm name=(\S+?)%%\s*\n(.*?)\n%%end%%",
+    r"%%defterm name=(\S+?)%%[ \t]*\n(.*?)\n[ \t]*%%end%%",
     re.DOTALL,
 )
 
@@ -186,6 +190,13 @@ async def run_render_html(
     draft = (await session.execute(select(Draft).where(Draft.draft_id == draft_id))).scalar_one()
     md = draft.final_markup or draft.markup_raw
     result = render_html(md)
+    # Idempotency: LangGraph can re-enter the production sub-graph (resume,
+    # retry, refine loop) and call this node twice for the same draft. Without
+    # this DELETE we accumulate duplicate Render rows for one draft and the
+    # downstream audit ``scalar_one()`` on ``Render.draft_id`` blows up with
+    # MultipleResultsFound. The Render schema does not (yet) enforce a unique
+    # constraint on ``draft_id``, so enforce single-row semantics here.
+    await session.execute(delete(Render).where(Render.draft_id == draft_id))
     session.add(Render(
         draft_id=draft_id,
         seo_title=result.seo_title,
