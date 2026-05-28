@@ -77,6 +77,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         wp_client=wp_client,
         seo_plugin=seo_plugin,
     )
+    try:
+        await executor.recover_orphaned()
+    except Exception:
+        logger.exception("orphaned run recovery failed at startup")
     app.state.session_factory = sf
     app.state.run_executor = executor
     app.state.wp_client = wp_client

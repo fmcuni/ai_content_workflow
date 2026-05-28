@@ -30,6 +30,19 @@ _RUNNING_STATUS: dict[tuple[str, ...], str] = {
     ("publish_or_revise",): "publishing",
 }
 
+# Statuses meaning "LangGraph was actively driving this run". On a fresh process
+# there is no live task for any of these, so they are guaranteed orphaned and
+# must be recovered as "failed" so the user can restart. HITL pauses
+# ("hitl_1", "hitl_2") deliberately have no in-memory task — they survive
+# restarts via the checkpoint — so they are NOT in this set.
+_IN_FLIGHT_STATUSES: tuple[str, ...] = (
+    "pending",
+    "fetching",
+    "strategy",
+    "production",
+    "publishing",
+)
+
 # Per-run event history kept in memory so a late SSE subscriber (page refresh,
 # nav back to the run page) can be brought up-to-date instead of seeing a blank
 # timeline. Bounded to avoid unbounded growth.
@@ -109,6 +122,48 @@ class RunExecutor:
         buf.append(data)
         for q in self._subscribers.get(run_id, []):
             await q.put(data)
+
+    async def recover_orphaned(self) -> list[UUID]:
+        """Mark in-flight runs from a prior process as ``failed``.
+
+        A server restart (auto-reload during dev, crash, redeploy) kills any
+        live LangGraph task in memory but the Run row still carries whatever
+        in-flight status it held at the moment. Without this recovery, the
+        ``/restart`` endpoint refuses (requires status="failed") and the run
+        is silently stuck. Called from the lifespan after the executor is
+        constructed but before requests are served, so no live tasks can
+        exist yet.
+        """
+        from sqlalchemy import select
+
+        async with self._sf() as session:
+            rows = (
+                await session.execute(
+                    select(Run.run_id).where(Run.status.in_(_IN_FLIGHT_STATUSES))
+                )
+            ).scalars().all()
+            if not rows:
+                return []
+            await session.execute(
+                update(Run)
+                .where(Run.status.in_(_IN_FLIGHT_STATUSES))
+                .values(
+                    status="failed",
+                    error={
+                        "type": "OrphanedRun",
+                        "message": (
+                            "Server restarted while this run was in flight; "
+                            "the in-memory task was lost. Click Restart to retry."
+                        ),
+                    },
+                )
+            )
+            await session.commit()
+        logger.warning(
+            "recovered orphaned in-flight runs as failed",
+            extra={"count": len(rows), "run_ids": [str(r) for r in rows]},
+        )
+        return list(rows)
 
     async def start(self, run_id: UUID) -> None:
         self._tasks[run_id] = asyncio.create_task(self._run(run_id))

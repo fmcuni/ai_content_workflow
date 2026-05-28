@@ -337,3 +337,64 @@ async def test_clear_derived_rows_on_restart(postgres_url):
         assert run_row.run_id == run_id
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_fails_in_flight_runs_only(postgres_url):
+    """Startup recovery flips in-flight statuses to ``failed`` but leaves HITL
+    pauses and terminal runs untouched."""
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+
+    def _row(status: str) -> Run:
+        return Run(
+            run_id=uuid4(),
+            created_by="x",
+            status=status,
+            article_url="https://e.com",
+            topic="t",
+            keywords=["k"],
+            mode="auto",
+            acf_adv_id=1,
+            acf_widget_id=2,
+            persona="bowtie-editor",
+            today_date=date(2026, 5, 28),
+        )
+
+    in_flight = {
+        s: _row(s)
+        for s in ("pending", "fetching", "strategy", "production", "publishing")
+    }
+    untouched = {
+        s: _row(s)
+        for s in (
+            "hitl_1", "hitl_2", "completed", "published",
+            "rejected", "changes_requested", "failed",
+        )
+    }
+
+    async with sf() as session:
+        for r in (*in_flight.values(), *untouched.values()):
+            session.add(r)
+        await session.commit()
+
+    runner = RunExecutor(
+        postgres_url=postgres_url, session_factory=sf, gemini=FakeGeminiClient(canned_responses={})
+    )
+    recovered = await runner.recover_orphaned()
+
+    assert set(recovered) == {r.run_id for r in in_flight.values()}
+
+    async with sf() as session:
+        for status, r in in_flight.items():
+            row = (await session.execute(select(Run).where(Run.run_id == r.run_id))).scalar_one()
+            assert row.status == "failed", f"{status} should have been recovered"
+            assert row.error is not None and row.error.get("type") == "OrphanedRun"
+        for status, r in untouched.items():
+            row = (await session.execute(select(Run).where(Run.run_id == r.run_id))).scalar_one()
+            assert row.status == status, f"{status} must not be touched"
+
+    # Idempotent on a clean DB.
+    assert await runner.recover_orphaned() == []
+
+    await engine.dispose()
