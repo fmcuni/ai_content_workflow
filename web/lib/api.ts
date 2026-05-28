@@ -3,10 +3,11 @@ import type {
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
   PersonaPatch, PersonaUsage,
-  PromoteRequest, PromoteResponse, PromptGraph, PromptTemplate, RefreshEvaluation,
-  RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse, TopicBatch,
-  TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample, WpCategoryOption,
-  WpUserOption,
+  PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptSaveResponse,
+  PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem, PromptTemplateSchema,
+  RefreshEvaluation, RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse,
+  TopicBatch, TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample,
+  WpCategoryOption, WpUserOption,
 } from "./types";
 
 const BASE = "/api/runs";
@@ -188,4 +189,23 @@ export const promptsApi = {
   template: (id: string) => http<PromptTemplate>(`${PROMPTS_BASE}/templates/${id}`),
   userExample: (runId: string, agent: string) =>
     http<UserPromptExample>(`${PROMPTS_BASE}/user-example?run_id=${runId}&agent=${agent}`),
+  listTemplates: () =>
+    http<{ templates: PromptTemplateListItem[] }>(`${PROMPTS_BASE}/templates`),
+  templateSchema: (id: string) =>
+    http<PromptTemplateSchema>(`${PROMPTS_BASE}/templates/${id}/schema`),
+  templateConsumers: (id: string) =>
+    http<PromptTemplateConsumers>(`${PROMPTS_BASE}/templates/${id}/consumers`),
+  saveTemplate: (id: string, body: { template: string; expected_sha256: string }) =>
+    http<PromptSaveResponse>(`${PROMPTS_BASE}/templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  previewTemplate: (
+    id: string,
+    body: { template: string; route?: string; context?: Record<string, string> },
+  ) =>
+    http<PromptPreviewResponse>(`${PROMPTS_BASE}/templates/${id}/preview`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

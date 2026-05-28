@@ -507,6 +507,43 @@ export interface PromptGraph {
 export interface PromptTemplate {
   template_id: string;
   template: string;
+  filename?: string;
+  category?: PromptTemplateCategory;
+  sha256?: string;
+}
+
+export type PromptTemplateCategory = "agent" | "partial";
+
+export interface PromptTemplateListItem {
+  template_id: string;
+  filename: string;
+  category: PromptTemplateCategory;
+  sha256: string;
+  bytes: number;
+}
+
+export interface PromptTemplateSchema {
+  template_id: string;
+  required_placeholders: string[];
+  found_placeholders: string[];
+  found_includes: string[];
+  unknown_includes: string[];
+}
+
+export interface PromptTemplateConsumers {
+  template_id: string;
+  consumers: string[];
+}
+
+export interface PromptSaveResponse {
+  template_id: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface PromptPreviewResponse {
+  resolved: string;
+  route: string;
 }
 
 export interface UserPromptExample {

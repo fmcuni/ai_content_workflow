@@ -20,9 +20,7 @@
 
 {source_policy_block}
 
-品牌與銷售中立（硬性）：
-- 不可硬銷或推廣 Bowtie 或任何保險公司／保險產品：不得出現報價、購買引導、品牌 CTA、產品名稱推薦或「立即投保」等推銷語句。
-- 可在相關處中立說明「為何需要保障／保險」的風險與需求背景，但須客觀、通用、不指向任何特定品牌或產品。
+{{include:_writer_brand_block}}
 
 硬性規則：
 1. 可自由撰寫 H1、meta description、H2、H3、section order、正文邏輯與 FAQ；以 outline 為結構依據。
@@ -37,26 +35,7 @@
    ```
 4. 不可捏造數字、年份、法例、醫療或保險條款；如未能核實，使用保守中性寫法。
 
-JSON-LD Schema 規則（去重 / dedup against Yoast）：
-- 本文章發佈到 WordPress 時，**Yoast SEO 已自動 emit** 以下 schema.org 類型，**不要在 markup 中重複描述或手寫**：
-  - `Article` / `WebPage` / `BreadcrumbList` / `WebSite`
-  - `Organization` / `Corporation`（Bowtie 機構資訊、聯絡、社交連結）
-  - `Person`（作者）
-  - `ImageObject`（feature image）
-  - 文章 `datePublished` / `dateModified` / `headline` / `articleSection` / `inLanguage`
-- 不要在 H1、meta description、正文寫「Bowtie 創立於…」、「Bowtie 地址…」、「作者：…」、「發佈日期：…」、「分類：…」這類純機構/出版 metadata，因為 Yoast 已負責處理。
-- **必須 emit** 的額外 schema：`FAQPage`（透過上方 FAQ shortcode；renderer 會自動轉成 JSON-LD）。
-- **可選 emit** 的額外 schema：`DefinedTermSet` — 用於文章內專有名詞、英文縮寫、政策/醫學/保險術語。每個術語以下列 shortcode 表示，放在該術語**首次在正文出現之後的獨立空行**，不要連續多個堆在一起。每個 shortcode 必須獨立成行：
-   ```
-   %%defterm name=術語%%
-   一句解釋（≤ 60 字，香港繁體中文）
-   %%end%%
-   ```
-   - `name` 為單一字串，不含空格與引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
-   - 全文最多 6 個 `defterm`；如全文無真正需要解釋的術語，可不輸出
-   - 不要為已在 H2 標題出現的常用詞重複定義
-   - 不要在 description 內嵌 HTML / Markdown 連結 / 表情符號
-   - 不要 emit 其他 schema 類型（如 `MedicalCondition`、`HowTo`、`Review`、`AggregateRating`、`Drug`、`MedicalProcedure`），renderer 不會處理，且部分有合規風險。
+{{include:_writer_schema}}
 
 寫作要求：
 1. 以 outline 為結構藍本，逐節撰寫完整原創內容。
@@ -65,37 +44,10 @@ JSON-LD Schema 規則（去重 / dedup against Yoast）：
 4. 按內容選擇最適合的呈現方式：定義/結論用段落；條件/資格用項目列表；流程/步驟用編號列表；比較/收費用 Markdown 表格。
 5. 標題下第一段要先答題，首句盡量點名該 heading 的核心概念。
 
-SEO 及 AI Search 優化要求：
-1. H1 自然、清楚、具搜尋意圖，整合 focus_keywords 及語義相關字詞，但不可堆砌。
-2. meta description 具體、自然、可讀。
-3. 內文自然覆蓋同義詞、近義詞、常見問法。
-4. 優先寫出定義、直接答案、條件、步驟、比較、例外與注意事項。
+{{include:_writer_seo}}
 
-如有 refine_notes：
-- 必須逐項處理 refine_notes 列出的 must_fix 問題
-- 不可改動仍然合格的段落
-- 完成後在 diagnose 中說明你處理了哪些 refine_notes
+{{include:_writer_refine_notes}}
 
 輸出格式要求：
 1. diagnose 使用香港繁體中文，約 100 字，說明這篇全新文章的內容策略與重點。
-2. markup 只可輸出最終完整文章 Markdown，不可輸出任何解說、前言、註解、JSON code fence。
-3. **markup 結構（最重要，違反任何一條會被 reject 並要求重生）**：
-   - **第 1 行必須係 `# <H1 標題>`**。唔可以有空行、BOM、code fence（```）、註解或任何其他內容喺前面。第 1 行唔係 `# ` 開頭即係違規。
-   - **第 2 行必須係 `%%meta desc=<具體、自然、可讀嘅描述>%%`**，緊貼 H1 下一行，唔可以漏、唔可以用其他格式、唔可以放第 3 行或之後。
-   - 第 3 行起：正文首段，然後 `%%adv_panel id=acf_adv_id%%`
-   - 餘下正文（如有 `%%defterm%%` shortcode，散落於相關段落之後）
-   - `%%page_widget id=acf_widget_id%%`
-   - `## 常見問題`
-   - FAQ shortcodes
-
-   markup 開頭範例（前 4 行；必須一模一樣嘅結構）：
-   ```
-   # 高端醫療保險邊間好？2026 全攻略
-   %%meta desc=比較 Bowtie、AIA、Bupa 嘅高端醫保保額、墊底費、保障地區同直付服務，教你揀啱 CEO Plan。%%
-
-   高端醫療保險（CEO Plan）...（首段內容由此開始）
-   ```
-4. 不要使用 HTML 標籤，不要使用 Markdown code fence（包括 ```markdown 或 ``` 包住成篇文）。
-5. citation_intents 必須列出你引用了什麼 claim 及為何引用。
-
-只輸出符合 schema 的 JSON。
+{{include:_writer_output_format_tail}}

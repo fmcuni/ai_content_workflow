@@ -23,6 +23,31 @@ PROMPT_PATHS = {
 }
 
 _META_LINE_RE = re.compile(r"^%%meta desc=.*?%%\s*$", re.MULTILINE)
+_INCLUDE_RE = re.compile(r"\{\{include:([A-Za-z0-9_./-]+)\}\}")
+
+
+def resolve_includes(
+    text: str,
+    *,
+    base: Path = _PROMPT_DIR,
+    _seen: frozenset[str] = frozenset(),
+) -> str:
+    """Recursively resolve ``{{include:NAME}}`` directives by inlining the
+    contents of ``base / NAME.md``. Trailing newlines in each partial are
+    stripped so the directive's own surrounding whitespace controls spacing.
+    Raises ``ValueError`` on include cycles; ``FileNotFoundError`` propagates
+    when a referenced partial is missing.
+    """
+
+    def _sub(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in _seen:
+            raise ValueError(f"include cycle detected at {{{{include:{name}}}}}")
+        sub_path = base / f"{name}.md"
+        body = sub_path.read_text(encoding="utf-8").rstrip("\n")
+        return resolve_includes(body, base=base, _seen=_seen | {name})
+
+    return _INCLUDE_RE.sub(_sub, text)
 
 
 def _markup_structural_issues(markup: str) -> list[str]:
@@ -63,6 +88,7 @@ async def build_system_prompt(
     policy_path: Path = DEFAULT_POLICY_PATH,
 ) -> str:
     template = PROMPT_PATHS[route].read_text(encoding="utf-8")
+    template = resolve_includes(template, base=PROMPT_PATHS[route].parent)
     persona = await load_persona(persona_name, session=session)
     policy = SourcePolicy.load_from(policy_path)
     return (

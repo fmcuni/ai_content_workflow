@@ -11,6 +11,7 @@ const NAV = [
   { href: "/", label: "Runs" },
   { href: "/library", label: "Library" },
   { href: "/voices", label: "Voices" },
+  { href: "/prompts", label: "Prompts" },
 ];
 
 function isoWeek(d: Date): number {
