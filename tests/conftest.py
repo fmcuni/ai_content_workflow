@@ -1,10 +1,11 @@
-import asyncio  # noqa: F401
+import asyncio
 import json
 import os
-import subprocess
+import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+import asyncpg
 import httpx
 import pytest
 import pytest_asyncio
@@ -41,8 +42,35 @@ def postgres_url(postgres_container) -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_migrations(postgres_url):
-    env = {**os.environ, "POSTGRES_URL": postgres_url}
-    subprocess.run(["alembic", "upgrade", "head"], check=True, env=env)  # noqa: S607
+    # When pointed at an EXTERNAL_POSTGRES_URL (e.g. local Supabase), the
+    # operator is responsible for applying schema via `supabase db reset`
+    # before the test run. The Alembic baseline has been retired (see
+    # supabase/migrations/<ts>_baseline.sql).
+    if os.environ.get("EXTERNAL_POSTGRES_URL"):
+        return
+    # Apply baseline migration + seed directly for the testcontainers path.
+    # Strip psql meta-commands (\restrict / \unrestrict) and Supabase-only
+    # extensions that don't exist in a plain postgres:16 image.
+    _STRIP = re.compile(
+        r"^\\.+$\n?|CREATE EXTENSION IF NOT EXISTS[^;]+;",
+        re.MULTILINE,
+    )
+
+    async def _bootstrap() -> None:
+        url = postgres_url.replace("postgresql+asyncpg://", "postgresql://")
+        conn = await asyncpg.connect(url)
+        try:
+            baseline = _STRIP.sub(
+                "",
+                Path("supabase/migrations/20260528131043_baseline.sql").read_text(),
+            )
+            seed = Path("supabase/seed.sql").read_text()
+            await conn.execute(baseline)
+            await conn.execute(seed)
+        finally:
+            await conn.close()
+
+    asyncio.run(_bootstrap())
 
 
 # get_settings() reads env; set dummies so tests using FakeGeminiClient can construct Settings.

@@ -6,7 +6,7 @@ Bowtie AI Content Tool — LangGraph-based article update pipeline with HITL
 ## Tech Stack
 
 - **Backend:** Python 3.13, FastAPI, LangGraph, SQLAlchemy async, Pydantic v2,
-  Alembic, asyncpg, sse-starlette, OpenTelemetry, structlog
+  asyncpg, sse-starlette, OpenTelemetry, structlog
 - **LLM:** Google Gemini (`google-genai`)
 - **DB:** PostgreSQL 16
 - **Frontend:** Next.js 16, React 19, TanStack Query, TipTap, Tailwind 4, shadcn
@@ -26,8 +26,9 @@ Bowtie AI Content Tool — LangGraph-based article update pipeline with HITL
 | Tests (web) | `cd web && npx playwright test` |
 | Lint (py) | `ruff check .` |
 | Typecheck | `pyright` |
-| Migrate DB | `alembic upgrade head` (script_location = `migrations/`) |
-| New migration | `alembic revision -m "..."` |
+| Migrate DB (local) | `supabase db reset` |
+| Migrate DB (prod) | `supabase db push` |
+| New migration | `supabase migration new <name>` |
 | CLI | `content-tool gap-analysis --article-url ... --topic ... --keywords ...` |
 
 ## Project Structure
@@ -47,8 +48,8 @@ content_tool/        Backend Python package
   refresh/           Periodic article re-audit (CMS Stage 0)
 config/              YAML config (pricing, refresh, personas, source_policy)
 prompts/             LLM prompt templates (.md)
-migrations/versions/ Alembic migrations (0001…0011)  ← active
-alembic/versions/    Older migration files (NOT the active script_location)
+supabase/migrations/ Supabase migration files (baseline + future changes)
+supabase/seed.sql    Seed data (personas)
 web/                 Next.js 16 frontend (see web/AGENTS.md before editing)
 docs/superpowers/    specs/ and plans/ — design docs per feature, dated
 evals/               LLM-judge evals + fixtures (nightly cron + PR label trigger)
@@ -80,8 +81,8 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
 - **Async everywhere** — DB, HTTP, Gemini. `asyncio_mode = "auto"` in pytest.
 - **Pyright strict.** Add precise type hints; do not weaken the config to fix errors.
   The baseline is ~547 existing errors — focus on not adding new ones in touched files.
-- **Ruff rules:** `E, F, I, B, UP, ASYNC, S, ANN, RUF` (`S101` ignored, tests/migrations
-  exempt from `ANN`). Line length 100.
+- **Ruff rules:** `E, F, I, B, UP, ASYNC, S, ANN, RUF` (`S101` ignored, tests exempt from
+  `ANN`). Line length 100.
 - **Naming:** snake_case modules; PascalCase Pydantic models; tests as `test_*.py`.
 - **Frontend:** see `web/AGENTS.md` — Next.js 16 has breaking changes from earlier
   versions; consult `node_modules/next/dist/docs/` before writing Next code.

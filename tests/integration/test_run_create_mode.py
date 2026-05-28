@@ -95,11 +95,8 @@ async def test_root_graph_create_mode_publishes_as_draft(postgres_url, monkeypat
     """Full create-mode run lands in WP as a draft and backfills article_url."""
     monkeypatch.setenv("WP_BASE_URL", "https://wp.example.com")
 
-    # ``content_tool.compliance_log`` table is not in the testcontainers
-    # migration chain (it lives in the older ``alembic/`` directory). The
-    # root graph calls ``write_compliance_log`` right after a successful
-    # publish; stub it so the test exercises the publish path without
-    # tripping on schema we don't control here.
+    # Stub write_compliance_log so this test focuses on the WP publish path
+    # without spinning up a full compliance-log fixture.
     async def _noop_write_compliance_log(**_kwargs: Any) -> None:
         return None
 
