@@ -14,14 +14,18 @@ function formatTime(ts: string): string {
 }
 
 export function EventTimeline({ events }: { events: SseEvent[] }) {
-  if (events.length === 0) {
+  // *.thinking events are live-only streaming chunks (one per Gemini thought
+  // summary) — they have their own dedicated UI surface and would otherwise
+  // drown the timeline.
+  const milestones = events.filter((e) => !e.event.endsWith(".thinking"));
+  if (milestones.length === 0) {
     return <p className="text-ink-faint italic font-display text-[15px]">No signal yet.</p>;
   }
   return (
     <ol className="relative">
-      {events.map((e, i) => {
+      {milestones.map((e, i) => {
         const { ch, tone } = glyphFor(e.event);
-        const last = i === events.length - 1;
+        const last = i === milestones.length - 1;
         return (
           <li key={i} className="grid grid-cols-[72px_16px_1fr] gap-3 items-start py-2.5 border-b border-rule last:border-b-0">
             <span className="font-mono text-[11px] text-ink-faint tabular-nums pt-[2px]">

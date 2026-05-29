@@ -6,17 +6,13 @@ whether the input topic is already covered. No retry/backoff here — that is
 the topic-expansion subgraph's concern (Task 3).
 """
 
-from pathlib import Path
-
+from content_tool import prompts_store
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.topic_batch import TopicDedupInput, TopicDedupOutput
 
-_PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
-_PROMPT_PATH = _PROMPT_DIR / "topic_dedup.md"
 
-
-def build_system_prompt() -> str:
-    return _PROMPT_PATH.read_text(encoding="utf-8")
+async def build_system_prompt() -> str:
+    return await prompts_store.get_assembled_standalone("topic_dedup")
 
 
 def build_user_prompt(input_: TopicDedupInput) -> str:
@@ -35,7 +31,7 @@ async def run_topic_dedup(
     input: TopicDedupInput,
 ) -> TopicDedupOutput:
     """Single Gemini call. Returns the dedup verdict for one candidate."""
-    system_prompt = build_system_prompt()
+    system_prompt = await build_system_prompt()
     user_prompt = build_user_prompt(input)
     result = await gemini.generate(
         agent="topic_dedup",

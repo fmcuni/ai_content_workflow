@@ -33,10 +33,17 @@ _FAQ_BLOCK_RE = re.compile(
 )
 # %%defterm name=<term>%%\n<description>\n%%end%%
 # `name` is a single token (no spaces / quotes) per the writer-prompt contract.
+# Newlines around the description are optional: writers sometimes inline the
+# whole block inside CJK quotes (e.g. 「%%defterm name=X%%desc%%end%%」), and
+# we'd rather strip cleanly than leak raw markers into the published HTML.
 _DEFTERM_BLOCK_RE = re.compile(
-    r"%%defterm name=(\S+?)%%[ \t]*\n(.*?)\n[ \t]*%%end%%",
+    r"%%defterm name=(\S+?)%%[ \t]*\n?[ \t]*(.*?)[ \t]*\n?[ \t]*%%end%%",
     re.DOTALL,
 )
+# Catches any residual marker fragment after well-formed blocks were stripped.
+# If the writer emitted a half-broken shortcode (open without close, or vice
+# versa), refuse to render rather than publish literal `%%defterm…` to WordPress.
+_DEFTERM_RESIDUE_RE = re.compile(r"%%defterm\b|%%end%%")
 
 
 def _build_faq_html(items: list[tuple[str, str]]) -> str:
@@ -130,14 +137,33 @@ def render_html(markdown: str) -> RenderResult:
 
     # Extract DefinedTerm items, dedup by name (first occurrence wins),
     # then strip the shortcodes so they don't survive into the visible HTML.
+    # Block form (newlines around description) → strip entirely; the term
+    # already appears in the surrounding paragraph text. Inline form (writer
+    # wrapped the whole block inside e.g. 「…」 CJK quotes) → replace with just
+    # the term name so the visible sentence keeps its referent instead of
+    # collapsing to empty quotes.
     defterm_items: list[tuple[str, str]] = []
     _seen_defterm_names: set[str] = set()
-    for name, desc in _DEFTERM_BLOCK_RE.findall(rest):
-        n = name.strip()
-        if n and n not in _seen_defterm_names:
-            _seen_defterm_names.add(n)
-            defterm_items.append((n, desc.strip()))
-    rest = _DEFTERM_BLOCK_RE.sub("", rest)
+
+    def _consume_defterm(match: re.Match[str]) -> str:
+        name = match.group(1).strip()
+        desc = match.group(2).strip()
+        if name and name not in _seen_defterm_names:
+            _seen_defterm_names.add(name)
+            defterm_items.append((name, desc))
+        return name if "\n" not in match.group(0) else ""
+
+    rest = _DEFTERM_BLOCK_RE.sub(_consume_defterm, rest)
+    # Belt-and-braces: if ANY half-formed defterm marker survived the regex
+    # (open without close, malformed name, stray %%end%%, etc.), refuse to
+    # render. Better to fail the publish step than ship literal markers to
+    # readers — the writer node will surface the failure and HITL_2 can hold.
+    residue = _DEFTERM_RESIDUE_RE.search(rest)
+    if residue is not None:
+        snippet = rest[max(0, residue.start() - 20) : residue.end() + 20]
+        raise ValueError(
+            f"render: unhandled defterm marker survived stripping near: {snippet!r}"
+        )
 
     # Markdown → HTML (without FAQ block; we'll inject)
     md = MarkdownIt("commonmark").enable(["table"])

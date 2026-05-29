@@ -7,8 +7,27 @@ import { toast } from "sonner";
 
 import { SectionHead } from "@/components/SectionHead";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { promptsApi } from "@/lib/api";
+import type { PromptVersionSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const secs = Math.round((Date.now() - then) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
 
 // `params` is a Promise in Next.js 16 — must be unwrapped with `use()`.
 export default function PromptEditorPage({
@@ -31,12 +50,17 @@ export default function PromptEditorPage({
     queryKey: ["prompts", "consumers", templateId],
     queryFn: () => promptsApi.templateConsumers(templateId),
   });
+  const historyQ = useQuery({
+    queryKey: ["prompts", "history", templateId],
+    queryFn: () => promptsApi.templateHistory(templateId),
+  });
 
   const [buffer, setBuffer] = useState<string>("");
   const [sha, setSha] = useState<string>("");
   const [activeRoute, setActiveRoute] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string>("");
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [openVersion, setOpenVersion] = useState<PromptVersionSummary | null>(null);
 
   // The server-loaded copy primes the buffer once per (template_id, sha)
   // pair; afterwards the buffer is the source of truth for the editor,
@@ -110,6 +134,7 @@ export default function PromptEditorPage({
       setSha(data.sha256);
       queryClient.invalidateQueries({ queryKey: ["prompts", "template", templateId] });
       queryClient.invalidateQueries({ queryKey: ["prompts", "templates"] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "history", templateId] });
     },
     onError: (e: Error) => {
       if (e.message.includes("409")) {
@@ -120,6 +145,42 @@ export default function PromptEditorPage({
         toast.error(`Save failed — ${e.message}`);
       }
     },
+  });
+
+  const revertMut = useMutation({
+    mutationFn: async (target: PromptVersionSummary) => {
+      // Always fetch the version body — both to show it in the dialog AND
+      // to defend against the row being deleted before we POST revert.
+      const detail = await promptsApi.templateVersion(templateId, target.version_id);
+      return promptsApi.revertTemplate(templateId, {
+        target_version_id: detail.version_id,
+        expected_sha256: sha,
+      });
+    },
+    onSuccess: (data) => {
+      toast.success("Reverted · next run will use this body");
+      setSha(data.sha256);
+      setOpenVersion(null);
+      queryClient.invalidateQueries({ queryKey: ["prompts", "template", templateId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "templates"] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "history", templateId] });
+    },
+    onError: (e: Error) => {
+      if (e.message.includes("409")) {
+        toast.error(
+          "Someone else saved this template since you loaded it. Reload to merge.",
+        );
+      } else {
+        toast.error(`Revert failed — ${e.message}`);
+      }
+    },
+  });
+
+  const versionDetailQ = useQuery({
+    queryKey: ["prompts", "version", templateId, openVersion?.version_id],
+    queryFn: () =>
+      promptsApi.templateVersion(templateId, openVersion!.version_id),
+    enabled: openVersion !== null,
   });
 
   const handleReload = async () => {
@@ -259,6 +320,51 @@ export default function PromptEditorPage({
                 </ul>
               </div>
             )}
+
+            <div>
+              <h3 className="kicker mb-2">History</h3>
+              {historyQ.isPending && (
+                <p className="text-ink-faint text-[12px]">Loading…</p>
+              )}
+              {historyQ.data && historyQ.data.versions.length === 0 && (
+                <p className="text-ink-faint text-[12px]">
+                  No saves yet. The first save creates a version row you can
+                  revert to.
+                </p>
+              )}
+              {historyQ.data && historyQ.data.versions.length > 0 && (
+                <ul className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+                  {historyQ.data.versions.map((v) => (
+                    <li key={v.version_id}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenVersion(v)}
+                        className="w-full text-left border border-rule hover:border-accent rounded-sm px-2 py-1.5 transition-colors group"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-[10.5px] text-ink-soft">
+                            {relativeTime(v.saved_at)}
+                          </span>
+                          <span
+                            className={cn(
+                              "font-mono text-[10px] uppercase tracking-wider px-1 py-px rounded-sm",
+                              v.kind === "revert"
+                                ? "bg-accent/10 text-accent"
+                                : "bg-paper-deep/50 text-ink-faint",
+                            )}
+                          >
+                            {v.kind}
+                          </span>
+                        </div>
+                        <div className="font-mono text-[10px] text-ink-faint mt-0.5 truncate">
+                          {v.saved_by} · {v.sha256.slice(0, 7)}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </aside>
         </div>
       )}
@@ -303,6 +409,72 @@ export default function PromptEditorPage({
           )}
         </section>
       )}
+
+      <Dialog
+        open={openVersion !== null}
+        onOpenChange={(o) => { if (!o) setOpenVersion(null); }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {openVersion?.kind === "revert" ? "Revert" : "Save"}
+              {" · "}
+              {openVersion ? relativeTime(openVersion.saved_at) : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {openVersion ? (
+                <>
+                  Saved by {openVersion.saved_by} · sha{" "}
+                  {openVersion.sha256.slice(0, 7)} · {openVersion.bytes.toLocaleString()} bytes.
+                  Reverting overwrites the current file and creates a new
+                  history row.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+
+          {versionDetailQ.isPending && (
+            <p className="text-ink-faint text-[12px]">Loading body…</p>
+          )}
+          {versionDetailQ.isError && (
+            <p className="text-accent-deep text-[12px]">
+              Failed to load — {(versionDetailQ.error as Error).message}
+            </p>
+          )}
+          {versionDetailQ.data && (
+            <pre className="font-mono text-[12px] leading-[1.55] text-ink-soft bg-paper-deep/30 border border-rule rounded-sm p-3 whitespace-pre-wrap max-h-[55vh] overflow-auto">
+              {versionDetailQ.data.body}
+            </pre>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setOpenVersion(null)}
+              disabled={revertMut.isPending}
+            >
+              Close
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => { if (openVersion) revertMut.mutate(openVersion); }}
+              disabled={
+                !openVersion ||
+                revertMut.isPending ||
+                openVersion.sha256 === sha
+              }
+              title={
+                openVersion?.sha256 === sha
+                  ? "Already the current body"
+                  : undefined
+              }
+            >
+              {revertMut.isPending ? "Reverting…" : "Revert to this"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

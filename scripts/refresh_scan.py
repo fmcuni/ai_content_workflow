@@ -17,6 +17,7 @@ import sys
 
 import click
 
+from content_tool import prompts_store
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.gemini.client import RealGeminiClient
@@ -52,6 +53,7 @@ async def _run(*, article_ids: tuple[str, ...], force: bool, dry_run: bool) -> N
     settings = get_settings()
     engine = make_engine(settings.postgres_url)
     sf = make_session_factory(engine)
+    prompts_store.configure(sf)
     try:
         wp_client = WordPressClient(
             settings.wp_base_url,

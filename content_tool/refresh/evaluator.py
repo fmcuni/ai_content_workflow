@@ -85,6 +85,7 @@ async def llm_audit_published(
     """
     from datetime import date
 
+    from content_tool import prompts_store
     from content_tool.agents.audit import build_system_prompt_from_pack, build_user_prompt
     from content_tool.models.audit import AuditOutput
     from content_tool.policy.personas import load_persona_from_yaml
@@ -94,7 +95,10 @@ async def llm_audit_published(
     # via the UI, but this path will not see those edits until refresh
     # scanning is given a session. Threaded-session is out of scope here.
     persona_pack = load_persona_from_yaml(persona or "bowtie-editor")
-    sys_prompt = build_system_prompt_from_pack(persona_pack, date.today())
+    template_text = await prompts_store.get_assembled_standalone("audit")
+    sys_prompt = build_system_prompt_from_pack(
+        persona_pack, date.today(), template_text=template_text
+    )
     user_prompt = build_user_prompt(
         html_body=html,
         gap_update_plan={},

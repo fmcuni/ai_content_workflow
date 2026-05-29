@@ -52,7 +52,14 @@ data/
 tmp/
 *.sqlite
 *.db
+*.dump
 
 # Local debug artifacts (screenshots, captures)
 index-keywords.png
 /*.png
+/*.jpeg
+/*.jpg
+
+# Local agent scratch / tooling
+.agents/
+skills-lock.json

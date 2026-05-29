@@ -3,8 +3,9 @@ import type {
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
   PersonaPatch, PersonaUsage,
-  PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptSaveResponse,
-  PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem, PromptTemplateSchema,
+  PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
+  PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem,
+  PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
   RefreshEvaluation, RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse,
   TopicBatch, TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample,
   WpCategoryOption, WpUserOption,
@@ -12,10 +13,23 @@ import type {
 
 const BASE = "/api/runs";
 
+// The reverse proxy is the source of truth in production; in local dev we
+// pre-fill the header from this env so the API's _require_editor stamps the
+// version row with a real-looking identity instead of "dev@local".
+const PROMPT_EDITOR_EMAIL = process.env.NEXT_PUBLIC_PROMPT_EDITOR_EMAIL;
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const extra: Record<string, string> = {};
+  if (PROMPT_EDITOR_EMAIL && path.startsWith("/api/prompts/")) {
+    extra["X-Editor-Email"] = PROMPT_EDITOR_EMAIL;
+  }
   const r = await fetch(path, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "content-type": "application/json",
+      ...extra,
+      ...(init?.headers ?? {}),
+    },
   });
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return (await r.json()) as T;
@@ -205,6 +219,22 @@ export const promptsApi = {
     body: { template: string; route?: string; context?: Record<string, string> },
   ) =>
     http<PromptPreviewResponse>(`${PROMPTS_BASE}/templates/${id}/preview`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  templateHistory: (id: string, limit = 50) =>
+    http<PromptVersionsResponse>(
+      `${PROMPTS_BASE}/templates/${id}/history?limit=${limit}`,
+    ),
+  templateVersion: (id: string, versionId: string) =>
+    http<PromptVersionDetail>(
+      `${PROMPTS_BASE}/templates/${id}/versions/${versionId}`,
+    ),
+  revertTemplate: (
+    id: string,
+    body: { target_version_id: string; expected_sha256: string },
+  ) =>
+    http<PromptRevertResponse>(`${PROMPTS_BASE}/templates/${id}/revert`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

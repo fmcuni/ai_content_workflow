@@ -2,9 +2,6 @@
 
 今天是 {today_date}
 
-<!-- create_mode_block: replaced at runtime with the n8n Settings3 create-mode
-     outline body when start_mode == "create"; replaced with the empty string
-     when start_mode == "refresh" (the existing refresh body below applies). -->
 {create_mode_block}
 
 你會收到：

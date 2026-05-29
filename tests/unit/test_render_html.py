@@ -163,3 +163,124 @@ def test_defterm_emits_jsonld_and_strips_shortcode():
 def test_defterm_absent_means_no_definedtermset():
     r = render_html(SAMPLE)  # SAMPLE has no defterm blocks
     assert "DefinedTermSet" not in r.html_body
+
+
+# Regression: the writer nests defterm / FAQ blocks inside markdown bullets,
+# which prefixes every line with 2+ spaces. Earlier the regex required the
+# closing tag to sit flush against the newline, so an indented block silently
+# survived into the body and no JSON-LD was emitted.
+INDENTED_SAMPLE = """\
+# 高端醫保指南
+%%meta desc=高端醫保解說%%
+
+主要分別有以下幾點：
+
+* **「全數賠償」概念**：
+  普通醫保通常設有細項上限。
+
+  %%defterm name=全數賠償%%
+  保險公司不設各個細項的賠償上限，全額實報實銷醫療開支。
+  %%end%%
+
+* **自付額**：
+  選擇自付額越高，保費折扣越大。
+
+\t%%defterm name=自付額%%
+\t俗稱「墊底費」，投保人必須自行承擔的合資格醫療費用金額。
+\t%%end%%
+
+## 常見問題
+   %%acf_faq type=q%%
+   什麼是「全數賠償」？
+   %%acf_faq type=a%%
+   不設各個分項的賠償上限。
+   %%end%%
+"""
+
+
+def test_indented_defterm_inside_list_is_stripped_and_schema_emitted():
+    r = render_html(INDENTED_SAMPLE)
+    assert "%%defterm" not in r.html_body
+    assert "%%end%%" not in r.html_body
+    assert '"@type": "DefinedTermSet"' in r.html_body
+    assert '"name": "全數賠償"' in r.html_body
+    assert '"name": "自付額"' in r.html_body
+    assert r.html_body.count('"@type": "DefinedTerm"') == 2
+
+
+def test_indented_faq_is_stripped_and_schema_emitted():
+    r = render_html(INDENTED_SAMPLE)
+    assert "%%acf_faq" not in r.html_body
+    assert r.faq_schema_jsonld is not None
+    assert r.faq_schema_jsonld["@type"] == "FAQPage"
+    assert len(r.faq_schema_jsonld["mainEntity"]) == 1
+    assert r.faq_schema_jsonld["mainEntity"][0]["name"] == "什麼是「全數賠償」？"
+
+
+# Regression for run b56515ba: the writer inlined defterm blocks inside CJK
+# quotes (e.g. 「%%defterm name=回南天%%描述%%end%%」). The old regex required
+# newlines between markers, so the whole block survived into the published HTML
+# as literal marker text. We now (a) tolerate inline form, (b) replace the
+# inline block with just the term name so quotes don't collapse to empty 「」,
+# (c) still emit the DefinedTermSet JSON-LD, and (d) hard-fail on any residual
+# marker fragment so future writer quirks can't silently leak again.
+INLINE_DEFTERM_SAMPLE = """\
+# 立春指南
+%%meta desc=立春時節養生重點%%
+
+香港立春時節伴隨「%%defterm name=回南天%%指華南春季潮濕多霧天氣，水汽凝結令牆壁滲水。%%end%%」嘅潮濕天氣，亦易誘發「%%defterm name=春困%%春季濕氣困脾胃，令人精神不振、昏昏欲睡嘅生理現象。%%end%%」。
+
+%%adv_panel id=1%%
+
+## 養生重點
+
+配置一份「%%defterm name=自願醫保%%（VHIS）係政府推行嘅個人住院醫保計劃。%%end%%」可加強防護。
+
+%%page_widget id=2%%
+"""
+
+
+def test_inline_defterm_replaced_with_term_name():
+    r = render_html(INLINE_DEFTERM_SAMPLE)
+    # No raw marker text leaks into the body.
+    assert "%%defterm" not in r.html_body
+    assert "%%end%%" not in r.html_body
+    # Inline blocks were wrapped in 「…」 — the visible term must survive so
+    # the sentence doesn't collapse to empty quotes.
+    assert "「回南天」" in r.html_body
+    assert "「春困」" in r.html_body
+    assert "「自願醫保」" in r.html_body
+
+
+def test_inline_defterm_still_emits_definedtermset_jsonld():
+    r = render_html(INLINE_DEFTERM_SAMPLE)
+    assert '"@type": "DefinedTermSet"' in r.html_body
+    assert '"name": "回南天"' in r.html_body
+    assert '"name": "春困"' in r.html_body
+    assert '"name": "自願醫保"' in r.html_body
+    assert r.html_body.count('"@type": "DefinedTerm"') == 3
+
+
+def test_orphan_defterm_open_marker_refuses_render():
+    """Half-broken shortcode (open without close) must hard-fail rather than
+    silently leak the marker into the published HTML."""
+    bad = """\
+# 標題
+%%meta desc=說明%%
+
+正文段落含一個未閉合嘅 %%defterm name=X%% 描述但無 end marker。
+"""
+    with pytest.raises(ValueError, match="defterm"):
+        render_html(bad)
+
+
+def test_orphan_defterm_end_marker_refuses_render():
+    """Stray `%%end%%` outside a FAQ or defterm block must also hard-fail."""
+    bad = """\
+# 標題
+%%meta desc=說明%%
+
+正文段落含一個孤兒 %%end%% marker。
+"""
+    with pytest.raises(ValueError, match="defterm"):
+        render_html(bad)

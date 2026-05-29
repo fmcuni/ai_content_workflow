@@ -400,6 +400,67 @@ class WpCategoryCache(Base):
     )
 
 
+class PromptVersion(Base):
+    """Immutable history row for every prompt-template save or revert.
+
+    The on-disk file under ``prompts/`` is the live copy; this table is the
+    audit trail and the source for the editor's "History" panel + one-click
+    revert. ``parent_sha256`` chains rows so the lineage is recoverable even
+    if ``saved_at`` ties.
+    """
+
+    __tablename__ = "prompt_versions"
+    __table_args__ = (
+        Index("prompt_versions_template_idx", "template_id", "saved_at"),
+        {"schema": "content_tool"},
+    )
+
+    version_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    template_id: Mapped[str] = mapped_column(String, nullable=False)
+    sha256: Mapped[str] = mapped_column(String, nullable=False)
+    parent_sha256: Mapped[str | None] = mapped_column(String)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    saved_by: Mapped[str] = mapped_column(String, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    kind: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'save'")
+    )
+
+
+class PromptTemplate(Base):
+    """Live prompt-template body — the source of truth the runtime reads from.
+
+    One row per ``template_id`` (agent prompts, shared partials, eval judges).
+    The editor at ``/prompts`` updates ``body`` in place; ``prompt_versions``
+    keeps the append-only history of every save/revert. ``sha256`` is the hash
+    of ``body`` and powers the editor's optimistic-concurrency check.
+    """
+
+    __tablename__ = "prompt_templates"
+    __table_args__ = (
+        Index("prompt_templates_category_idx", "category"),
+        {"schema": "content_tool"},
+    )
+
+    template_id: Mapped[str] = mapped_column(String, primary_key=True)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    sha256: Mapped[str] = mapped_column(String, nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+    updated_by: Mapped[str | None] = mapped_column(String)
+
+
 from content_tool.db.persona_model import Persona  # noqa: E402
 from content_tool.db.topic_batch_model import (  # noqa: E402
     TopicBatch,

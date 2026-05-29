@@ -539,11 +539,40 @@ export interface PromptSaveResponse {
   template_id: string;
   sha256: string;
   bytes: number;
+  version_id?: string;
+  saved_at?: string;
+  saved_by?: string;
 }
 
 export interface PromptPreviewResponse {
   resolved: string;
   route: string;
+}
+
+export type PromptVersionKind = "save" | "revert";
+
+export interface PromptVersionSummary {
+  version_id: string;
+  sha256: string;
+  parent_sha256: string | null;
+  bytes: number;
+  saved_by: string;
+  saved_at: string;
+  kind: PromptVersionKind;
+}
+
+export interface PromptVersionDetail extends PromptVersionSummary {
+  template_id: string;
+  body: string;
+}
+
+export interface PromptVersionsResponse {
+  template_id: string;
+  versions: PromptVersionSummary[];
+}
+
+export interface PromptRevertResponse extends PromptSaveResponse {
+  reverted_from_version_id: string;
 }
 
 export interface UserPromptExample {

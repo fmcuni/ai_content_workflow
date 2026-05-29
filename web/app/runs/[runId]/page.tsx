@@ -8,6 +8,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { SectionHead } from "@/components/SectionHead";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
+import { ThinkingStream } from "@/components/ThinkingStream";
 import { CostMeter } from "@/components/CostMeter";
 import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { useRunEvents } from "@/lib/sse";
@@ -131,6 +132,7 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-10">
         {/* Live progress */}
         <section>
+          <ThinkingStream events={events} live={run?.status === "production"} />
           <p className="kicker mb-3">Live progress</p>
           <EventTimeline events={events} />
         </section>

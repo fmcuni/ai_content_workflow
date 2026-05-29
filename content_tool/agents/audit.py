@@ -1,11 +1,11 @@
 import json
 from datetime import date
-from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from content_tool import prompts_store
 from content_tool.agents.audit_checks import run_deterministic_checks
 from content_tool.db.models import AuditRun, Citation, Draft, GapAnalysisRow, Render, Run
 from content_tool.gemini.client import GeminiClient
@@ -13,22 +13,23 @@ from content_tool.models.audit import AuditFinding, AuditOutput, SeveritySummary
 from content_tool.models.persona import PersonaPack
 from content_tool.policy.personas import load_persona
 
-_PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "audit.md"
-
 
 def build_system_prompt_from_pack(
-    persona: PersonaPack, today: date, *, context_text: str | None = None
+    persona: PersonaPack,
+    today: date,
+    *,
+    template_text: str,
+    context_text: str | None = None,
 ) -> str:
     """Render the audit system prompt from a pre-loaded PersonaPack.
 
+    ``template_text`` is the assembled prompt body from the DB store.
     ``context_text`` filters the glossary block to entries whose term or
     variants appear in the draft. When ``None`` the full glossary renders.
     """
-    return (
-        _PROMPT_PATH.read_text(encoding="utf-8")
-        .replace("{persona_block}", persona.to_prompt_block(context_text))
-        .replace("{today_date}", today.isoformat())
-    )
+    return template_text.replace(
+        "{persona_block}", persona.to_prompt_block(context_text)
+    ).replace("{today_date}", today.isoformat())
 
 
 async def build_system_prompt(
@@ -39,7 +40,10 @@ async def build_system_prompt(
     context_text: str | None = None,
 ) -> str:
     persona = await load_persona(persona_name, session=session)
-    return build_system_prompt_from_pack(persona, today, context_text=context_text)
+    template_text = await prompts_store.get_assembled("audit", session=session)
+    return build_system_prompt_from_pack(
+        persona, today, template_text=template_text, context_text=context_text
+    )
 
 
 def build_user_prompt(
@@ -151,6 +155,12 @@ async def run_audit(
         findings=combined_findings,
     )
 
+    # Idempotency: LangGraph can re-enter the production sub-graph (resume,
+    # retry, refine loop) and call this node twice for the same draft.
+    # ``AuditRun.draft_id`` is UNIQUE, so a blind INSERT crashes with
+    # ``UniqueViolationError`` on the second pass. DELETE first so the node has
+    # single-row semantics regardless of how many times the graph replays it.
+    await session.execute(delete(AuditRun).where(AuditRun.draft_id == draft_id))
     session.add(
         AuditRun(
             draft_id=draft_id,

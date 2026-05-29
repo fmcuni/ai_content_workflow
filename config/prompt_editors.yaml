@@ -1,0 +1,15 @@
+# Editors allowed to write prompt templates via the /prompts editor.
+#
+# Authentication is header-based: the reverse proxy that fronts the API is
+# expected to validate the editor's SSO session and inject X-Editor-Email
+# before forwarding. The list below is the authorisation allowlist matched
+# against that header (case-insensitive). Anyone in this list can save and
+# revert; anyone outside it is rejected with 403 (unless dev_mode is on).
+editors:
+  - franco.ma@bowtie.com.sg
+
+# When true the gate is skipped — the request is allowed and stamped as
+# the header value (or "dev@local" when no header). Use ONLY in local dev
+# and tests. CI and production set the environment variable
+# PROMPT_EDITOR_DEV_MODE=false, which overrides this file.
+dev_mode: true

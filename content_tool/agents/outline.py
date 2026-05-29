@@ -1,5 +1,4 @@
 from datetime import date
-from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
@@ -7,22 +6,21 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from content_tool import prompts_store
 from content_tool.db.models import FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.outline import Outline
 
-_PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
-PROMPT_PATH = _PROMPT_DIR / "outline.md"
-# Create-mode body slotted into the ``{create_mode_block}`` placeholder when
-# ``start_mode == "create"``. Sourced verbatim from the n8n reference workflow
-# (``AI Content Creation - 1) Create article.json`` node ``Settings3``).
-CREATE_MODE_PROMPT_PATH = _PROMPT_DIR / "outline_create_mode.md"
 
-
-def build_system_prompt(today: date, start_mode: Literal["refresh", "create"] = "refresh") -> str:
+async def build_system_prompt(
+    today: date,
+    start_mode: Literal["refresh", "create"] = "refresh",
+    *,
+    session: AsyncSession,
+) -> str:
     """Render the outline system prompt.
 
-    ``start_mode == "create"``: slot the n8n Settings3 body into the
+    ``start_mode == "create"``: slot the create-mode body into the
     ``{create_mode_block}`` placeholder so the LLM gets the create-mode brief
     *before* the refresh-mode instructions in the template.
 
@@ -31,14 +29,13 @@ def build_system_prompt(today: date, start_mode: Literal["refresh", "create"] = 
     the pre-Task-4 behaviour.
     """
     block = (
-        CREATE_MODE_PROMPT_PATH.read_text(encoding="utf-8").rstrip()
+        (await prompts_store.get_assembled("outline_create_mode", session=session)).rstrip()
         if start_mode == "create"
         else ""
     )
-    return (
-        PROMPT_PATH.read_text(encoding="utf-8")
-        .replace("{today_date}", today.isoformat())
-        .replace("{create_mode_block}", block)
+    template = await prompts_store.get_assembled("outline", session=session)
+    return template.replace("{today_date}", today.isoformat()).replace(
+        "{create_mode_block}", block
     )
 
 
@@ -106,7 +103,7 @@ async def run_outline(
         "create" if run.start_mode == "create" else "refresh"
     )
 
-    sys_prompt = build_system_prompt(today, start_mode)
+    sys_prompt = await build_system_prompt(today, start_mode, session=session)
 
     if start_mode == "create":
         user_prompt = build_user_prompt_create_mode(

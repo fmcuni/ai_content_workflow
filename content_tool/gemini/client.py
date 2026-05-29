@@ -4,6 +4,8 @@ from typing import Any, Protocol
 from google import genai
 from google.genai import types as genai_types
 
+from content_tool.gemini.streaming import ThoughtEmitter, get_thought_emitter
+
 
 @dataclass
 class GeminiResult:
@@ -119,27 +121,45 @@ class RealGeminiClient:
         if "urlContext" in tools:
             config_tools.append(genai_types.Tool(url_context=genai_types.UrlContext()))
 
+        # ``include_thoughts`` is opt-in per request and only matters when the
+        # caller installed a sink that wants to surface thought summaries (the
+        # SSE run-page; CLI and batch jobs leave it ``None``). Enabling it
+        # unconditionally would charge thought tokens against runs nobody is
+        # watching.
+        emitter = get_thought_emitter()
+        include_thoughts = emitter is not None
         config = genai_types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=1.0,
-            thinking_config=genai_types.ThinkingConfig(thinking_level=self._thinking_level),
+            thinking_config=genai_types.ThinkingConfig(
+                thinking_level=self._thinking_level,
+                include_thoughts=include_thoughts or None,
+            ),
             response_mime_type="application/json" if response_schema else None,
             response_json_schema=strip_property_ordering(response_schema) if response_schema else None,  # noqa: E501
             tools=config_tools or None,
         )
 
         t0 = time.perf_counter()
-        response = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=user_prompt,
-            config=config,
-        )
+        if emitter is not None:
+            text, usage, candidate = await self._stream_call(
+                agent=agent,
+                user_prompt=user_prompt,
+                config=config,
+                emitter=emitter,
+            )
+        else:
+            response = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=user_prompt,
+                config=config,
+            )
+            text = response.text or ""
+            usage = response.usage_metadata
+            candidate = response.candidates[0] if response.candidates else None
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-        text = response.text or ""
         parsed = parse_gemini_json(text)
-        usage = response.usage_metadata
-        candidate = response.candidates[0] if response.candidates else None
         grounding = None
         if candidate and candidate.grounding_metadata:
             grounding = [c.model_dump() for c in (candidate.grounding_metadata.grounding_chunks or [])]  # noqa: E501
@@ -154,3 +174,46 @@ class RealGeminiClient:
             grounding_chunks=grounding,
             finish_reason=candidate.finish_reason.name if candidate and candidate.finish_reason else None,  # noqa: E501
         )
+
+    async def _stream_call(
+        self,
+        *,
+        agent: str,
+        user_prompt: str,
+        config: genai_types.GenerateContentConfig,
+        emitter: ThoughtEmitter,
+    ) -> tuple[str, Any, Any]:
+        """Drive ``generate_content_stream``, forwarding thought parts to the
+        emitter and accumulating the non-thought text + final usage/candidate
+        metadata. The Gemini SDK guarantees ``usage_metadata`` and the resolved
+        ``candidate`` show up on the *last* chunk, so we keep overwriting as
+        each chunk lands.
+        """
+        text_parts: list[str] = []
+        usage: Any = None
+        last_candidate: Any = None
+        stream = await self._client.aio.models.generate_content_stream(
+            model=self._model,
+            contents=user_prompt,
+            config=config,
+        )
+        async for chunk in stream:
+            if chunk.usage_metadata is not None:
+                usage = chunk.usage_metadata
+            if chunk.candidates:
+                last_candidate = chunk.candidates[0]
+                content = last_candidate.content
+                if content and content.parts:
+                    for part in content.parts:
+                        if not isinstance(part.text, str) or not part.text:
+                            continue
+                        if part.thought is True:
+                            # Swallow emitter errors — a broken SSE pipe must
+                            # not abort the writer LLM call mid-flight.
+                            try:
+                                await emitter(agent, part.text)
+                            except Exception:  # noqa: S110
+                                pass
+                        else:
+                            text_parts.append(part.text)
+        return "".join(text_parts), usage, last_candidate

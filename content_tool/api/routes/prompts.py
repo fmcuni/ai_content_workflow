@@ -1,22 +1,19 @@
 import hashlib
-import os
 import re
-import tempfile
 from datetime import date
-from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from content_tool import prompts_store
 from content_tool.agents import audit as audit_agent
 from content_tool.agents import gap_analysis as gap_agent
 from content_tool.agents import outline as outline_agent
 from content_tool.agents import writer as writer_agent
-from content_tool.agents.writer import resolve_includes
 from content_tool.api.prompt_graph import PROMPT_GRAPHS
 from content_tool.db.models import (
     AuditRun,
@@ -25,48 +22,28 @@ from content_tool.db.models import (
     FetchedArticle,
     GapAnalysisRow,
     OutlineRow,
+    PromptTemplate,
+    PromptVersion,
     Render,
     Run,
 )
 from content_tool.policy.personas import load_persona_from_yaml
+from content_tool.policy.prompt_editors import load_policy as _load_editor_policy
 from content_tool.policy.source_policy import DEFAULT_POLICY_PATH, SourcePolicy
+from content_tool.prompts_store import TemplateRow
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
-_PROMPT_DIR = Path(__file__).resolve().parents[3] / "prompts"
-
-# Agent-prompt files exposed by `/prompts/templates/{id}`. These are the
-# full system-prompt templates that ship to Gemini, one per node in the graph.
-_TEMPLATE_FILES = {
-    "audit": "audit.md",
-    "gap_analysis": "gap_analysis.md",
-    "outline": "outline.md",
-    "outline_create_mode": "outline_create_mode.md",
-    "writer_small_refresh": "writer_small_refresh.md",
-    "writer_full_rewrite": "writer_full_rewrite.md",
-    "writer_create": "writer_create.md",
-    "topic_gen": "topic_gen.md",
-    "topic_dedup": "topic_dedup.md",
-    "topic_hot": "topic_hot.md",
-}
-
-# Shared partials — slotted into agent prompts via `{{include:NAME}}`. Their
-# template_id is the underscore-prefixed filename stem so the editor can
-# distinguish them from full agent prompts in the list view.
-_PARTIAL_FILES = {
-    "_writer_brand_block": "_writer_brand_block.md",
-    "_writer_schema": "_writer_schema.md",
-    "_writer_seo": "_writer_seo.md",
-    "_writer_refine_notes": "_writer_refine_notes.md",
-    "_writer_output_format_tail": "_writer_output_format_tail.md",
-}
-
-_ALL_FILES = {**_TEMPLATE_FILES, **_PARTIAL_FILES}
+# Categories the prompt editor surfaces and manages. Judge templates live in the
+# same ``prompt_templates`` table (seeded for the eval harness) but are not
+# editable here, so reads/saves for a judge id resolve to 404 as before.
+_EDITABLE_CATEGORIES = frozenset({"agent", "partial"})
 
 # Required `{placeholder}` set per template — the writer/audit/outline/etc.
-# loaders perform these substitutions on the rendered system prompt, so
+# loaders perform these substitutions on the assembled system prompt, so
 # removing one would leak a literal `{persona_block}` into the model. The
-# editor blocks any save that drops one of these.
+# editor blocks any save that drops one of these. This validation metadata is
+# not stored in the DB; it lives with the route.
 _REQUIRED_PLACEHOLDERS: dict[str, set[str]] = {
     "audit": {"persona_block", "today_date"},
     "gap_analysis": {"today_date"},
@@ -78,8 +55,8 @@ _REQUIRED_PLACEHOLDERS: dict[str, set[str]] = {
     "topic_gen": set(),
     "topic_dedup": set(),
     "topic_hot": set(),
-    # Partials are pure text today, but their schema endpoint still returns
-    # an entry so the UI can treat them uniformly.
+    # Partials are pure text today, but their schema endpoint still returns an
+    # entry so the UI can treat them uniformly.
     "_writer_brand_block": set(),
     "_writer_schema": set(),
     "_writer_seo": set(),
@@ -92,32 +69,50 @@ _INCLUDE_RE = re.compile(r"\{\{include:([A-Za-z0-9_./-]+)\}\}")
 _PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 
 
-def _category(template_id: str) -> str:
-    return "partial" if template_id in _PARTIAL_FILES else "agent"
-
-
-def _resolve_path(template_id: str) -> Path:
-    filename = _ALL_FILES.get(template_id)
-    if filename is None:
-        raise HTTPException(404, f"unknown template_id '{template_id}'")
-    return _PROMPT_DIR / filename
-
-
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _consumers_of(template_id: str) -> list[str]:
+def _get_session_factory(request: Request) -> async_sessionmaker[Any]:
+    return request.app.state.session_factory  # type: ignore[no-any-return]
+
+
+async def _load_snapshot(sf: async_sessionmaker[Any]) -> dict[str, TemplateRow]:
+    """Cached in-process snapshot of every ``prompt_templates`` row.
+
+    Opens one session for the first (cache-miss) read; warm reads are served
+    from the process cache that :func:`prompts_store.invalidate` busts on save.
+    """
+    async with sf() as session:
+        return await prompts_store.snapshot(session)
+
+
+def _editable_or_404(snap: dict[str, TemplateRow], template_id: str) -> TemplateRow:
+    row = snap.get(template_id)
+    if row is None or row.category not in _EDITABLE_CATEGORIES:
+        raise HTTPException(404, f"unknown template_id '{template_id}'")
+    return row
+
+
+def _agent_ids(snap: dict[str, TemplateRow]) -> set[str]:
+    return {tid for tid, row in snap.items() if row.category == "agent"}
+
+
+def _partial_ids(snap: dict[str, TemplateRow]) -> set[str]:
+    return {tid for tid, row in snap.items() if row.category == "partial"}
+
+
+def _consumers_of(template_id: str, snap: dict[str, TemplateRow]) -> list[str]:
     """Agent templates whose body contains `{{include:<template_id>}}`.
 
     For agent templates the answer is just `[template_id]` — the editor
     previews the agent prompt against itself.
     """
-    if template_id in _TEMPLATE_FILES:
+    if snap[template_id].category == "agent":
         return [template_id]
     hits: list[str] = []
-    for agent_id, filename in _TEMPLATE_FILES.items():
-        body = (_PROMPT_DIR / filename).read_text(encoding="utf-8")
+    for agent_id in _agent_ids(snap):
+        body = snap[agent_id].body
         for match in _INCLUDE_RE.finditer(body):
             if match.group(1) == template_id:
                 hits.append(agent_id)
@@ -125,9 +120,8 @@ def _consumers_of(template_id: str) -> list[str]:
     return sorted(hits)
 
 
-def _partials_referenced_by(route_id: str) -> set[str]:
-    body = (_PROMPT_DIR / _TEMPLATE_FILES[route_id]).read_text(encoding="utf-8")
-    return {m.group(1) for m in _INCLUDE_RE.finditer(body)}
+def _partials_referenced_by(route_id: str, snap: dict[str, TemplateRow]) -> set[str]:
+    return {m.group(1) for m in _INCLUDE_RE.finditer(snap[route_id].body)}
 
 
 @router.get("/graph")
@@ -139,23 +133,26 @@ async def graph(mode: str = Query("refresh")) -> dict:
 
 
 @router.get("/templates")
-async def list_templates() -> dict[str, Any]:
-    """List every editable prompt file — agent prompts + shared partials.
+async def list_templates(
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """List every editable prompt — agent prompts + shared partials.
 
     sha256 lets the editor detect server-side changes between load and save
     (optimistic concurrency).
     """
+    snap = await _load_snapshot(sf)
     items: list[dict[str, Any]] = []
-    for template_id, filename in _ALL_FILES.items():
-        path = _PROMPT_DIR / filename
-        body = path.read_text(encoding="utf-8")
+    for template_id, row in snap.items():
+        if row.category not in _EDITABLE_CATEGORIES:
+            continue
         items.append(
             {
                 "template_id": template_id,
-                "filename": filename,
-                "category": _category(template_id),
-                "sha256": _sha256(body),
-                "bytes": len(body.encode("utf-8")),
+                "filename": row.filename,
+                "category": row.category,
+                "sha256": row.sha256,
+                "bytes": row.bytes,
             }
         )
     items.sort(key=lambda i: (i["category"] == "partial", i["template_id"]))
@@ -163,32 +160,38 @@ async def list_templates() -> dict[str, Any]:
 
 
 @router.get("/templates/{template_id}")
-async def template(template_id: str) -> dict:
-    path = _resolve_path(template_id)
-    body = path.read_text(encoding="utf-8")
+async def template(
+    template_id: str,
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict:
+    snap = await _load_snapshot(sf)
+    row = _editable_or_404(snap, template_id)
     return {
         "template_id": template_id,
-        "filename": path.name,
-        "category": _category(template_id),
-        "template": body,
-        "sha256": _sha256(body),
+        "filename": row.filename,
+        "category": row.category,
+        "template": row.body,
+        "sha256": row.sha256,
     }
 
 
 @router.get("/templates/{template_id}/schema")
-async def template_schema(template_id: str) -> dict[str, Any]:
+async def template_schema(
+    template_id: str,
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
     """Return required placeholders + the include directives this template
     currently references. The editor uses both: required placeholders drive
     the validation chips; includes drive the preview tabs.
     """
-    path = _resolve_path(template_id)
-    body = path.read_text(encoding="utf-8")
+    snap = await _load_snapshot(sf)
+    row = _editable_or_404(snap, template_id)
+    body = row.body
     required = sorted(_REQUIRED_PLACEHOLDERS.get(template_id, set()))
     found_placeholders = sorted({m.group(1) for m in _PLACEHOLDER_RE.finditer(body)})
     found_includes = sorted({m.group(1) for m in _INCLUDE_RE.finditer(body)})
-    unknown_includes = sorted(
-        name for name in found_includes if name not in _PARTIAL_FILES
-    )
+    partial_ids = _partial_ids(snap)
+    unknown_includes = sorted(name for name in found_includes if name not in partial_ids)
     return {
         "template_id": template_id,
         "required_placeholders": required,
@@ -199,10 +202,13 @@ async def template_schema(template_id: str) -> dict[str, Any]:
 
 
 @router.get("/templates/{template_id}/consumers")
-async def template_consumers(template_id: str) -> dict[str, Any]:
-    if template_id not in _ALL_FILES:
-        raise HTTPException(404, f"unknown template_id '{template_id}'")
-    return {"template_id": template_id, "consumers": _consumers_of(template_id)}
+async def template_consumers(
+    template_id: str,
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    snap = await _load_snapshot(sf)
+    _editable_or_404(snap, template_id)
+    return {"template_id": template_id, "consumers": _consumers_of(template_id, snap)}
 
 
 class _SaveTemplateRequest(BaseModel):
@@ -210,87 +216,323 @@ class _SaveTemplateRequest(BaseModel):
     expected_sha256: str = Field(..., min_length=64, max_length=64)
 
 
-@router.put("/templates/{template_id}")
-async def save_template(template_id: str, body: _SaveTemplateRequest) -> dict[str, Any]:
-    """Validate + atomically write a template file.
+async def _require_editor(request: Request) -> str:
+    """Resolve the editor's email from the trusted ``X-Editor-Email`` header.
 
-    HTTP 409 if expected_sha256 no longer matches what's on disk (another
-    editor saved between load and save).
+    The reverse proxy in front of the API is expected to validate SSO and
+    inject this header; the browser does not set it directly. In dev mode
+    (``PROMPT_EDITOR_DEV_MODE=true`` — the default outside CI) a missing
+    header falls back to ``dev@local`` so local work isn't blocked.
+    """
+    email = (request.headers.get("X-Editor-Email") or "").strip().lower()
+    policy = _load_editor_policy()
+    if not email:
+        if policy.dev_mode:
+            return "dev@local"
+        raise HTTPException(401, "missing X-Editor-Email header")
+    if not policy.is_allowed(email) and not policy.dev_mode:
+        raise HTTPException(403, f"{email} is not an authorised prompt editor")
+    return email
+
+
+@router.put("/templates/{template_id}")
+async def save_template(
+    template_id: str,
+    body: _SaveTemplateRequest,
+    editor: str = Depends(_require_editor),
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Validate + persist a template edit, stamping an immutable version row.
+
+    HTTP 401 if no ``X-Editor-Email`` (production only).
+    HTTP 403 if the editor isn't in the allowlist (production only).
+    HTTP 404 if ``template_id`` is not an editable agent/partial template.
+    HTTP 409 if expected_sha256 no longer matches the row (another editor saved
+    between load and save).
     HTTP 413 if the new body exceeds the 64 KiB cap.
     HTTP 400 if a required placeholder is removed, or if a `{{include:X}}`
     directive references an unknown partial.
 
-    Atomic write via os.replace — a half-written file never overwrites the
-    real one. Git history is the audit trail.
+    The ``prompt_templates`` UPDATE and the ``prompt_versions`` INSERT commit in
+    a single transaction so history can never advertise a save that didn't land
+    (or vice versa). The row is locked ``FOR UPDATE`` to serialise concurrent
+    saves of the same template. After commit the in-process cache is invalidated
+    so this worker serves the new body immediately.
     """
-    path = _resolve_path(template_id)
-    current = path.read_text(encoding="utf-8")
-    current_sha = _sha256(current)
-    if current_sha != body.expected_sha256:
-        raise HTTPException(
-            409,
-            {
-                "error": "stale_sha",
-                "message": "template was changed on disk since you loaded it",
-                "current_sha256": current_sha,
-            },
-        )
-
     new_bytes = body.template.encode("utf-8")
-    if len(new_bytes) > _MAX_TEMPLATE_BYTES:
-        raise HTTPException(
-            413,
-            f"template exceeds {_MAX_TEMPLATE_BYTES} bytes (got {len(new_bytes)})",
-        )
+    new_sha = _sha256(body.template)
+    version_id = uuid4()
 
-    required = _REQUIRED_PLACEHOLDERS.get(template_id, set())
-    present = {m.group(1) for m in _PLACEHOLDER_RE.finditer(body.template)}
-    missing = sorted(required - present)
-    if missing:
-        raise HTTPException(
-            400,
-            {
-                "error": "missing_placeholders",
-                "message": "template removed required placeholders",
-                "missing": missing,
-            },
-        )
+    async with sf() as session:
+        row = (
+            await session.execute(
+                select(PromptTemplate)
+                .where(PromptTemplate.template_id == template_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or row.category not in _EDITABLE_CATEGORIES:
+            raise HTTPException(404, f"unknown template_id '{template_id}'")
 
-    bad_includes = sorted(
-        m.group(1)
-        for m in _INCLUDE_RE.finditer(body.template)
-        if m.group(1) not in _PARTIAL_FILES
-    )
-    if bad_includes:
-        raise HTTPException(
-            400,
-            {
-                "error": "unknown_includes",
-                "message": "template references partials that do not exist",
-                "unknown": bad_includes,
-            },
-        )
+        current_sha = row.sha256
+        if current_sha != body.expected_sha256:
+            raise HTTPException(
+                409,
+                {
+                    "error": "stale_sha",
+                    "message": "template was changed since you loaded it",
+                    "current_sha256": current_sha,
+                },
+            )
 
-    # Same-directory tmp + os.replace = atomic on POSIX; avoids cross-fs
-    # edge cases when /tmp is a different filesystem.
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
-    )
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(new_bytes)
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+        if len(new_bytes) > _MAX_TEMPLATE_BYTES:
+            raise HTTPException(
+                413,
+                f"template exceeds {_MAX_TEMPLATE_BYTES} bytes (got {len(new_bytes)})",
+            )
+
+        required = _REQUIRED_PLACEHOLDERS.get(template_id, set())
+        present = {m.group(1) for m in _PLACEHOLDER_RE.finditer(body.template)}
+        missing = sorted(required - present)
+        if missing:
+            raise HTTPException(
+                400,
+                {
+                    "error": "missing_placeholders",
+                    "message": "template removed required placeholders",
+                    "missing": missing,
+                },
+            )
+
+        partial_ids = set(
+            (
+                await session.execute(
+                    select(PromptTemplate.template_id).where(
+                        PromptTemplate.category == "partial"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        bad_includes = sorted(
+            m.group(1)
+            for m in _INCLUDE_RE.finditer(body.template)
+            if m.group(1) not in partial_ids
+        )
+        if bad_includes:
+            raise HTTPException(
+                400,
+                {
+                    "error": "unknown_includes",
+                    "message": "template references partials that do not exist",
+                    "unknown": bad_includes,
+                },
+            )
+
+        row.body = body.template
+        row.sha256 = new_sha
+        row.bytes = len(new_bytes)
+        row.updated_by = editor
+        version = PromptVersion(
+            version_id=version_id,
+            template_id=template_id,
+            sha256=new_sha,
+            parent_sha256=current_sha,
+            body=body.template,
+            bytes=len(new_bytes),
+            saved_by=editor,
+            kind="save",
+        )
+        session.add(version)
+        await session.commit()
+        await session.refresh(version, attribute_names=["saved_at"])
+        saved_at = version.saved_at
+
+    prompts_store.invalidate(template_id)
 
     return {
         "template_id": template_id,
-        "sha256": _sha256(body.template),
+        "sha256": new_sha,
         "bytes": len(new_bytes),
+        "version_id": str(version_id),
+        "saved_at": saved_at.isoformat(),
+        "saved_by": editor,
+    }
+
+
+@router.get("/templates/{template_id}/history")
+async def template_history(
+    template_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Newest-first list of saves + reverts for this template.
+
+    ``body`` is omitted to keep the payload small — fetch a single version
+    via ``GET .../versions/{version_id}`` when the user opens the preview
+    dialog.
+    """
+    async with sf() as session:
+        snap = await prompts_store.snapshot(session)
+        _editable_or_404(snap, template_id)
+        rows = (
+            (
+                await session.execute(
+                    select(PromptVersion)
+                    .where(PromptVersion.template_id == template_id)
+                    .order_by(PromptVersion.saved_at.desc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "template_id": template_id,
+        "versions": [
+            {
+                "version_id": str(r.version_id),
+                "sha256": r.sha256,
+                "parent_sha256": r.parent_sha256,
+                "bytes": r.bytes,
+                "saved_by": r.saved_by,
+                "saved_at": r.saved_at.isoformat(),
+                "kind": r.kind,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/templates/{template_id}/versions/{version_id}")
+async def template_version(
+    template_id: str,
+    version_id: UUID,
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Return one version's full body + metadata.
+
+    Used by the revert flow to preview before confirming, and by any future
+    diff UI. Scoped to ``template_id`` so a stray UUID for a different
+    template returns 404 instead of leaking another template's body.
+    """
+    async with sf() as session:
+        snap = await prompts_store.snapshot(session)
+        _editable_or_404(snap, template_id)
+        row = (
+            await session.execute(
+                select(PromptVersion).where(
+                    PromptVersion.version_id == version_id,
+                    PromptVersion.template_id == template_id,
+                )
+            )
+        ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, f"unknown version_id '{version_id}'")
+    return {
+        "version_id": str(row.version_id),
+        "template_id": row.template_id,
+        "sha256": row.sha256,
+        "parent_sha256": row.parent_sha256,
+        "body": row.body,
+        "bytes": row.bytes,
+        "saved_by": row.saved_by,
+        "saved_at": row.saved_at.isoformat(),
+        "kind": row.kind,
+    }
+
+
+class _RevertRequest(BaseModel):
+    target_version_id: UUID
+    expected_sha256: str = Field(..., min_length=64, max_length=64)
+
+
+@router.post("/templates/{template_id}/revert")
+async def revert_template(
+    template_id: str,
+    body: _RevertRequest,
+    editor: str = Depends(_require_editor),
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Replace the live template body with the body of a past version.
+
+    Subject to the same optimistic-concurrency gate as PUT — the row's sha must
+    still match ``expected_sha256`` — and stamped as a ``kind='revert'`` row so
+    the trail is symmetric. The UPDATE + INSERT commit in one transaction.
+    """
+    version_id = uuid4()
+
+    async with sf() as session:
+        row = (
+            await session.execute(
+                select(PromptTemplate)
+                .where(PromptTemplate.template_id == template_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or row.category not in _EDITABLE_CATEGORIES:
+            raise HTTPException(404, f"unknown template_id '{template_id}'")
+
+        current_sha = row.sha256
+        if current_sha != body.expected_sha256:
+            raise HTTPException(
+                409,
+                {
+                    "error": "stale_sha",
+                    "message": "template was changed since you loaded it",
+                    "current_sha256": current_sha,
+                },
+            )
+
+        target = (
+            await session.execute(
+                select(PromptVersion).where(
+                    PromptVersion.version_id == body.target_version_id,
+                    PromptVersion.template_id == template_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if target is None:
+            raise HTTPException(404, f"unknown version_id '{body.target_version_id}'")
+
+        new_text = target.body
+        new_bytes = new_text.encode("utf-8")
+        if len(new_bytes) > _MAX_TEMPLATE_BYTES:
+            # Should be impossible — the row was inserted under the same cap —
+            # but guard anyway so a future cap reduction doesn't bypass it.
+            raise HTTPException(413, f"target version exceeds {_MAX_TEMPLATE_BYTES} bytes")
+
+        new_sha = _sha256(new_text)
+        row.body = new_text
+        row.sha256 = new_sha
+        row.bytes = len(new_bytes)
+        row.updated_by = editor
+        version = PromptVersion(
+            version_id=version_id,
+            template_id=template_id,
+            sha256=new_sha,
+            parent_sha256=current_sha,
+            body=new_text,
+            bytes=len(new_bytes),
+            saved_by=editor,
+            kind="revert",
+        )
+        session.add(version)
+        await session.commit()
+        await session.refresh(version, attribute_names=["saved_at"])
+        saved_at = version.saved_at
+
+    prompts_store.invalidate(template_id)
+
+    return {
+        "template_id": template_id,
+        "sha256": new_sha,
+        "bytes": len(new_bytes),
+        "version_id": str(version_id),
+        "saved_at": saved_at.isoformat(),
+        "saved_by": editor,
+        "reverted_from_version_id": str(body.target_version_id),
     }
 
 
@@ -301,49 +543,47 @@ class _PreviewRequest(BaseModel):
 
 
 @router.post("/templates/{template_id}/preview")
-async def preview_template(template_id: str, body: _PreviewRequest) -> dict[str, Any]:
+async def preview_template(
+    template_id: str,
+    body: _PreviewRequest,
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
     """Render the fully assembled system prompt this template participates in.
 
     For an agent prompt, the request `template` IS the prompt body and any
-    `route` must match `template_id`. For a partial, `route` picks which
-    consumer to preview against — the agent file is read from disk and
-    `{{include:<partial>}}` is replaced with the request body before the
-    rest of the partials resolve from disk.
+    `route` must match `template_id`; includes resolve from the DB snapshot.
+    For a partial, `route` picks which consumer to preview against — the agent
+    body is read from the snapshot and `{{include:<partial>}}` is replaced with
+    the request body before the rest of the partials resolve from the DB.
 
     Placeholders are substituted with live defaults (today's date, the
-    `bowtie_default` persona, the active source_policy) unless the request
+    `bowtie-editor` persona, the active source_policy) unless the request
     overrides them via `context`.
     """
-    if template_id not in _ALL_FILES:
-        raise HTTPException(404, f"unknown template_id '{template_id}'")
+    snap = await _load_snapshot(sf)
+    row = _editable_or_404(snap, template_id)
 
-    is_partial = template_id in _PARTIAL_FILES
-    if is_partial:
+    if row.category == "partial":
         if body.route is None:
             raise HTTPException(400, "route is required when previewing a partial")
-        if body.route not in _TEMPLATE_FILES:
+        if body.route not in _agent_ids(snap):
             raise HTTPException(400, f"unknown route '{body.route}'")
-        if template_id not in _partials_referenced_by(body.route):
+        if template_id not in _partials_referenced_by(body.route, snap):
             raise HTTPException(
                 400,
                 f"route '{body.route}' does not include partial '{template_id}'",
             )
         route_id = body.route
-        route_text = (_PROMPT_DIR / _TEMPLATE_FILES[route_id]).read_text(
-            encoding="utf-8"
-        )
-        assembled = _resolve_with_override(
-            route_text, override_name=template_id, override_body=body.template
+        assembled = prompts_store.assemble_with_override(
+            route_id, snap, override_name=template_id, override_body=body.template
         )
     else:
         route_id = body.route or template_id
         if route_id != template_id:
-            raise HTTPException(
-                400, "route must equal template_id for agent prompts"
-            )
+            raise HTTPException(400, "route must equal template_id for agent prompts")
         try:
-            assembled = resolve_includes(body.template, base=_PROMPT_DIR)
-        except FileNotFoundError as e:
+            assembled = prompts_store.resolve_body(body.template, snap)
+        except prompts_store.PromptTemplateNotFound as e:
             raise HTTPException(
                 400,
                 {
@@ -353,47 +593,19 @@ async def preview_template(template_id: str, body: _PreviewRequest) -> dict[str,
                 },
             ) from e
 
-    resolved = _substitute_placeholders(assembled, overrides=body.context)
+    resolved = _substitute_placeholders(assembled, overrides=body.context, snap=snap)
     return {"resolved": resolved, "route": route_id}
 
 
-def _resolve_with_override(
-    text: str,
-    *,
-    override_name: str,
-    override_body: str,
-    base: Path = _PROMPT_DIR,
-    _seen: frozenset[str] = frozenset(),
+def _substitute_placeholders(
+    text: str, *, overrides: dict[str, str], snap: dict[str, TemplateRow]
 ) -> str:
-    """Like writer.resolve_includes but `override_name` resolves to
-    `override_body` (the editor's draft) instead of reading from disk.
-    """
-
-    def _sub(match: re.Match[str]) -> str:
-        name = match.group(1)
-        if name in _seen:
-            raise ValueError(f"include cycle detected at {{{{include:{name}}}}}")
-        if name == override_name:
-            body = override_body.rstrip("\n")
-        else:
-            sub_path = base / f"{name}.md"
-            body = sub_path.read_text(encoding="utf-8").rstrip("\n")
-        return _resolve_with_override(
-            body,
-            override_name=override_name,
-            override_body=override_body,
-            base=base,
-            _seen=_seen | {name},
-        )
-
-    return _INCLUDE_RE.sub(_sub, text)
-
-
-def _substitute_placeholders(text: str, *, overrides: dict[str, str]) -> str:
     """Fill `{name}` placeholders with overrides or sensible defaults.
 
     Defaults mirror the live values the writer/audit/outline loaders compute
-    at runtime so the preview reflects what Gemini actually sees.
+    at runtime so the preview reflects what Gemini actually sees. The persona
+    and source-policy blocks come from their YAML configs; `create_mode_block`
+    comes from the DB-backed ``outline_create_mode`` template.
     """
     today_iso = overrides.get("today_date", date.today().isoformat())
 
@@ -401,7 +613,7 @@ def _substitute_placeholders(text: str, *, overrides: dict[str, str]) -> str:
         persona_block = overrides["persona_block"]
     else:
         try:
-            persona = load_persona_from_yaml("bowtie_default")
+            persona = load_persona_from_yaml("bowtie-editor")
             persona_block = persona.to_prompt_block(None)
         except FileNotFoundError:
             persona_block = "（preview: persona block not configured）"  # noqa: RUF001
@@ -410,21 +622,15 @@ def _substitute_placeholders(text: str, *, overrides: dict[str, str]) -> str:
         source_policy_block = overrides["source_policy_block"]
     else:
         try:
-            source_policy_block = SourcePolicy.load_from(
-                DEFAULT_POLICY_PATH
-            ).to_prompt_block()
+            source_policy_block = SourcePolicy.load_from(DEFAULT_POLICY_PATH).to_prompt_block()
         except FileNotFoundError:
             source_policy_block = "（preview: source policy not configured）"  # noqa: RUF001
 
     if "create_mode_block" in overrides:
         create_mode_block = overrides["create_mode_block"]
     else:
-        create_mode_path = _PROMPT_DIR / "outline_create_mode.md"
-        create_mode_block = (
-            create_mode_path.read_text(encoding="utf-8").rstrip()
-            if create_mode_path.exists()
-            else ""
-        )
+        cm = snap.get("outline_create_mode")
+        create_mode_block = cm.body.rstrip() if cm is not None else ""
 
     out = (
         text.replace("{persona_block}", persona_block)
@@ -446,13 +652,7 @@ class _MissingInputs(Exception):
     pass
 
 
-def _get_session_factory(request: Request) -> async_sessionmaker[Any]:
-    return request.app.state.session_factory  # type: ignore[no-any-return]
-
-
-async def _render_user_prompt(
-    *, session: AsyncSession, run: Run, agent: str
-) -> str:
+async def _render_user_prompt(*, session: AsyncSession, run: Run, agent: str) -> str:
     if agent == "gap_analysis":
         return gap_agent.build_user_prompt(
             topic=run.topic,
@@ -476,12 +676,16 @@ async def _render_user_prompt(
                 acf_widget_id=run.acf_widget_id,
                 edit_note=run.edit_note,
             )
-        ga = (await session.execute(
-            select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
-        )).scalar_one_or_none()
-        fa = (await session.execute(
-            select(FetchedArticle).where(FetchedArticle.run_id == run.run_id)
-        )).scalar_one_or_none()
+        ga = (
+            await session.execute(
+                select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
+            )
+        ).scalar_one_or_none()
+        fa = (
+            await session.execute(
+                select(FetchedArticle).where(FetchedArticle.run_id == run.run_id)
+            )
+        ).scalar_one_or_none()
         if ga is None or fa is None:
             raise _MissingInputs("outline needs gap_analysis + fetched_article")
         return outline_agent.build_user_prompt(
@@ -493,15 +697,21 @@ async def _render_user_prompt(
         )
 
     if agent == "writer":
-        ga = (await session.execute(
-            select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
-        )).scalar_one_or_none()
-        ol = (await session.execute(
-            select(OutlineRow).where(OutlineRow.run_id == run.run_id)
-        )).scalar_one_or_none()
-        fa = (await session.execute(
-            select(FetchedArticle).where(FetchedArticle.run_id == run.run_id)
-        )).scalar_one_or_none()
+        ga = (
+            await session.execute(
+                select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
+            )
+        ).scalar_one_or_none()
+        ol = (
+            await session.execute(
+                select(OutlineRow).where(OutlineRow.run_id == run.run_id)
+            )
+        ).scalar_one_or_none()
+        fa = (
+            await session.execute(
+                select(FetchedArticle).where(FetchedArticle.run_id == run.run_id)
+            )
+        ).scalar_one_or_none()
         # In create-mode the writer is the first content node: gap analysis and
         # the fetched article are absent, so fall back to empty payloads exactly
         # like run_writer does. The outline is always required.
@@ -516,28 +726,34 @@ async def _render_user_prompt(
         )
 
     # agent == "audit"
-    draft = (await session.execute(
-        select(Draft).where(Draft.run_id == run.run_id)
-        .order_by(Draft.iteration.desc()).limit(1)
-    )).scalar_one_or_none()
+    draft = (
+        await session.execute(
+            select(Draft)
+            .where(Draft.run_id == run.run_id)
+            .order_by(Draft.iteration.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     if draft is None:
         raise _MissingInputs("audit needs a draft")
-    ga = (await session.execute(
-        select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
-    )).scalar_one_or_none()
+    ga = (
+        await session.execute(
+            select(GapAnalysisRow).where(GapAnalysisRow.run_id == run.run_id)
+        )
+    ).scalar_one_or_none()
     if ga is None:
         raise _MissingInputs("audit needs gap_analysis")
-    render = (await session.execute(
-        select(Render).where(Render.draft_id == draft.draft_id)
-    )).scalar_one_or_none()
+    render = (
+        await session.execute(select(Render).where(Render.draft_id == draft.draft_id))
+    ).scalar_one_or_none()
     if render is None:
         raise _MissingInputs("audit needs a render")
-    cits = (await session.execute(
-        select(Citation).where(Citation.draft_id == draft.draft_id)
-    )).scalars().all()
-    audit_row = (await session.execute(
-        select(AuditRun).where(AuditRun.draft_id == draft.draft_id)
-    )).scalar_one_or_none()
+    cits = (
+        await session.execute(select(Citation).where(Citation.draft_id == draft.draft_id))
+    ).scalars().all()
+    audit_row = (
+        await session.execute(select(AuditRun).where(AuditRun.draft_id == draft.draft_id))
+    ).scalar_one_or_none()
     return audit_agent.build_user_prompt(
         html_body=render.html_body,
         gap_update_plan=ga.payload.get("update_plan", {}),
@@ -553,8 +769,7 @@ async def _render_user_prompt(
             for c in cits
         ],
         deterministic_findings=(
-            (audit_row.deterministic_findings or {}).get("findings", [])
-            if audit_row else []
+            (audit_row.deterministic_findings or {}).get("findings", []) if audit_row else []
         ),
     )
 

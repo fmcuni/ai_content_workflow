@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.streaming import set_thought_emitter
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
 from content_tool.wordpress.client import WordPressClient
@@ -118,8 +119,14 @@ class RunExecutor:
             },
             ensure_ascii=False,
         )
-        buf = self._history.setdefault(run_id, deque(maxlen=_EVENT_BUFFER_SIZE))
-        buf.append(data)
+        # Drop thinking chunks from the replay buffer — they are live-only
+        # progress for currently-watching subscribers, accumulate fast (one
+        # event per Gemini thought-summary chunk), and would otherwise evict
+        # the structurally meaningful milestone events that the timeline UI
+        # actually replays on a late connect.
+        if not event.endswith(".thinking"):
+            buf = self._history.setdefault(run_id, deque(maxlen=_EVENT_BUFFER_SIZE))
+            buf.append(data)
         for q in self._subscribers.get(run_id, []):
             await q.put(data)
 
@@ -237,6 +244,16 @@ class RunExecutor:
         resume: bool = False,
         update: dict[str, Any] | None = None,
     ) -> None:
+        async def _emit_thought(agent: str, chunk: str) -> None:
+            await self._emit(
+                run_id, f"{agent}.thinking", {"agent": agent, "chunk": chunk}
+            )
+
+        # Bind on a ContextVar so any ``gemini.generate`` call inside the graph
+        # (writer, audit, …) picks it up and streams; nodes running outside
+        # this executor (CLI, refresh evaluator) see the default ``None`` and
+        # use the one-shot path.
+        set_thought_emitter(_emit_thought)
         try:
             async with make_checkpointer(self._postgres_url) as cp:
                 graph = build_root_graph(
@@ -308,6 +325,10 @@ class RunExecutor:
             )
             logger.exception("runner crashed", extra={"run_id": str(run_id)})
             await self._emit(run_id, "graph.error", {"message": str(e)})
+        finally:
+            # ContextVar lives for the lifetime of this asyncio task; clearing
+            # is belt-and-braces in case the executor coroutine is reused.
+            set_thought_emitter(None)
 
 
 async def _build_initial_state(sf: async_sessionmaker[Any], run_id: UUID) -> dict[str, Any]:

@@ -1,15 +1,8 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+from content_tool import prompts_store
 from content_tool.gemini.client import GeminiClient
-
-JUDGE_PROMPTS: dict[str, Path] = {
-    "brand_voice": Path("evals/judge/brand_voice.md"),
-    "coverage": Path("evals/judge/coverage.md"),
-    "citation_alignment": Path("evals/judge/citation_alignment.md"),
-    "hk_localisation": Path("evals/judge/hk_localisation.md"),
-}
 
 
 @dataclass
@@ -25,7 +18,7 @@ async def run_judge(
     user_payload: str,
     use_url_context: bool = False,
 ) -> JudgeResult:
-    prompt = JUDGE_PROMPTS[metric].read_text(encoding="utf-8")
+    prompt = await prompts_store.get_assembled_standalone(f"judge_{metric}")
     result = await gemini.generate(
         agent=f"judge.{metric}",
         system_prompt=prompt,

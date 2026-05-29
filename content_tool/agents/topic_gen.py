@@ -6,13 +6,9 @@ candidates with focus keywords. No DB writes — the caller (topic-expansion
 subgraph in Task 3) persists the rows.
 """
 
-from pathlib import Path
-
+from content_tool import prompts_store
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.topic_batch import TopicGenInput, TopicGenOutput
-
-_PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
-_PROMPT_PATH = _PROMPT_DIR / "topic_gen.md"
 
 
 def _format_list_block(items: list[str]) -> str:
@@ -21,8 +17,8 @@ def _format_list_block(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
-def build_system_prompt() -> str:
-    return _PROMPT_PATH.read_text(encoding="utf-8")
+async def build_system_prompt() -> str:
+    return await prompts_store.get_assembled_standalone("topic_gen")
 
 
 def build_user_prompt(input_: TopicGenInput) -> str:
@@ -45,7 +41,7 @@ async def run_topic_gen(
     input: TopicGenInput,
 ) -> TopicGenOutput:
     """Single Gemini call. Returns validated topic candidates."""
-    system_prompt = build_system_prompt()
+    system_prompt = await build_system_prompt()
     user_prompt = build_user_prompt(input)
     result = await gemini.generate(
         agent="topic_gen",

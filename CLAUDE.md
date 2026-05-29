@@ -100,6 +100,31 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
 - Compliance export: `GET /compliance/export.csv`.
 - Tracing: set `OTEL_EXPORTER_OTLP_ENDPOINT` to ship spans (e.g. local Jaeger).
 
+## Supabase
+
+**Managed Postgres only** — no PostgREST, no Supabase Auth, no `supabase-js`.
+SQLAlchemy/asyncpg owns all data access.
+
+**Schema:** `content_tool` (not `public`) — not auto-exposed to PostgREST/Data API,
+safer for PHI/PII. RLS is enabled on all tables as defense in depth; app connects
+via the dedicated `content_tool_app` role (not the `postgres` superuser).
+
+**Connection choice:**
+- **Direct connection** (port 5432) — default for the long-lived FastAPI process;
+  supports SQLAlchemy/asyncpg prepared statements without workarounds.
+- **Session-mode pooler** (port 5432 via pooler) — fallback if the host is
+  IPv4-only and cannot reach the direct connection endpoint.
+- **Never** use the transaction-mode pooler (port 6543) — it breaks prepared
+  statements and silently degrades performance.
+
+**Migration workflow:**
+- `supabase migration new <name>` — scaffold a new migration
+- `supabase db reset` — wipe + re-apply all migrations locally
+- `supabase db push` — apply pending migrations to the linked prod project
+
+**Prod cutover runbook (E1–E9):** see [Supabase Cutover Runbook (E1–E9)](https://www.notion.so/36fef2b9861481d39723d884070e30fa) in Notion.
+Compliance/security sign-off required before E1 (PHI/PII crosses to new vendor).
+
 ## WordPress publishing
 
 Always verify `target_label` from the dry-publish endpoint before approving HITL_2.

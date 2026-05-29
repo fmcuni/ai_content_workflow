@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from content_tool import prompts_store
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.writer import WriterOutput
@@ -87,8 +88,7 @@ async def build_system_prompt(
     context_text: str | None = None,
     policy_path: Path = DEFAULT_POLICY_PATH,
 ) -> str:
-    template = PROMPT_PATHS[route].read_text(encoding="utf-8")
-    template = resolve_includes(template, base=PROMPT_PATHS[route].parent)
+    template = await prompts_store.get_assembled(f"writer_{route}", session=session)
     persona = await load_persona(persona_name, session=session)
     policy = SourcePolicy.load_from(policy_path)
     return (

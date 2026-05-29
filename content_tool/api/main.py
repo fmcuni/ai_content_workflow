@@ -18,6 +18,7 @@ from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.routes.topic_batches import router as topic_batches_router
 from content_tool.api.routes.wp_options import router as wp_options_router
+from content_tool import prompts_store
 from content_tool.api.sse import RunExecutor
 from content_tool.api.wp_options_cache import TtlCache
 from content_tool.config import get_settings
@@ -82,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("orphaned run recovery failed at startup")
     app.state.session_factory = sf
+    prompts_store.configure(sf)
     app.state.run_executor = executor
     app.state.wp_client = wp_client
     app.state.wp_options_cache = wp_options_cache

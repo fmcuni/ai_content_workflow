@@ -1,21 +1,19 @@
 from datetime import date
-from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from content_tool import prompts_store
 from content_tool.config import Settings, get_settings
 from content_tool.db.models import GapAnalysisRow, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.gap_analysis import GapAnalysis
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "gap_analysis.md"
 
-
-def build_system_prompt(today: date) -> str:
-    template = PROMPT_PATH.read_text(encoding="utf-8")
+async def build_system_prompt(today: date, *, session: AsyncSession) -> str:
+    template = await prompts_store.get_assembled("gap_analysis", session=session)
     return template.replace("{today_date}", today.isoformat())
 
 
@@ -61,7 +59,7 @@ async def run_gap_analysis(
         .one()
     )
 
-    sys_prompt = build_system_prompt(today)
+    sys_prompt = await build_system_prompt(today, session=session)
     user_prompt = build_user_prompt(
         topic=run["topic"],
         keywords=run["keywords"],
