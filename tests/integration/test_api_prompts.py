@@ -1,34 +1,35 @@
 import hashlib
-from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-_PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
-
-
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+from content_tool.db.models import PromptTemplate
 
 
-@pytest.fixture
-def restore_prompt():
-    """Snapshot a prompt file's content and restore it after the test.
+def _sha256(text_: str) -> str:
+    return hashlib.sha256(text_.encode("utf-8")).hexdigest()
 
-    PUT /prompts/templates writes a real file on disk; without restore the
-    repo's prompts would drift on every failed run.
+
+@pytest_asyncio.fixture
+async def clean_prompt_versions(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+):
+    """Truncate prompt_versions before and after each test that touches history.
+
+    The base conftest truncate is scoped to runs/articles/wp tables only, so
+    history rows would otherwise accumulate across tests and break count
+    assertions.
     """
-    snapshots: dict[Path, str] = {}
-
-    def _snap(filename: str) -> Path:
-        path = _PROMPT_DIR / filename
-        snapshots[path] = path.read_text(encoding="utf-8")
-        return path
-
-    yield _snap
-
-    for path, body in snapshots.items():
-        path.write_text(body, encoding="utf-8")
+    async with pg_session_factory() as s:
+        await s.execute(text("TRUNCATE TABLE content_tool.prompt_versions"))
+        await s.commit()
+    yield
+    async with pg_session_factory() as s:
+        await s.execute(text("TRUNCATE TABLE content_tool.prompt_versions"))
+        await s.commit()
 
 
 @pytest.mark.asyncio
@@ -97,7 +98,9 @@ async def test_user_example_audit_includes_html(api_client: AsyncClient, persist
 
 
 @pytest.mark.asyncio
-async def test_user_example_missing_inputs_422(api_client: AsyncClient, persisted_strategy_only_run):
+async def test_user_example_missing_inputs_422(
+    api_client: AsyncClient, persisted_strategy_only_run
+):
     # audit needs Draft + Render + Citation — none present in strategy-only run.
     r = await api_client.get(
         "/prompts/user-example",
@@ -149,8 +152,12 @@ async def test_template_consumers_agent_is_self(api_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_put_template_round_trip(api_client: AsyncClient, restore_prompt):
-    restore_prompt("_writer_brand_block.md")
+async def test_put_template_round_trip(
+    api_client: AsyncClient,
+    restore_template,
+    pg_session_factory: async_sessionmaker[AsyncSession],
+):
+    await restore_template("_writer_brand_block")
     # Read current
     g = await api_client.get("/prompts/templates/_writer_brand_block")
     assert g.status_code == 200
@@ -165,16 +172,24 @@ async def test_put_template_round_trip(api_client: AsyncClient, restore_prompt):
     assert r.status_code == 200, r.text
     assert r.json()["sha256"] == _sha256(new_body)
 
-    # Disk reflects the new content
-    on_disk = (_PROMPT_DIR / "_writer_brand_block.md").read_text(encoding="utf-8")
-    assert on_disk == new_body
+    # DB row reflects the new content
+    async with pg_session_factory() as s:
+        row = (
+            await s.execute(
+                select(PromptTemplate).where(
+                    PromptTemplate.template_id == "_writer_brand_block"
+                )
+            )
+        ).scalar_one()
+    assert row.body == new_body
+    assert row.sha256 == _sha256(new_body)
 
 
 @pytest.mark.asyncio
 async def test_put_template_missing_placeholder_400(
-    api_client: AsyncClient, restore_prompt
+    api_client: AsyncClient, restore_template
 ):
-    restore_prompt("writer_small_refresh.md")
+    await restore_template("writer_small_refresh")
     g = await api_client.get("/prompts/templates/writer_small_refresh")
     sha = g.json()["sha256"]
     body = g.json()["template"]
@@ -192,8 +207,8 @@ async def test_put_template_missing_placeholder_400(
 
 
 @pytest.mark.asyncio
-async def test_put_template_stale_sha_409(api_client: AsyncClient, restore_prompt):
-    restore_prompt("_writer_seo.md")
+async def test_put_template_stale_sha_409(api_client: AsyncClient, restore_template):
+    await restore_template("_writer_seo")
     g = await api_client.get("/prompts/templates/_writer_seo")
     body = g.json()["template"]
     r = await api_client.put(
@@ -206,9 +221,9 @@ async def test_put_template_stale_sha_409(api_client: AsyncClient, restore_promp
 
 @pytest.mark.asyncio
 async def test_put_template_unknown_include_400(
-    api_client: AsyncClient, restore_prompt
+    api_client: AsyncClient, restore_template
 ):
-    restore_prompt("writer_create.md")
+    await restore_template("writer_create")
     g = await api_client.get("/prompts/templates/writer_create")
     sha = g.json()["sha256"]
     body = g.json()["template"]
@@ -276,3 +291,261 @@ async def test_preview_partial_route_must_be_consumer(api_client: AsyncClient):
         json={"template": "x", "route": "audit"},
     )
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# RBAC — _require_editor / X-Editor-Email header
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_put_missing_header_in_non_dev_mode_401(
+    api_client: AsyncClient, restore_template, clean_prompt_versions, monkeypatch
+):
+    monkeypatch.setenv("PROMPT_EDITOR_DEV_MODE", "false")
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": body + "\n# touched\n", "expected_sha256": sha},
+    )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_put_unauthorised_editor_403(
+    api_client: AsyncClient, restore_template, clean_prompt_versions, monkeypatch
+):
+    monkeypatch.setenv("PROMPT_EDITOR_DEV_MODE", "false")
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": body + "\n# touched\n", "expected_sha256": sha},
+        headers={"X-Editor-Email": "nobody@example.com"},
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_put_allowed_editor_stamps_version(
+    api_client: AsyncClient, restore_template, clean_prompt_versions, monkeypatch
+):
+    """An allowed editor saves successfully and the version row records the
+    email; future history reads should attribute the change to that user."""
+    monkeypatch.setenv("PROMPT_EDITOR_DEV_MODE", "false")
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+    new_body = body + "\n# allowed-editor\n"
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": new_body, "expected_sha256": sha},
+        headers={"X-Editor-Email": "franco.ma@bowtie.com.sg"},
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["saved_by"] == "franco.ma@bowtie.com.sg"
+    assert out["sha256"] == _sha256(new_body)
+    # And the history endpoint sees the same email.
+    h = await api_client.get("/prompts/templates/_writer_seo/history")
+    versions = h.json()["versions"]
+    assert versions[0]["saved_by"] == "franco.ma@bowtie.com.sg"
+
+
+# ---------------------------------------------------------------------------
+# Version history
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_put_inserts_history_row(
+    api_client: AsyncClient, restore_template, clean_prompt_versions
+):
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+    new_body = body + "\n# touched\n"
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": new_body, "expected_sha256": sha},
+    )
+    assert r.status_code == 200, r.text
+
+    h = await api_client.get("/prompts/templates/_writer_seo/history")
+    assert h.status_code == 200
+    versions = h.json()["versions"]
+    assert len(versions) == 1
+    row = versions[0]
+    assert row["sha256"] == _sha256(new_body)
+    assert row["parent_sha256"] == sha
+    assert row["kind"] == "save"
+    assert "body" not in row  # list endpoint omits body for payload size
+
+
+@pytest.mark.asyncio
+async def test_history_orders_newest_first(
+    api_client: AsyncClient, restore_template, clean_prompt_versions
+):
+    await restore_template("_writer_seo")
+    # Save three times so we can verify ordering.
+    for i in range(3):
+        g = await api_client.get("/prompts/templates/_writer_seo")
+        sha = g.json()["sha256"]
+        body = g.json()["template"]
+        r = await api_client.put(
+            "/prompts/templates/_writer_seo",
+            json={"template": body + f"\n# touched-{i}\n", "expected_sha256": sha},
+        )
+        assert r.status_code == 200
+
+    h = await api_client.get("/prompts/templates/_writer_seo/history")
+    versions = h.json()["versions"]
+    assert len(versions) == 3
+    # saved_at is a timestamptz iso string; lexicographic compare works.
+    timestamps = [v["saved_at"] for v in versions]
+    assert timestamps == sorted(timestamps, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_get_version_returns_body(
+    api_client: AsyncClient, restore_template, clean_prompt_versions
+):
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+    new_body = body + "\n# fetched-by-version-id\n"
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": new_body, "expected_sha256": sha},
+    )
+    version_id = r.json()["version_id"]
+
+    v = await api_client.get(f"/prompts/templates/_writer_seo/versions/{version_id}")
+    assert v.status_code == 200
+    payload = v.json()
+    assert payload["body"] == new_body
+    assert payload["sha256"] == _sha256(new_body)
+
+
+@pytest.mark.asyncio
+async def test_get_version_wrong_template_404(
+    api_client: AsyncClient, restore_template, clean_prompt_versions
+):
+    """A version row belongs to one template; asking for it under another
+    template id must 404 to avoid leaking unrelated bodies."""
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": body + "\n# x\n", "expected_sha256": sha},
+    )
+    version_id = r.json()["version_id"]
+
+    cross = await api_client.get(
+        f"/prompts/templates/_writer_brand_block/versions/{version_id}"
+    )
+    assert cross.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Revert
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_revert_restores_previous_body(
+    api_client: AsyncClient,
+    restore_template,
+    clean_prompt_versions,
+    pg_session_factory: async_sessionmaker[AsyncSession],
+):
+    await restore_template("_writer_seo")
+    # Save A, then save B, then revert to A.
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha0 = g.json()["sha256"]
+    body0 = g.json()["template"]
+    body_a = body0 + "\n# version A\n"
+    r_a = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": body_a, "expected_sha256": sha0},
+    )
+    assert r_a.status_code == 200
+    version_a_id = r_a.json()["version_id"]
+    sha_a = r_a.json()["sha256"]
+
+    body_b = body_a + "\n# version B\n"
+    r_b = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": body_b, "expected_sha256": sha_a},
+    )
+    assert r_b.status_code == 200
+    sha_b = r_b.json()["sha256"]
+
+    rev = await api_client.post(
+        "/prompts/templates/_writer_seo/revert",
+        json={"target_version_id": version_a_id, "expected_sha256": sha_b},
+    )
+    assert rev.status_code == 200, rev.text
+    assert rev.json()["sha256"] == sha_a
+
+    async with pg_session_factory() as s:
+        row = (
+            await s.execute(
+                select(PromptTemplate).where(PromptTemplate.template_id == "_writer_seo")
+            )
+        ).scalar_one()
+    assert row.body == body_a
+
+    h = await api_client.get("/prompts/templates/_writer_seo/history")
+    versions = h.json()["versions"]
+    # newest-first: revert row, then B, then A
+    assert [v["kind"] for v in versions] == ["revert", "save", "save"]
+
+
+@pytest.mark.asyncio
+async def test_revert_stale_sha_409(
+    api_client: AsyncClient, restore_template, clean_prompt_versions
+):
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha0 = g.json()["sha256"]
+    body0 = g.json()["template"]
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        json={"template": body0 + "\n# v1\n", "expected_sha256": sha0},
+    )
+    version_id = r.json()["version_id"]
+
+    rev = await api_client.post(
+        "/prompts/templates/_writer_seo/revert",
+        json={"target_version_id": version_id, "expected_sha256": "0" * 64},
+    )
+    assert rev.status_code == 409
+    assert rev.json()["detail"]["error"] == "stale_sha"
+
+
+@pytest.mark.asyncio
+async def test_revert_unknown_version_404(
+    api_client: AsyncClient, restore_template, clean_prompt_versions
+):
+    await restore_template("_writer_seo")
+    g = await api_client.get("/prompts/templates/_writer_seo")
+    sha = g.json()["sha256"]
+    rev = await api_client.post(
+        "/prompts/templates/_writer_seo/revert",
+        json={
+            "target_version_id": "00000000-0000-0000-0000-000000000000",
+            "expected_sha256": sha,
+        },
+    )
+    assert rev.status_code == 404

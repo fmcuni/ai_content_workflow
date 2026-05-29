@@ -1,14 +1,22 @@
 """Integration-test-only fixtures for the /refresh API routes."""
 from __future__ import annotations
 
+import asyncio
+import os
+import re
 from collections.abc import AsyncGenerator
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
+import asyncpg
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from content_tool import prompts_store
 from content_tool.api.main import create_app
 from content_tool.db.models import (
     Citation,
@@ -16,6 +24,7 @@ from content_tool.db.models import (
     FetchedArticle,
     GapAnalysisRow,
     OutlineRow,
+    PromptTemplate,
     Render,
     Run,
 )
@@ -115,3 +124,81 @@ async def persisted_full_run(
         ))
         await s.commit()
     return str(run_id)
+
+
+_OWNER_STRIP = re.compile(r"ALTER TABLE [^\n]*OWNER TO postgres;", re.MULTILINE)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_prompt_templates(apply_migrations, postgres_url):
+    """Seed content_tool.prompt_templates for the testcontainers path.
+
+    The retired-Alembic baseline ships prompt_versions but not prompt_templates,
+    so the runtime store has no rows to read. This applies the idempotent
+    prompt_templates migration (CREATE TABLE IF NOT EXISTS + INSERT ON CONFLICT
+    DO NOTHING). `ALTER TABLE ... OWNER TO postgres;` is stripped because the
+    testcontainers superuser is `test`, not `postgres`. Skipped under
+    EXTERNAL_POSTGRES_URL, where `supabase db reset` already applied it.
+    """
+    if os.environ.get("EXTERNAL_POSTGRES_URL"):
+        return
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "supabase/migrations/20260529000001_prompt_templates.sql"
+    )
+    stripped_sql = _OWNER_STRIP.sub("", migration.read_text())
+
+    async def _seed() -> None:
+        url = postgres_url.replace("postgresql+asyncpg://", "postgresql://")
+        conn = await asyncpg.connect(url)
+        try:
+            await conn.execute(stripped_sql)
+        finally:
+            await conn.close()
+
+    asyncio.run(_seed())
+
+
+@pytest_asyncio.fixture
+async def restore_template(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+):
+    """Snapshot prompt_templates rows and restore them after the test.
+
+    PUT/revert API tests mutate the live row (body/sha256/bytes/updated_by),
+    which would drift across tests and break sha assertions. The yielded
+    callable snapshots a row by template_id; teardown writes the saved values
+    back and busts the prompts_store cache so the next read reloads the
+    restored row rather than the mutated one.
+    """
+    saved: dict[str, tuple[str, str, int, str | None]] = {}
+
+    async def _snap(template_id: str) -> str:
+        async with pg_session_factory() as s:
+            row = (
+                await s.execute(
+                    select(PromptTemplate).where(
+                        PromptTemplate.template_id == template_id
+                    )
+                )
+            ).scalar_one()
+            saved[template_id] = (row.body, row.sha256, row.bytes, row.updated_by)
+        return template_id
+
+    yield _snap
+
+    for template_id, (body, sha256, num_bytes, updated_by) in saved.items():
+        async with pg_session_factory() as s:
+            row = (
+                await s.execute(
+                    select(PromptTemplate)
+                    .where(PromptTemplate.template_id == template_id)
+                    .with_for_update()
+                )
+            ).scalar_one()
+            row.body = body
+            row.sha256 = sha256
+            row.bytes = num_bytes
+            row.updated_by = updated_by
+            await s.commit()
+    prompts_store.clear_cache()
