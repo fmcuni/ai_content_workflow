@@ -33,6 +33,11 @@ out/
 *.key
 *.pem
 
+# Desktop app local config (normally lives outside the repo under
+# ~/Library/Application Support/BowtieContentTool; guarded here in case
+# BOWTIE_CONFIG_DIR is pointed inside the repo)
+BowtieContentTool/
+
 # IDE
 .vscode/
 .idea/

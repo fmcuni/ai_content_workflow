@@ -1,17 +1,41 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    JsonConfigSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+
+DEFAULT_CONFIG_DIR = Path.home() / "Library" / "Application Support" / "BowtieContentTool"
+
+
+def desktop_config_dir() -> Path:
+    """Directory holding the desktop app's local config file.
+
+    Overridable via ``BOWTIE_CONFIG_DIR`` (used by tests and packaging).
+    """
+    override = os.environ.get("BOWTIE_CONFIG_DIR")
+    return Path(override) if override else DEFAULT_CONFIG_DIR
+
+
+def desktop_config_path() -> Path:
+    return desktop_config_dir() / "config.json"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env.local", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=".env.local", case_sensitive=False, extra="ignore"
+    )
 
-    postgres_url: str
-    gemini_api_key: str
-    gemini_model: str = "gemini-3.5-flash"
+    # Credentials are optional so the app can boot into a "needs setup" state.
+    postgres_url: str | None = None
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.1-pro-preview"
     gemini_thinking_level: str = "high"
     log_level: str = "info"
 
@@ -27,9 +51,30 @@ class Settings(BaseSettings):
     refresh_config_path: str = "config/refresh.yaml"
     refresh_cron_enabled: bool = True
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Precedence: init kwargs > env > .env.local > desktop JSON file > defaults.
+        path = desktop_config_path()
+        json_source = JsonConfigSettingsSource(
+            settings_cls, json_file=path if path.is_file() else None
+        )
+        return (init_settings, env_settings, dotenv_settings, json_source, file_secret_settings)
+
 
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
+
+
+def is_configured(settings: Settings) -> bool:
+    """True when the minimum credentials needed to run are present."""
+    return bool(settings.postgres_url) and bool(settings.gemini_api_key)
 
 
 @lru_cache(maxsize=1)
