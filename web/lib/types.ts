@@ -580,3 +580,29 @@ export interface UserPromptExample {
   agent: string;
   prompt: string;
 }
+
+// --- Desktop first-run setup (mirrors content_tool/api/routes/setup.py) ---
+
+export interface SetupStatus {
+  configured: boolean;
+  missing: string[];
+  wp_configured: boolean;
+}
+
+export interface SetupVerifyResult {
+  postgres: boolean;
+  gemini: boolean;
+}
+
+export interface SetupRequest {
+  gemini_api_key: string;
+  postgres_url: string;
+  wp_base_url?: string;
+  wp_target?: "staging" | "production";
+  wp_username?: string;
+  wp_app_password?: string;
+}
+
+export type SetupConfigureResult =
+  | { ok: true }
+  | { ok: false; reason: "verification_failed"; checks: SetupVerifyResult };

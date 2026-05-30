@@ -7,6 +7,7 @@ import type {
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
   RefreshEvaluation, RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse,
+  SetupConfigureResult, SetupRequest, SetupStatus, SetupVerifyResult,
   TopicBatch, TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample,
   WpCategoryOption, WpUserOption,
 } from "./types";
@@ -34,6 +35,33 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return (await r.json()) as T;
 }
+
+// Desktop first-run setup. `configure` expects a 400 with a `checks` body when
+// credentials fail verification, so it branches on status instead of letting the
+// generic `http` helper throw on that (expected) case.
+export const setupApi = {
+  status: () => http<SetupStatus>("/api/setup/status"),
+  verify: (body: SetupRequest) =>
+    http<SetupVerifyResult>("/api/setup/verify", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  configure: async (body: SetupRequest): Promise<SetupConfigureResult> => {
+    const r = await fetch("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) return { ok: true };
+    if (r.status === 400) {
+      const data = (await r.json()) as { detail?: string; checks?: SetupVerifyResult };
+      if (data.detail === "verification_failed" && data.checks) {
+        return { ok: false, reason: "verification_failed", checks: data.checks };
+      }
+    }
+    throw new Error(`${r.status}: ${await r.text()}`);
+  },
+};
 
 export const api = {
   listRuns: (status?: string) =>
