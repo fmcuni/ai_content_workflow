@@ -319,8 +319,8 @@ async def test_audit_handles_missing_gap_analysis_row(postgres_url):
                 draft_id=draft.draft_id,
                 seo_title="H1",
                 meta_description="m",
+                schema_jsonld=[{"@type": "FAQPage"}],
                 html_body=(
-                    '<script type="application/ld+json">{"@type":"FAQPage"}</script>'
                     '<p>x</p>[adv_panel id="1"]<h2>x</h2><p>y</p>'
                     '[page_widget id="2"]<h2>常見問題</h2>'
                     '<div class="editor__item editor__faq">x</div>'

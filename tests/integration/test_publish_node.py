@@ -112,3 +112,72 @@ async def test_publish_node_forwards_wp_publish_at_as_date_gmt(db_session):
         )
         body = json.loads(route.calls.last.request.content)
         assert body["date_gmt"] == "2026-06-01T03:00:00"
+
+
+@pytest.mark.asyncio
+async def test_publish_node_ships_schema_jsonld_as_meta_not_body(db_session):
+    """The structured-data graph rides along in post meta (_bowtie_schema_jsonld),
+    JSON-encoded, and the body content carries NO inline <script> block."""
+    run_id = uuid4()
+    db_session.add(Run(
+        run_id=run_id, created_by="x", status="hitl_2",
+        article_url="https://e.com", topic="x", keywords=[], mode="auto",
+        acf_adv_id=1, acf_widget_id=2, persona="bowtie-editor",
+        today_date=date(2026, 5, 21), chosen_route="small_refresh",
+        wp_publish_status="draft", wp_category_ids=[42], wp_author_id=5,
+        approved_at=datetime.utcnow(), approved_by="e@x.com",
+    ))
+    await db_session.commit()
+    db_session.add(FetchedArticle(run_id=run_id, wp_post_id=98785, wp_categories=[],
+                                  raw_html="x", markdown="x"))
+    db_session.add(GapAnalysisRow(run_id=run_id, model="x", thinking_level="high", payload={}))
+    db_session.add(OutlineRow(run_id=run_id, payload={}))
+    draft = Draft(
+        run_id=run_id, iteration=0, diagnose="d", markup_raw="x", final_markup="x",
+        citation_intents=[],
+    )
+    db_session.add(draft)
+    await db_session.commit()
+    await db_session.refresh(draft)
+    schema = [
+        {
+            "@context": "https://schema.org", "@type": "FAQPage",
+            "mainEntity": [
+                {"@type": "Question", "name": "篩查資格?",
+                 "acceptedAnswer": {"@type": "Answer", "text": "50 至 75 歲."}}
+            ],
+        }
+    ]
+    db_session.add(Render(
+        draft_id=draft.draft_id, seo_title="新標題", meta_description="meta",
+        html_body="<p>x</p>", schema_jsonld=schema,
+        excerpt_suggestion="e", slug_suggestion=None,
+    ))
+    await db_session.commit()
+
+    with respx.mock(assert_all_called=True) as r:
+        route = r.put("https://wp.example.com/wp-json/wp/v2/posts/98785").mock(
+            return_value=Response(200, json={
+                "id": 98785, "link": "https://wp.example.com/x",
+                "status": "draft", "modified_gmt": "2026-05-21T10:00:00",
+                "slug": "x",
+            })
+        )
+        client = WordPressClient("https://wp.example.com", username="u", app_password="p")  # noqa: S106
+        await publish_to_wordpress(
+            session=db_session, run_id=run_id, wp_client=client, seo_plugin="yoast",
+            if_unmodified_since=None,
+        )
+        body = json.loads(route.calls.last.request.content)
+
+    # Schema is carried in meta as a JSON-encoded graph. Compare decoded
+    # structures, not the raw string: JSONB does not preserve key order on
+    # round-trip through Postgres.
+    shipped = body["meta"]["_bowtie_schema_jsonld"]
+    assert json.loads(shipped) == schema
+    # Non-ASCII is preserved verbatim (ensure_ascii=False), not \uXXXX-escaped.
+    assert "篩查資格?" in shipped
+    # SEO meta_description still present.
+    assert body["meta"]["_yoast_wpseo_metadesc"] == "meta"
+    # The post body itself stays free of inline JSON-LD <script>.
+    assert "<script" not in body["content"]

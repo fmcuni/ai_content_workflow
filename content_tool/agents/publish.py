@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import Draft, FetchedArticle, Render, Run
 from content_tool.wordpress.client import (
+    SCHEMA_JSONLD_META_KEY,
     WP_DEFAULT_PAGE_TEMPLATE,
     PublishPayload,
     WordPressClient,
@@ -53,6 +55,11 @@ async def publish_to_wordpress(
     key = _seo_meta_key(seo_plugin)
     if key:
         meta[key] = render.meta_description
+    # Ship the structured-data graph out-of-band. The companion mu-plugin reads
+    # this meta and merges it into the page <head> graph (Yoast/RankMath schema
+    # filter), so we never inline a raw <script> into the post body.
+    if render.schema_jsonld:
+        meta[SCHEMA_JSONLD_META_KEY] = json.dumps(render.schema_jsonld, ensure_ascii=False)
 
     date_gmt: str | None = None
     if run.wp_publish_at is not None:

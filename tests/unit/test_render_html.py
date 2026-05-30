@@ -59,12 +59,21 @@ def test_faq_widget_html_first_active():
     assert 'style="display: block;"' in r.html_body
 
 
-def test_jsonld_present_at_top():
+def test_faq_jsonld_not_in_body_but_in_schema_graph():
+    """JSON-LD is delivered out-of-band (post meta → wp_head), never inlined
+    into the body. The body must carry NO <script> block; the FAQPage piece
+    lives in schema_jsonld instead."""
     r = render_html(SAMPLE)
-    assert r.html_body.startswith('<script type="application/ld+json">')
+    assert '<script type="application/ld+json">' not in r.html_body
+    # Back-compat field still populated.
     assert r.faq_schema_jsonld is not None
     assert r.faq_schema_jsonld["@type"] == "FAQPage"
     assert len(r.faq_schema_jsonld["mainEntity"]) == 2
+    # Out-of-band graph carries the FAQPage piece.
+    assert r.schema_jsonld is not None
+    faqpage = [p for p in r.schema_jsonld if p["@type"] == "FAQPage"]
+    assert len(faqpage) == 1
+    assert len(faqpage[0]["mainEntity"]) == 2
 
 
 def test_sources_become_ol():
@@ -106,7 +115,9 @@ def test_no_faq_means_no_jsonld():
 """
     r = render_html(no_faq)
     assert r.faq_schema_jsonld is None
-    assert not r.html_body.startswith('<script type="application/ld+json">')
+    assert '<script type="application/ld+json">' not in r.html_body
+    # No FAQ and no defterm → empty graph collapses to None.
+    assert r.schema_jsonld is None
 
 
 DEFTERM_SAMPLE = """\
@@ -142,27 +153,33 @@ VHIS 是政府自願醫保計劃。
 """
 
 
+def _defterm_piece(r):
+    """The DefinedTermSet piece from the out-of-band schema graph, or None."""
+    pieces = [p for p in (r.schema_jsonld or []) if p["@type"] == "DefinedTermSet"]
+    return pieces[0] if pieces else None
+
+
 def test_defterm_emits_jsonld_and_strips_shortcode():
     r = render_html(DEFTERM_SAMPLE)
-    # Shortcode must not survive into visible HTML
+    # Shortcode must not survive into visible HTML; no inline <script> either.
     assert "%%defterm" not in r.html_body
     assert "%%end%%" not in r.html_body
-    # Both FAQ + DefinedTermSet scripts present
-    scripts = [
-        line for line in r.html_body.split("\n") if line.startswith("<script type=")
-    ]
-    assert len(scripts) == 2
-    # DefinedTermSet payload: dedup'd, ordered by first occurrence
-    assert '"@type": "DefinedTermSet"' in r.html_body
-    assert '"name": "OGTT"' in r.html_body
-    assert '"name": "VHIS"' in r.html_body
-    assert r.html_body.count('"@type": "DefinedTerm"') == 2
-    assert r.html_body.index('"OGTT"') < r.html_body.index('"VHIS"')
+    assert '<script type="application/ld+json">' not in r.html_body
+    # Graph carries both a FAQPage and a DefinedTermSet piece.
+    assert r.schema_jsonld is not None
+    types = [p["@type"] for p in r.schema_jsonld]
+    assert "FAQPage" in types
+    dts = _defterm_piece(r)
+    assert dts is not None
+    # DefinedTermSet payload: dedup'd, ordered by first occurrence.
+    names = [t["name"] for t in dts["hasDefinedTerm"]]
+    assert names == ["OGTT", "VHIS"]
 
 
 def test_defterm_absent_means_no_definedtermset():
     r = render_html(SAMPLE)  # SAMPLE has no defterm blocks
     assert "DefinedTermSet" not in r.html_body
+    assert _defterm_piece(r) is None
 
 
 # Regression: the writer nests defterm / FAQ blocks inside markdown bullets,
@@ -202,10 +219,11 @@ def test_indented_defterm_inside_list_is_stripped_and_schema_emitted():
     r = render_html(INDENTED_SAMPLE)
     assert "%%defterm" not in r.html_body
     assert "%%end%%" not in r.html_body
-    assert '"@type": "DefinedTermSet"' in r.html_body
-    assert '"name": "全數賠償"' in r.html_body
-    assert '"name": "自付額"' in r.html_body
-    assert r.html_body.count('"@type": "DefinedTerm"') == 2
+    assert '<script type="application/ld+json">' not in r.html_body
+    dts = _defterm_piece(r)
+    assert dts is not None
+    names = [t["name"] for t in dts["hasDefinedTerm"]]
+    assert names == ["全數賠償", "自付額"]
 
 
 def test_indented_faq_is_stripped_and_schema_emitted():
@@ -254,11 +272,11 @@ def test_inline_defterm_replaced_with_term_name():
 
 def test_inline_defterm_still_emits_definedtermset_jsonld():
     r = render_html(INLINE_DEFTERM_SAMPLE)
-    assert '"@type": "DefinedTermSet"' in r.html_body
-    assert '"name": "回南天"' in r.html_body
-    assert '"name": "春困"' in r.html_body
-    assert '"name": "自願醫保"' in r.html_body
-    assert r.html_body.count('"@type": "DefinedTerm"') == 3
+    assert '<script type="application/ld+json">' not in r.html_body
+    dts = _defterm_piece(r)
+    assert dts is not None
+    names = [t["name"] for t in dts["hasDefinedTerm"]]
+    assert names == ["回南天", "春困", "自願醫保"]
 
 
 def test_orphan_defterm_open_marker_refuses_render():

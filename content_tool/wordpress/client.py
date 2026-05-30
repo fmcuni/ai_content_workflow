@@ -11,6 +11,13 @@ import httpx
 # "default" would be rejected as an invalid template name by WP.
 WP_DEFAULT_PAGE_TEMPLATE = ""
 
+# Post meta key carrying the article's structured-data graph (JSON-encoded list
+# of schema.org pieces). A companion mu-plugin registers this key with
+# show_in_rest and emits it in the page <head> via the Yoast `wpseo_schema_graph`
+# / RankMath `rank_math/json_ld` filters — keeping the post body free of raw
+# <script type="application/ld+json"> markup. See docs/wordpress/.
+SCHEMA_JSONLD_META_KEY = "_bowtie_schema_jsonld"
+
 
 class WordPressError(Exception):
     pass

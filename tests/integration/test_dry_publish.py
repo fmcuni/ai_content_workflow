@@ -40,7 +40,8 @@ async def test_dry_publish_returns_payload(postgres_url):
         await s.commit()
         await s.refresh(d)
         s.add(Render(draft_id=d.draft_id, seo_title="標題", meta_description="m",
-                     html_body="<p>x</p>", excerpt_suggestion="e"))
+                     html_body="<p>x</p>", excerpt_suggestion="e",
+                     schema_jsonld=[{"@type": "FAQPage", "mainEntity": []}]))
         await s.commit()
 
     app = FastAPI()
@@ -60,6 +61,11 @@ async def test_dry_publish_returns_payload(postgres_url):
     assert "/wp-json/wp/v2/posts/98785" in data["request_url"]
     assert data["request_body"]["status"] == "draft"
     assert data["request_body"]["meta"]["_yoast_wpseo_metadesc"] == "m"
+    # Preview must surface the out-of-band schema meta (JSON-encoded graph),
+    # mirroring what the real publish sends — and never inline it into content.
+    assert "_bowtie_schema_jsonld" in data["request_body"]["meta"]
+    assert "FAQPage" in data["request_body"]["meta"]["_bowtie_schema_jsonld"]
+    assert "<script" not in data["request_body"]["content"]
     # Preview must surface the forced WP default page template ("" = default).
     assert data["request_body"]["template"] == ""
     await engine.dispose()

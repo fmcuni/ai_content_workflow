@@ -69,8 +69,8 @@ async def test_audit_pass_flow(db_session):
             draft_id=draft.draft_id,
             seo_title="H1",
             meta_description="m",
+            schema_jsonld=[{"@type": "FAQPage"}],
             html_body=(
-                '<script type="application/ld+json">{"@type":"FAQPage"}</script>'
                 '<p>x</p>[adv_panel id="1"]<h2>x</h2><p>y</p>[page_widget id="2"]'
                 '<h2>常見問題</h2><div class="editor__item editor__faq">x</div>'
                 "<h2>資訊來源</h2><ol><li>x</li></ol>"
@@ -150,8 +150,8 @@ async def test_det_finding_forces_fail_even_when_llm_passes(db_session):
             draft_id=draft.draft_id,
             seo_title="H1",
             meta_description="m",
+            schema_jsonld=[{"@type": "FAQPage"}],
             html_body=(
-                '<script type="application/ld+json">{"@type":"FAQPage"}</script>'
                 '<p>x</p><h2>x</h2><p>y</p>[page_widget id="2"]'
                 '<h2>常見問題</h2><div class="editor__item editor__faq">x</div>'
                 "<h2>資訊來源</h2><ol><li>x</li></ol>"
@@ -236,8 +236,8 @@ async def test_denied_citation_displayed_triggers_finding(db_session):
             draft_id=draft.draft_id,
             seo_title="H1",
             meta_description="m",
+            schema_jsonld=[{"@type": "FAQPage"}],
             html_body=(
-                '<script type="application/ld+json">{"@type":"FAQPage"}</script>'
                 '<p>x</p>[adv_panel id="1"]<h2>x</h2><p>y</p>[page_widget id="2"]'
                 '<h2>常見問題</h2><div class="editor__item editor__faq">x</div>'
                 "<h2>資訊來源</h2><ol><li>x</li></ol>"
@@ -329,8 +329,8 @@ async def test_audit_idempotent_on_graph_replay(db_session):
             draft_id=draft.draft_id,
             seo_title="H1",
             meta_description="m",
+            schema_jsonld=[{"@type": "FAQPage"}],
             html_body=(
-                '<script type="application/ld+json">{"@type":"FAQPage"}</script>'
                 '<p>x</p>[adv_panel id="1"]<h2>x</h2><p>y</p>[page_widget id="2"]'
                 '<h2>常見問題</h2><div class="editor__item editor__faq">x</div>'
                 "<h2>資訊來源</h2><ol><li>x</li></ol>"

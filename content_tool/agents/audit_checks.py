@@ -3,7 +3,10 @@ from typing import Any
 
 
 def run_deterministic_checks(
-    html_body: str, *, citations_denied_displayed: bool,
+    html_body: str,
+    *,
+    citations_denied_displayed: bool,
+    schema_jsonld: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -39,11 +42,20 @@ def run_deterministic_checks(
             "must_fix": True,
         })
 
-    if not re.search(r'<script type="application/ld\+json">', html_body):
+    # FAQ JSON-LD is now delivered OUT-OF-BAND (schema_jsonld → _bowtie_schema_jsonld
+    # post meta → Yoast/RankMath schema filter → page <head>), so we no longer
+    # look for a <script> in the body. Instead: whenever the visible FAQ widget
+    # is present, the schema graph must carry a matching FAQPage piece.
+    has_faq_widget = 'class="editor__item editor__faq"' in html_body
+    has_faqpage = any(
+        isinstance(p, dict) and p.get("@type") == "FAQPage"
+        for p in (schema_jsonld or [])
+    )
+    if has_faq_widget and not has_faqpage:
         findings.append({
             "id": "det-fmt-jsonld", "category": "format", "severity": "high",
-            "location": "head", "issue": "缺少 FAQPage JSON-LD",
-            "suggested_fix": "render_html 必須在 body 頂部注入 application/ld+json",
+            "location": "head", "issue": "FAQ widget 存在但 schema_jsonld 缺少 FAQPage",
+            "suggested_fix": "render_html 必須輸出 FAQPage 至 schema_jsonld (經 post meta 交付, 不再注入 body)",  # noqa: E501
             "must_fix": True,
         })
 

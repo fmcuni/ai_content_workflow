@@ -1,4 +1,3 @@
-import json
 import re
 from dataclasses import dataclass
 from uuid import UUID
@@ -16,6 +15,9 @@ class RenderResult:
     meta_description: str
     html_body: str
     faq_schema_jsonld: dict | None
+    # Full schema.org graph (FAQPage, DefinedTermSet, ...) for out-of-band
+    # delivery to WP via post meta. None when the article has no structured data.
+    schema_jsonld: list[dict[str, object]] | None
     excerpt_suggestion: str
     slug_suggestion: str
 
@@ -71,7 +73,7 @@ def _build_faq_html(items: list[tuple[str, str]]) -> str:
     return "\n".join(parts)
 
 
-def _build_faq_jsonld(items: list[tuple[str, str]]) -> dict:
+def _build_faq_jsonld(items: list[tuple[str, str]]) -> dict[str, object]:
     return {
         "@context": "https://schema.org",
         "@type": "FAQPage",
@@ -86,7 +88,7 @@ def _build_faq_jsonld(items: list[tuple[str, str]]) -> dict:
     }
 
 
-def _build_defterm_jsonld(items: list[tuple[str, str]]) -> dict:
+def _build_defterm_jsonld(items: list[tuple[str, str]]) -> dict[str, object]:
     return {
         "@context": "https://schema.org",
         "@type": "DefinedTermSet",
@@ -178,18 +180,18 @@ def render_html(markdown: str) -> RenderResult:
     faq_jsonld = _build_faq_jsonld(faq_items) if faq_items else None
     defterm_jsonld = _build_defterm_jsonld(defterm_items) if defterm_items else None
 
-    jsonld_blocks: list[str] = []
-    for obj in (faq_jsonld, defterm_jsonld):
-        if obj is None:
-            continue
-        jsonld_blocks.append(
-            '<script type="application/ld+json">\n'
-            + json.dumps(obj, ensure_ascii=False, indent=2)
-            + "\n</script>"
-        )
-    jsonld_script = ("\n".join(jsonld_blocks) + "\n") if jsonld_blocks else ""
+    # Structured-data graph pieces, collected for OUT-OF-BAND delivery only.
+    # We deliberately do NOT inline a <script type="application/ld+json"> block
+    # into the body any more: publish ships this graph to the
+    # _bowtie_schema_jsonld post meta key, and a companion Yoast/RankMath schema
+    # filter on the WordPress side emits it in the page <head>. Inlining it left
+    # a stray leading blank line and tripped block-editor "invalid markup".
+    schema_pieces: list[dict[str, object]] = [
+        obj for obj in (faq_jsonld, defterm_jsonld) if obj is not None
+    ]
+    schema_jsonld = schema_pieces or None
 
-    final = jsonld_script + body_html
+    final = body_html
     if faq_html:
         final += "\n<h2>常見問題</h2>\n" + faq_html + "\n"
     if sources_md:
@@ -205,6 +207,7 @@ def render_html(markdown: str) -> RenderResult:
         meta_description=meta_description,
         html_body=final,
         faq_schema_jsonld=faq_jsonld,
+        schema_jsonld=schema_jsonld,
         excerpt_suggestion=excerpt,
         slug_suggestion=slug_suggestion,
     )
@@ -229,6 +232,7 @@ async def run_render_html(
         meta_description=result.meta_description,
         html_body=result.html_body,
         faq_schema_jsonld=result.faq_schema_jsonld,
+        schema_jsonld=result.schema_jsonld,
         excerpt_suggestion=result.excerpt_suggestion,
         slug_suggestion=result.slug_suggestion,
     ))
