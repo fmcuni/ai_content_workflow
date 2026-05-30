@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import and_, select, text
 
+from content_tool.config import config_path
 from content_tool.db.models import Draft, GapAnalysisRow, Run
 from content_tool.observability.cost import CostCalculator
 
@@ -20,7 +21,7 @@ async def cost_for_run(
     run_id: UUID,
     sf: Any = Depends(get_session_factory),  # noqa: ANN401, B008
 ) -> dict[str, int]:
-    calc = CostCalculator.load_from("config/pricing.yaml")
+    calc = CostCalculator.load_from(config_path("pricing.yaml"))
     async with sf() as session:
         ga = (
             await session.execute(
@@ -61,7 +62,7 @@ async def cost_summary(
     end: date,
     sf: Any = Depends(get_session_factory),  # noqa: ANN401, B008
 ) -> dict[str, Any]:
-    calc = CostCalculator.load_from("config/pricing.yaml")
+    calc = CostCalculator.load_from(config_path("pricing.yaml"))
     async with sf() as session:
         runs = (
             await session.execute(

@@ -14,7 +14,7 @@ import structlog
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from content_tool.config import get_refresh_config, get_settings
+from content_tool.config import config_path, get_refresh_config, get_settings
 from content_tool.db.models import Article, RefreshEvaluation, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.observability.cost import CostCalculator
@@ -29,7 +29,7 @@ _COST_CALC: CostCalculator | None = None
 def _get_cost_calc() -> CostCalculator:
     global _COST_CALC
     if _COST_CALC is None:
-        _COST_CALC = CostCalculator.load_from("config/pricing.yaml")
+        _COST_CALC = CostCalculator.load_from(config_path("pricing.yaml"))
     return _COST_CALC
 
 log = structlog.get_logger(__name__)

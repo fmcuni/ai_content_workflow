@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from content_tool.agents.publish import publish_to_wordpress
 from content_tool.compliance.log import write_compliance_log
-from content_tool.config import get_settings
+from content_tool.config import config_path, get_settings
 from content_tool.gemini.client import GeminiClient
 from content_tool.graph.production import build_production_graph
 from content_tool.graph.strategy import build_strategy_graph
@@ -45,7 +45,7 @@ def build_root_graph(
                     if_unmodified_since=None,
                 )
             settings = get_settings()
-            cost_calc = CostCalculator.load_from("config/pricing.yaml")
+            cost_calc = CostCalculator.load_from(config_path("pricing.yaml"))
             async with session_factory() as session:
                 await write_compliance_log(
                     session=session,

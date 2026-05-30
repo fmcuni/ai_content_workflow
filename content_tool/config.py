@@ -1,4 +1,5 @@
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,23 @@ from pydantic_settings import (
 )
 
 DEFAULT_CONFIG_DIR = Path.home() / "Library" / "Application Support" / "BowtieContentTool"
+
+
+def resource_root() -> Path:
+    """Root directory holding bundled runtime assets (``config/``, ``prompts/``).
+
+    Under PyInstaller the spec extracts those data dirs to ``sys._MEIPASS``; in a
+    source checkout they live at the repo root, one level above this package.
+    Resolving against this root — never the process cwd — keeps asset lookups
+    working when the desktop sidecar runs with an arbitrary working directory.
+    """
+    bundle_dir = getattr(sys, "_MEIPASS", None)
+    return Path(bundle_dir) if bundle_dir else Path(__file__).resolve().parents[1]
+
+
+def config_path(*parts: str) -> Path:
+    """Absolute path to a file under the bundled ``config/`` directory."""
+    return resource_root().joinpath("config", *parts)
 
 
 def desktop_config_dir() -> Path:
@@ -81,6 +99,11 @@ def is_configured(settings: Settings) -> bool:
 def get_refresh_config() -> dict[str, Any]:
     settings = get_settings()
     path = Path(settings.refresh_config_path)
+    # A relative default ("config/refresh.yaml") must resolve against the
+    # bundle/repo root, not the process cwd — the packaged sidecar's cwd is not
+    # the repo. An absolute override (env / desktop config.json) is honored as-is.
+    if not path.is_absolute():
+        path = resource_root() / path
     if not path.exists():
         raise FileNotFoundError(f"refresh config not found: {path}")
     with path.open() as f:
