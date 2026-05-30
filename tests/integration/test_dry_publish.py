@@ -60,4 +60,6 @@ async def test_dry_publish_returns_payload(postgres_url):
     assert "/wp-json/wp/v2/posts/98785" in data["request_url"]
     assert data["request_body"]["status"] == "draft"
     assert data["request_body"]["meta"]["_yoast_wpseo_metadesc"] == "m"
+    # Preview must surface the forced WP default page template ("" = default).
+    assert data["request_body"]["template"] == ""
     await engine.dispose()

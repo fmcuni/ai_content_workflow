@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import Draft, FetchedArticle, Render, Run
 from content_tool.wordpress.client import (
+    WP_DEFAULT_PAGE_TEMPLATE,
     PublishPayload,
     WordPressClient,
     WordPressConflictError,
@@ -82,6 +83,9 @@ async def publish_to_wordpress(
         meta=meta,
         if_unmodified_since=if_unmodified_since,
         date_gmt=date_gmt,
+        # Force the theme default page template on both create and refresh/update
+        # so published articles never inherit a stale post template.
+        template=WP_DEFAULT_PAGE_TEMPLATE,
     )
 
     try:

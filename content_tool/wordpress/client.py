@@ -4,6 +4,13 @@ from urllib.parse import urlparse
 
 import httpx
 
+# WordPress represents "use the theme's default page template" as the empty
+# string in the REST API `template` field. Sending this on every upsert forces
+# both the create and refresh/update pipelines onto the default template,
+# overriding whatever template an old post may have carried. A literal
+# "default" would be rejected as an invalid template name by WP.
+WP_DEFAULT_PAGE_TEMPLATE = ""
+
 
 class WordPressError(Exception):
     pass
@@ -28,6 +35,9 @@ class PublishPayload:
     meta: dict[str, str]
     if_unmodified_since: str | None
     date_gmt: str | None = None
+    # WP page template slug. "" selects the theme default; None omits the field
+    # entirely (leaving any existing post template untouched).
+    template: str | None = None
 
 
 @dataclass
@@ -115,6 +125,10 @@ class WordPressClient:
                 body["featured_media"] = p.featured_media
             if p.date_gmt is not None:
                 body["date_gmt"] = p.date_gmt
+            # `is not None` (not truthiness): "" is the meaningful value that
+            # selects the WP default template, so it must still be sent.
+            if p.template is not None:
+                body["template"] = p.template
 
             if p.post_id:
                 resp = await client.put(

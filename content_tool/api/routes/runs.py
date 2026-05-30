@@ -37,6 +37,7 @@ from content_tool.db.models import (
     TopicCandidate,
 )
 from content_tool.refresh.inventory import upsert_article
+from content_tool.wordpress.client import WP_DEFAULT_PAGE_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -879,6 +880,8 @@ async def dry_publish(
         "categories": categories,
         "tags": tags,
         "meta": meta,
+        # Mirror the actual publish payload: force the theme default template.
+        "template": WP_DEFAULT_PAGE_TEMPLATE,
     }
     if excerpt:
         body["excerpt"] = excerpt
