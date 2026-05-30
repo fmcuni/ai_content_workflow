@@ -11,6 +11,9 @@ TRIPLE="${TARGET_TRIPLE:-$(rustc -Vv | sed -n 's/host: //p')}"
 echo "Building backend for target triple: ${TRIPLE}"
 
 # PyInstaller is a build-only dependency; install it into the active venv.
+# uv-created venvs ship without pip, so bootstrap it via ensurepip first
+# (idempotent no-op when pip is already present).
+python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
 python3 -m pip install --quiet pyinstaller
 
 pyinstaller packaging/pyinstaller/content-tool-api.spec \

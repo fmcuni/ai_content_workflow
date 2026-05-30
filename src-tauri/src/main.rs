@@ -55,12 +55,17 @@ fn main() {
             std::fs::create_dir_all(&config_dir)?;
 
             // --- Backend sidecar: the PyInstaller `content-tool-api` binary. ---
+            // Pass our PID so the backend's supervisor watchdog can self-exit if
+            // the bootloader is killed and the frozen child is orphaned (see
+            // content_tool/desktop/server_entry.py) — kill() alone reaps only the
+            // bootloader, not its forked child.
             let (_backend_rx, backend_child) = handle
                 .shell()
                 .sidecar("content-tool-api")?
                 .env("CONTENT_TOOL_HOST", BACKEND_HOST)
                 .env("CONTENT_TOOL_PORT", BACKEND_PORT.to_string())
                 .env("BOWTIE_CONFIG_DIR", config_dir.to_string_lossy().to_string())
+                .env("BOWTIE_SUPERVISOR_PID", std::process::id().to_string())
                 .spawn()?;
 
             // --- Frontend sidecar: bundled Node running the Next standalone server. ---
@@ -108,10 +113,15 @@ fn main() {
             if let RunEvent::Exit = event {
                 // Best-effort cleanup: kill both sidecars on shutdown.
                 let sidecars = app_handle.state::<Sidecars>();
-                if let Ok(mut guard) = sidecars.0.lock() {
-                    for child in guard.drain(..) {
-                        let _ = child.kill();
-                    }
+                // Collect the children out under the lock, then kill after the
+                // guard is dropped — avoids holding the mutex across kill() and
+                // keeps the lock temporary from outliving `sidecars`.
+                let children: Vec<CommandChild> = match sidecars.0.lock() {
+                    Ok(mut guard) => guard.drain(..).collect(),
+                    Err(_) => Vec::new(),
+                };
+                for child in children {
+                    let _ = child.kill();
                 }
             }
         });

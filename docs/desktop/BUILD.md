@@ -59,17 +59,51 @@ Enter the Gemini API key + Supabase URL (and optionally WordPress), click
 **Test connection**, then **Save & continue**. Credentials are written to
 `~/Library/Application Support/BowtieContentTool/config.json` (mode `0600`).
 
+## DMG bundling needs an interactive session
+
+`cargo tauri build` builds the `.app` headlessly, but the `.dmg` step runs
+Tauri's `bundle_dmg.sh`, which executes an AppleScript that tells **Finder** to
+arrange the disk-image window. That requires a GUI login **and** Automation
+permission to control Finder, so it fails in non-interactive contexts (ssh, CI,
+detached agents) with `Failed running AppleScript` (exit 64).
+
+- **Interactive Terminal (normal case):** run `./scripts/desktop/build_app.sh`
+  from Terminal.app. macOS prompts *"Terminal wants to control Finder"* the first
+  time — click **Allow** (or pre-grant under System Settings → Privacy &
+  Security → Automation) and the `.dmg` builds.
+- **Headless / CI fallback:** build only the `.app` (`cargo tauri build
+  --bundles app`) and wrap it into a plain DMG without the Finder cosmetics:
+
+  ```bash
+  APP="src-tauri/target/release/bundle/macos/Bowtie Content Tool.app"
+  STAGE="$(mktemp -d)"; cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
+  hdiutil create -volname "Bowtie Content Tool" -srcfolder "$STAGE" \
+    -ov -format UDZO "Bowtie Content Tool.dmg"
+  ```
+
+  The result installs identically (drag to Applications); it just lacks the
+  custom background/icon layout.
+
 ## Notes / known limitations
 
-- **Bundle size:** ships a full Node runtime plus the PyInstaller backend — the
-  `.dmg` is large (hundreds of MB). Acceptable for an internal tool; a future
-  phase could swap Node for a single-file compile.
+- **Bundle size:** ships a full Node runtime (the official self-contained
+  nodejs.org build, ~110 MB) plus the PyInstaller backend — the `.dmg` is large
+  (hundreds of MB). Acceptable for an internal tool; a future phase could swap
+  Node for a single-file compile.
+- **Backend warm-up:** the frozen backend cold-boots in ~25 s (PyInstaller
+  unpacks the one-file archive and imports heavy deps). The shell reveals the
+  window as soon as the **frontend** is ready (~few seconds) so first paint is
+  fast; the setup form is static, but **Test connection / Save** may briefly
+  return a proxy error until the backend finishes booting. Just retry.
 - **Ports:** `3000` (frontend) and `8000` (backend) on loopback. If taken, the
-  sidecars fail to bind; env-overridable ports are a follow-up.
+  sidecars fail to bind. The backend port is baked into the frontend client
+  bundle (`NEXT_PUBLIC_API_BASE`) at build time, so runtime port overrides need
+  a rebuild — env-overridable ports remain a follow-up.
 - **Single instance:** not enforced in v1 (single-user assumption).
-- **Verification status:** the scaffold (Rust shell, `tauri.conf.json`,
-  capabilities, PyInstaller spec, scripts) was authored without a Tauri/
-  PyInstaller toolchain in CI. Expect to reconcile minor schema/permission
-  details against `cargo tauri`'s generated schemas on the first real build —
-  the Tauri CLI validates `tauri.conf.json` and `capabilities/` and will report
-  exactly what (if anything) needs adjusting.
+- **Verification status:** first real build verified on macOS Apple Silicon
+  (2026-05-30): `.app` launches, both sidecars bind, the in-app proxy reaches the
+  backend, and the first-run setup screen renders. Building from the committed
+  scaffold required removing an invalid capability permission
+  (`core:webview:allow-navigate`) and a Rust borrow fix in the exit handler;
+  both are in tree. `cargo tauri` validates `tauri.conf.json` and `capabilities/`
+  and reports exactly what (if anything) still needs adjusting.

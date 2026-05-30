@@ -27,8 +27,27 @@ if [ -d public ]; then
   cp -R public "$DEST/public"
 fi
 
-# Bundle the Node runtime used to run the server (same arch as the host build).
-cp "$(command -v node)" "$DEST/node"
+# Bundle a self-contained Node runtime to run the server. We deliberately do NOT
+# copy `$(command -v node)`: package-manager Node builds (e.g. Homebrew) are thin
+# launchers dynamically linked against libnode + a web of Cellar dylibs, so they
+# break the moment the .app is relocated to another machine. The official
+# nodejs.org build is statically linked against libnode/V8 and depends only on
+# system libraries, so it is safe to relocate.
+NODE_VERSION="$(node --version)"          # e.g. v22.22.0
+case "${TARGET_TRIPLE:-$(rustc -Vv | sed -n 's/host: //p')}" in
+  aarch64-*) NODE_ARCH="arm64" ;;
+  x86_64-*)  NODE_ARCH="x64" ;;
+  *) echo "Unsupported target triple for Node bundling" >&2; exit 1 ;;
+esac
+NODE_PKG="node-${NODE_VERSION}-darwin-${NODE_ARCH}"
+NODE_CACHE="${ROOT}/build/desktop/node-cache"
+mkdir -p "$NODE_CACHE"
+if [ ! -x "$NODE_CACHE/$NODE_PKG/bin/node" ]; then
+  echo "Fetching official Node ${NODE_VERSION} (${NODE_ARCH})…"
+  curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${NODE_PKG}.tar.gz" \
+    | tar -xz -C "$NODE_CACHE"
+fi
+cp "$NODE_CACHE/$NODE_PKG/bin/node" "$DEST/node"
 chmod +x "$DEST/node"
 
 echo "Assembled frontend sidecar at ${DEST}"

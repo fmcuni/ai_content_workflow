@@ -6,7 +6,6 @@
   "permissions": [
     "core:default",
     "core:window:allow-show",
-    "core:webview:allow-navigate",
     {
       "identifier": "shell:allow-execute",
       "allow": [
