@@ -55,10 +55,30 @@ def apply_migrations(postgres_url):
     # Apply baseline migration + seed directly for the testcontainers path.
     # Strip psql meta-commands (\restrict / \unrestrict) and Supabase-only
     # extensions that don't exist in a plain postgres:16 image.
+    # Strip statements that only make sense on a real Supabase instance and
+    # break on a plain postgres:16 image: psql meta-commands (\restrict /
+    # \unrestrict), Supabase-only extensions, and the supabase_realtime
+    # publication (which Supabase pre-creates but a bare image does not).
     _STRIP = re.compile(
-        r"^\\.+$\n?|CREATE EXTENSION IF NOT EXISTS[^;]+;",
+        r"^\\.+$\n?|CREATE EXTENSION IF NOT EXISTS[^;]+;|ALTER PUBLICATION[^;]+;",
         re.MULTILINE,
     )
+
+    # The dump assigns ownership / grants to Supabase's built-in roles, none of
+    # which exist on a plain image. Pre-create them (idempotently) so the
+    # OWNER TO / GRANT / ALTER DEFAULT PRIVILEGES statements apply cleanly.
+    _ROLE_BOOTSTRAP = """
+    DO $$
+    DECLARE role_name text;
+    BEGIN
+        FOREACH role_name IN ARRAY ARRAY['postgres', 'anon', 'authenticated', 'service_role']
+        LOOP
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = role_name) THEN
+                EXECUTE format('CREATE ROLE %I', role_name);
+            END IF;
+        END LOOP;
+    END $$;
+    """
 
     baseline = _STRIP.sub(
         "",
@@ -70,6 +90,7 @@ def apply_migrations(postgres_url):
         url = postgres_url.replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(url)
         try:
+            await conn.execute(_ROLE_BOOTSTRAP)
             await conn.execute(baseline)
             await conn.execute(seed)
         finally:
