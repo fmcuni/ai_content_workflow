@@ -85,6 +85,7 @@ def build_production_graph(
                 "meta_description": result.meta_description,
                 "html_body": result.html_body,
                 "faq_schema_jsonld": result.faq_schema_jsonld,
+                "schema_jsonld": result.schema_jsonld,
                 "excerpt_suggestion": result.excerpt_suggestion,
             }
         }

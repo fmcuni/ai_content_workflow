@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
@@ -37,7 +38,10 @@ from content_tool.db.models import (
     TopicCandidate,
 )
 from content_tool.refresh.inventory import upsert_article
-from content_tool.wordpress.client import WP_DEFAULT_PAGE_TEMPLATE
+from content_tool.wordpress.client import (
+    SCHEMA_JSONLD_META_KEY,
+    WP_DEFAULT_PAGE_TEMPLATE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -535,6 +539,7 @@ async def get_latest_render(run_id: UUID, sf=Depends(get_session_factory)) -> di
             "meta_description": render.meta_description,
             "html_body": render.html_body,
             "faq_schema_jsonld": render.faq_schema_jsonld,
+            "schema_jsonld": render.schema_jsonld,
             "excerpt_suggestion": render.excerpt_suggestion,
             "slug_suggestion": render.slug_suggestion,
         }
@@ -871,7 +876,12 @@ async def dry_publish(
         "_yoast_wpseo_metadesc" if seo_plugin == "yoast"
         else ("rank_math_description" if seo_plugin == "rankmath" else None)
     )
-    meta = {meta_key: meta_desc} if meta_key else {}
+    meta: dict[str, str] = {meta_key: meta_desc} if meta_key else {}
+    # Mirror the actual publish payload: the structured-data graph rides along
+    # as out-of-band post meta (consumed by the WP-side schema filter), never
+    # inlined into the body.
+    if render.schema_jsonld:
+        meta[SCHEMA_JSONLD_META_KEY] = json.dumps(render.schema_jsonld, ensure_ascii=False)
 
     body: dict = {
         "title": title,

@@ -110,7 +110,9 @@ async def run_audit(
     )
 
     det_findings = run_deterministic_checks(
-        render.html_body, citations_denied_displayed=denied_displayed
+        render.html_body,
+        citations_denied_displayed=denied_displayed,
+        schema_jsonld=render.schema_jsonld,
     )
 
     sys_prompt = await build_system_prompt(

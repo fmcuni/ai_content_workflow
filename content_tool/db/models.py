@@ -245,6 +245,10 @@ class Render(Base):
     meta_description: Mapped[str] = mapped_column(String, nullable=False)
     html_body: Mapped[str] = mapped_column(String, nullable=False)
     faq_schema_jsonld: Mapped[dict | None] = mapped_column(JSONB)
+    # Full structured-data graph (list of schema.org pieces: FAQPage,
+    # DefinedTermSet, ...) shipped out-of-band to WordPress via the
+    # _bowtie_schema_jsonld post meta key, NOT inlined into html_body.
+    schema_jsonld: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
     excerpt_suggestion: Mapped[str | None] = mapped_column(String)
     slug_suggestion: Mapped[str | None] = mapped_column(String)
 
