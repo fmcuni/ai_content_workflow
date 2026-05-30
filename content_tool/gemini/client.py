@@ -159,7 +159,11 @@ class RealGeminiClient:
             candidate = response.candidates[0] if response.candidates else None
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-        parsed = parse_gemini_json(text)
+        # Only parse JSON when the caller actually requested structured output.
+        # A None schema means a plain-text reply is expected (e.g. the setup
+        # credential check), so forcing JSON parsing there would reject a valid
+        # response. ``parsed`` stays ``{}`` in that case.
+        parsed = parse_gemini_json(text) if response_schema is not None else {}
         grounding = None
         if candidate and candidate.grounding_metadata:
             grounding = [c.model_dump() for c in (candidate.grounding_metadata.grounding_chunks or [])]  # noqa: E501
