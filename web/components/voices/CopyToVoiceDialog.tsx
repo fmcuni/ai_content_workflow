@@ -100,7 +100,13 @@ export function CopyToVoiceDialog({ sourcePersona, candidates, onClose }: CopyTo
 
   return (
     <>
-      <div className="fixed inset-0 bg-ink/30 z-40" onClick={onClose} aria-hidden />
+      <div
+        className="fixed inset-0 bg-ink/30 z-40"
+        onClick={() => {
+          if (!mut.isPending) onClose();
+        }}
+        aria-hidden
+      />
       <div className="fixed inset-x-0 top-10 mx-auto z-50 max-w-[920px] bg-paper border border-rule shadow-2xl max-h-[85vh] flex flex-col">
         <header className="flex items-center justify-between border-b border-rule px-5 py-3">
           <div>
@@ -122,7 +128,7 @@ export function CopyToVoiceDialog({ sourcePersona, candidates, onClose }: CopyTo
               </select>
             </p>
           </div>
-          <button onClick={onClose} className="text-ink-faint hover:text-ink" aria-label="Close">×</button>
+          <button onClick={onClose} disabled={mut.isPending} className="text-ink-faint hover:text-ink disabled:opacity-40" aria-label="Close">×</button>
         </header>
 
         {!target && (
@@ -241,7 +247,7 @@ export function CopyToVoiceDialog({ sourcePersona, candidates, onClose }: CopyTo
                 Target glossary will be saved via PUT /personas/{target.slug}
               </p>
               <div className="flex items-center gap-3">
-                <button onClick={onClose} className="text-[12px] uppercase tracking-wider text-ink-faint hover:text-ink">
+                <button onClick={onClose} disabled={mut.isPending} className="text-[12px] uppercase tracking-wider text-ink-faint hover:text-ink disabled:opacity-40">
                   Cancel
                 </button>
                 <button

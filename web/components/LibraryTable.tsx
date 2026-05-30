@@ -7,6 +7,7 @@ import { articlesApi } from "@/lib/api";
 import type { Article, ArticleDetail } from "@/lib/types";
 import { StalenessIndicator } from "@/components/StalenessIndicator";
 import { ArticleDetailDrawer } from "@/components/ArticleDetailDrawer";
+import { ExternalLink } from "@/components/ExternalLink";
 import { DismissDialog } from "@/components/DismissDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +86,19 @@ export function LibraryTable({ filters }: LibraryTableProps) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const clearDismissMutation = useMutation({
+    mutationFn: (articleId: string) => articlesApi.clearDismiss(articleId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["articles"] });
+      toast.success("Dismiss cleared");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Any in-flight dismiss/clear disables the whole dropdown so reopening the
+  // menu can't re-fire a second mutation before the first settles.
+  const dismissBusy = dismissMutation.isPending || clearDismissMutation.isPending;
 
   function handleRowClick(a: Article) {
     setDrawerArticleId(a.article_id);
@@ -184,15 +198,13 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                       <p className="font-display text-[15px] text-ink line-clamp-1" style={{ fontVariationSettings: '"opsz" 36, "SOFT" 70' }}>
                         {a.topic ?? "—"}
                       </p>
-                      <a
+                      <ExternalLink
                         href={a.article_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="font-mono text-[11px] text-ink-faint underline-offset-2 hover:underline break-all line-clamp-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {a.article_url}
-                      </a>
+                      </ExternalLink>
                     </td>
 
                     {/* Persona */}
@@ -255,21 +267,25 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                           />
                           <DropdownMenuContent>
                             <DropdownMenuItem
+                              disabled={dismissBusy}
                               onClick={() => handleDismissPreset(a, 7)}
                             >
                               7 days
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              disabled={dismissBusy}
                               onClick={() => handleDismissPreset(a, 30)}
                             >
                               30 days
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              disabled={dismissBusy}
                               onClick={() => handleDismissPreset(a, 90)}
                             >
                               90 days
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              disabled={dismissBusy}
                               onClick={() => handleDismissCustom(a)}
                             >
                               Custom…
@@ -278,18 +294,9 @@ export function LibraryTable({ filters }: LibraryTableProps) {
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
+                                  disabled={dismissBusy}
                                   onClick={() =>
-                                    articlesApi
-                                      .clearDismiss(a.article_id)
-                                      .then(() => {
-                                        void qc.invalidateQueries({
-                                          queryKey: ["articles"],
-                                        });
-                                        toast.success("Dismiss cleared");
-                                      })
-                                      .catch((e: Error) =>
-                                        toast.error(e.message)
-                                      )
+                                    clearDismissMutation.mutate(a.article_id)
                                   }
                                 >
                                   Clear

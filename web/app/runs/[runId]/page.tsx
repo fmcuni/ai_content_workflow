@@ -4,7 +4,9 @@ import { use } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { ExternalLink } from "@/components/ExternalLink";
+import { NavLinkButton } from "@/components/NavLinkButton";
 import { SectionHead } from "@/components/SectionHead";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
@@ -102,9 +104,9 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
         hed={run?.topic ?? "…"}
         dek={
           run?.article_url ? (
-            <a href={run.article_url} target="_blank" rel="noopener noreferrer" className="hover:text-ink hover:underline underline-offset-2 break-all">
+            <ExternalLink href={run.article_url} className="hover:text-ink hover:underline underline-offset-2 break-all">
               {run.article_url} <span className="text-ink-faint">↗</span>
-            </a>
+            </ExternalLink>
           ) : null
         }
       />
@@ -144,23 +146,27 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
             {run?.status === "hitl_1" && (
               <div>
                 <p className="kicker mb-2">Outline review</p>
-                <Link
+                <NavLinkButton
                   href={`/runs/${runId}/hitl1`}
-                  className={buttonVariants({ variant: "primary", size: "lg" }) + " w-full"}
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
                 >
                   Review gap analysis & outline →
-                </Link>
+                </NavLinkButton>
               </div>
             )}
             {run?.status === "hitl_2" && (
               <div>
                 <p className="kicker mb-2">Draft review</p>
-                <Link
+                <NavLinkButton
                   href={`/runs/${runId}/hitl2`}
-                  className={buttonVariants({ variant: "primary", size: "lg" }) + " w-full"}
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
                 >
                   Review final draft →
-                </Link>
+                </NavLinkButton>
               </div>
             )}
             {run?.status === "failed" && (
@@ -190,19 +196,23 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
             {run && TERMINAL_STATUSES.has(run.status) && (
               <div>
                 <p className="kicker mb-2">Post-hoc edit</p>
-                <Link
+                <NavLinkButton
                   href={`/runs/${runId}/edit`}
-                  className={buttonVariants({ variant: run.status === "failed" ? "secondary" : "primary", size: "lg" }) + " w-full"}
+                  variant={run.status === "failed" ? "secondary" : "primary"}
+                  size="lg"
+                  className="w-full"
                 >
                   Edit outline & article →
-                </Link>
+                </NavLinkButton>
                 {run.status !== "failed" && (
-                  <Link
+                  <NavLinkButton
                     href={`/runs/${runId}/regenerate`}
-                    className={buttonVariants({ variant: "secondary", size: "lg" }) + " w-full mt-3"}
+                    variant="secondary"
+                    size="lg"
+                    className="w-full mt-3"
                   >
                     Regenerate with comments ↺
-                  </Link>
+                  </NavLinkButton>
                 )}
               </div>
             )}

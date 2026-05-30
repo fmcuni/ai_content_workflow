@@ -183,12 +183,14 @@ export default function PromptEditorPage({
     enabled: openVersion !== null,
   });
 
-  const handleReload = async () => {
-    setBuffer("");
-    await queryClient.invalidateQueries({
-      queryKey: ["prompts", "template", templateId],
-    });
-  };
+  const reloadMut = useMutation({
+    mutationFn: async () => {
+      setBuffer("");
+      await queryClient.invalidateQueries({
+        queryKey: ["prompts", "template", templateId],
+      });
+    },
+  });
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">
@@ -217,10 +219,10 @@ export default function PromptEditorPage({
             <Button
               variant="secondary"
               size="sm"
-              onClick={handleReload}
-              disabled={saveMut.isPending}
+              onClick={() => reloadMut.mutate()}
+              disabled={saveMut.isPending || reloadMut.isPending}
             >
-              Reload
+              {reloadMut.isPending ? "Reloading…" : "Reload"}
             </Button>
             <Button
               size="sm"

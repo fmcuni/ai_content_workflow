@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExistingVerdict, HotTopicVerdict } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ExternalLink } from "@/components/ExternalLink";
 
 interface VerdictBadgeProps {
   kind: "existing" | "hot";
@@ -93,14 +94,12 @@ export function VerdictBadge({ kind, verdict, note, url }: VerdictBadgeProps) {
         >
           {note && <p className="text-[12px] leading-snug text-ink-soft">{note}</p>}
           {url && (
-            <a
+            <ExternalLink
               href={url}
-              target="_blank"
-              rel="noopener noreferrer"
               className="block font-mono text-[11px] text-accent-deep hover:underline break-all"
             >
               {url} ↗
-            </a>
+            </ExternalLink>
           )}
         </div>
       )}

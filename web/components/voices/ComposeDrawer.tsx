@@ -258,7 +258,9 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
     <>
       <div
         className="fixed inset-0 bg-ink/20 z-40"
-        onClick={onClose}
+        onClick={() => {
+          if (!busy && !archiveMut.isPending) onClose();
+        }}
         aria-hidden
       />
       <aside className="fixed right-0 top-0 bottom-0 z-50 w-full md:w-[460px] bg-paper border-l border-rule overflow-y-auto">
@@ -267,7 +269,7 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
             <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint">
               {mode.kind === "create" ? "Compose · New voice" : `Edit · ${mode.persona.slug}`}
             </p>
-            <button type="button" onClick={onClose} className="text-ink-faint hover:text-ink" aria-label="Close">
+            <button type="button" onClick={onClose} disabled={busy || archiveMut.isPending} className="text-ink-faint hover:text-ink disabled:opacity-40" aria-label="Close">
               ×
             </button>
           </header>
@@ -339,6 +341,7 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
             {mode.kind === "edit" && (
               <button
                 type="button"
+                disabled={busy || archiveMut.isPending}
                 onClick={() => {
                   if (
                     confirm(
@@ -348,9 +351,9 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
                     archiveMut.mutate(mode.persona.slug);
                   }
                 }}
-                className="text-accent-deep text-[12px] hover:underline"
+                className="text-accent-deep text-[12px] hover:underline disabled:opacity-40 disabled:pointer-events-none"
               >
-                Archive this voice
+                {archiveMut.isPending ? "Archiving…" : "Archive this voice"}
               </button>
             )}
           </footer>

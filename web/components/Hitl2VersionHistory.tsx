@@ -47,9 +47,20 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRestore: (snapshot: Hitl2Snapshot) => void;
+  /** True while a restore is in flight (disables all Restore buttons). */
+  restoring?: boolean;
+  /** The snapshot currently being restored, for a per-row "Restoring…" label. */
+  restoringId?: string | null;
 }
 
-export function Hitl2VersionHistory({ runId, open, onOpenChange, onRestore }: Props) {
+export function Hitl2VersionHistory({
+  runId,
+  open,
+  onOpenChange,
+  onRestore,
+  restoring = false,
+  restoringId = null,
+}: Props) {
   const snapshots = useQuery({
     queryKey: ["hitl2-snapshots", runId],
     queryFn: () => api.listHitl2Snapshots(runId),
@@ -109,9 +120,10 @@ export function Hitl2VersionHistory({ runId, open, onOpenChange, onRestore }: Pr
                   <Button
                     variant="secondary"
                     size="sm"
+                    disabled={restoring}
                     onClick={() => onRestore(s)}
                   >
-                    Restore
+                    {restoring && restoringId === s.snapshot_id ? "↻ Restoring…" : "Restore"}
                   </Button>
                 </li>
               ))}

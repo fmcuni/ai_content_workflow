@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SectionHead } from "@/components/SectionHead";
+import { ExternalLink } from "@/components/ExternalLink";
 import { PaperStamp } from "@/components/PaperStamp";
 import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
@@ -434,12 +435,21 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     };
   }, [render.data, runId, qc, applySnapshot]);
 
-  const restoreSnapshot = async (s: Hitl2Snapshot) => {
-    await saveSnapshot("manual"); // preserve current work before overwriting
-    applySnapshot(s);
-    setHistoryOpen(false);
-    toast.success(`Restored version from ${new Date(s.created_at).toLocaleString()}`);
-  };
+  // Restoring first preserves current work, then loads the chosen version.
+  // Modelled as a mutation so the version-history Restore buttons can disable
+  // and show "Restoring…" while the save round-trips, preventing double-fires.
+  const restore = useMutation({
+    mutationFn: async (s: Hitl2Snapshot) => {
+      await saveSnapshot("manual");
+      return s;
+    },
+    onSuccess: (s) => {
+      applySnapshot(s);
+      setHistoryOpen(false);
+      toast.success(`Restored version from ${new Date(s.created_at).toLocaleString()}`);
+    },
+    onError: () => toast.error("Couldn't restore — try again"),
+  });
 
   const saveStatusLabel =
     saveState === "saving"
@@ -499,14 +509,12 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             {existingPost.data?.wp_post_id != null && (
               <>
                 {" · "}
-                <a
+                <ExternalLink
                   href={existingPost.data.link ?? "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="text-accent hover:underline"
                 >
                   WP #{existingPost.data.wp_post_id} ↗
-                </a>
+                </ExternalLink>
                 <button
                   type="button"
                   onClick={handleRereadClick}
@@ -771,7 +779,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             disabled={!renderReady || submit.isPending}
             onClick={() => submit.mutate("reject")}
           >
-            Reject ✕
+            {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
           </Button>
           <Button
             variant="secondary"
@@ -786,14 +794,18 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             }
             onClick={() => submit.mutate("request_changes")}
           >
-            Request changes ↺
+            {submit.isPending && submit.variables === "request_changes"
+              ? "↻ Sending…"
+              : "Request changes ↺"}
           </Button>
           <Button
             variant="primary"
             disabled={!renderReady || submit.isPending}
             onClick={() => submit.mutate("approve")}
           >
-            {submit.isPending ? "Pushing…" : "Approve & push to WP ↪"}
+            {submit.isPending && submit.variables === "approve"
+              ? "↻ Pushing to WP…"
+              : "Approve & push to WP ↪"}
           </Button>
         </div>
       </div>
@@ -802,7 +814,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         runId={runId}
         open={historyOpen}
         onOpenChange={setHistoryOpen}
-        onRestore={restoreSnapshot}
+        onRestore={(s) => restore.mutate(s)}
+        restoring={restore.isPending}
+        restoringId={restore.variables?.snapshot_id ?? null}
       />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

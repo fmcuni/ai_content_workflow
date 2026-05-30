@@ -179,8 +179,18 @@ export function CandidateGrid({ batch }: CandidateGridProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" type="button" onClick={skipAllExisting}>
-            Skip all <span className="font-mono">existing=yes</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            disabled={skipMut.isPending}
+            onClick={skipAllExisting}
+          >
+            {skipMut.isPending ? (
+              "↻ Skipping…"
+            ) : (
+              <>Skip all <span className="font-mono">existing=yes</span></>
+            )}
           </Button>
         </div>
       </div>
@@ -225,6 +235,7 @@ export function CandidateGrid({ batch }: CandidateGridProps) {
               onLocal={(patch) => patchLocal(c.candidate_id, patch)}
               onPatchServer={(body) => schedulePatch(c.candidate_id, body)}
               onSkip={() => skipMut.mutate(c.candidate_id)}
+              skipping={skipMut.isPending && skipMut.variables === c.candidate_id}
             />
           ))}
         </div>
@@ -300,6 +311,7 @@ interface CandidateRowProps {
   onLocal: (patch: Partial<LocalRowState>) => void;
   onPatchServer: (body: Parameters<typeof topicBatchesApi.patchCandidate>[2]) => void;
   onSkip: () => void;
+  skipping: boolean;
 }
 
 function CandidateRow({
@@ -311,6 +323,7 @@ function CandidateRow({
   onLocal,
   onPatchServer,
   onSkip,
+  skipping,
 }: CandidateRowProps) {
   const c = candidate;
   if (!local) return null;
@@ -536,11 +549,12 @@ function CandidateRow({
             <button
               type="button"
               onClick={onSkip}
+              disabled={skipping}
               title="Strike row"
               aria-label="Skip candidate"
-              className="size-6 inline-flex items-center justify-center font-mono text-[13px] text-ink-faint hover:text-accent-deep transition-colors"
+              className="size-6 inline-flex items-center justify-center font-mono text-[13px] text-ink-faint hover:text-accent-deep transition-colors disabled:opacity-30 disabled:pointer-events-none"
             >
-              ×
+              {skipping ? "↻" : "×"}
             </button>
           )}
         </div>

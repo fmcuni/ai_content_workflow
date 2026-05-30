@@ -1,4 +1,5 @@
 import type { GapAnalysis } from "@/lib/types";
+import { ExternalLink } from "@/components/ExternalLink";
 
 export function GapAnalysisView({ ga }: { ga: GapAnalysis }) {
   return (
@@ -11,7 +12,7 @@ export function GapAnalysisView({ ga }: { ga: GapAnalysis }) {
         <h3 className="font-medium mb-1">Top pages</h3>
         <ol className="list-decimal pl-5 space-y-0.5">
           {ga.top_pages.map((p) => (
-            <li key={p.url}><a href={p.url} target="_blank" className="text-blue-700 underline">{p.title}</a></li>
+            <li key={p.url}><ExternalLink href={p.url} className="text-blue-700 underline">{p.title}</ExternalLink></li>
           ))}
         </ol>
       </section>

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionHead } from "@/components/SectionHead";
 import { RefreshFindingsPanel } from "@/components/RefreshFindingsPanel";
+import { ExternalLink } from "@/components/ExternalLink";
 import { api, articlesApi, personasApi, refreshApi } from "@/lib/api";
 import type { CreateRunRequest, Mode, Persona } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -313,14 +314,12 @@ function NewRunForm() {
           <p className="font-display text-[18px] text-ink leading-snug">
             {article.topic ?? "(no topic)"}
           </p>
-          <a
+          <ExternalLink
             href={article.article_url}
-            target="_blank"
-            rel="noopener noreferrer"
             className="font-mono text-[11px] text-ink-faint underline-offset-2 hover:underline break-all line-clamp-1"
           >
             {article.article_url}
-          </a>
+          </ExternalLink>
         </blockquote>
       )}
 

@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { RefreshFindingsPanel } from "@/components/RefreshFindingsPanel";
+import { ExternalLink } from "@/components/ExternalLink";
 import type { ArticleDetail } from "@/lib/types";
 
 interface ArticleDetailDrawerProps {
@@ -34,14 +35,12 @@ export function ArticleDetailDrawer({
             {article.topic ?? article.article_url}
           </SheetTitle>
           <SheetDescription>
-            <a
+            <ExternalLink
               href={article.article_url}
-              target="_blank"
-              rel="noopener noreferrer"
               className="text-xs text-blue-700 underline break-all"
             >
               {article.article_url}
-            </a>
+            </ExternalLink>
           </SheetDescription>
         </SheetHeader>
 

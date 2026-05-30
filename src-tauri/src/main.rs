@@ -81,6 +81,7 @@ fn wait_until_ready(host: &str, port: u16, timeout: Duration) -> bool {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Sidecars::default())
         .setup(|app| {
             let handle = app.handle().clone();
