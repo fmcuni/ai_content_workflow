@@ -40,8 +40,12 @@ def postgres_url(postgres_container) -> str:
     return postgres_container.get_connection_url()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def apply_migrations(postgres_url):
+    # Not autouse: only DB-consuming fixtures depend on this, so pure unit tests
+    # never spin a container or apply schema. Set POSTGRES_URL here so code under
+    # test that reads it sees the same database the tests actually use.
+    os.environ["POSTGRES_URL"] = postgres_url
     # When pointed at an EXTERNAL_POSTGRES_URL (e.g. local Supabase), the
     # operator is responsible for applying schema via `supabase db reset`
     # before the test run. The Alembic baseline has been retired (see
@@ -73,15 +77,17 @@ def apply_migrations(postgres_url):
     asyncio.run(_bootstrap())
 
 
-# get_settings() reads env; set dummies so tests using FakeGeminiClient can construct Settings.
+# get_settings() reads env; set a dummy Gemini key so tests using FakeGeminiClient
+# can construct Settings without a real key. POSTGRES_URL is set lazily by
+# `apply_migrations` only when a database is actually needed, keeping pure unit
+# tests free of any container/DB requirement.
 @pytest.fixture(scope="session", autouse=True)
-def set_test_env(postgres_url):
+def set_test_env():
     os.environ["GEMINI_API_KEY"] = "test-dummy"
-    os.environ["POSTGRES_URL"] = postgres_url
 
 
 @pytest_asyncio.fixture
-async def db_session(postgres_url) -> AsyncGenerator[AsyncSession]:
+async def db_session(postgres_url, apply_migrations) -> AsyncGenerator[AsyncSession]:
     engine = make_engine(postgres_url)
     sf = make_session_factory(engine)
     async with sf() as session:
@@ -93,6 +99,7 @@ async def db_session(postgres_url) -> AsyncGenerator[AsyncSession]:
 @pytest_asyncio.fixture
 async def pg_session_factory(
     postgres_url,
+    apply_migrations,
 ) -> AsyncGenerator[async_sessionmaker[AsyncSession]]:
     """Yields a per-test async_sessionmaker bound to the running postgres container.
 
