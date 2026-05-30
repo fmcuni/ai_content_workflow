@@ -77,3 +77,8 @@ index-keywords.png
 # Local agent scratch / tooling
 .agents/
 skills-lock.json
+
+# Stray bundled JS chunks dropped into the repo root by the Codex desktop app
+# (e.g. settings-page-<hash>.js). The web frontend lives under web/, so the
+# repo root never holds source JS — safe to ignore wholesale.
+/*.js
