@@ -1,0 +1,35 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Allow the main window to spawn the backend and frontend sidecars.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:webview:allow-navigate",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "content-tool-api", "sidecar": true },
+        {
+          "name": "node",
+          "cmd": "node",
+          "args": true,
+          "sidecar": false
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "content-tool-api", "sidecar": true },
+        {
+          "name": "node",
+          "cmd": "node",
+          "args": true,
+          "sidecar": false
+        }
+      ]
+    }
+  ]
+}
