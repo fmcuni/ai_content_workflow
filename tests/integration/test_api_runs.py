@@ -383,7 +383,11 @@ async def test_recover_orphaned_fails_in_flight_runs_only(postgres_url):
     )
     recovered = await runner.recover_orphaned()
 
-    assert set(recovered) == {r.run_id for r in in_flight.values()}
+    # Other integration tests share this session-scoped DB and may leave their
+    # own in-flight runs behind, so scope the assertion to this test's rows:
+    # exactly the in-flight statuses (and none of the untouched ones) recover.
+    my_ids = {r.run_id for r in (*in_flight.values(), *untouched.values())}
+    assert set(recovered) & my_ids == {r.run_id for r in in_flight.values()}
 
     async with sf() as session:
         for status, r in in_flight.items():
