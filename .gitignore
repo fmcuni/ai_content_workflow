@@ -33,6 +33,20 @@ out/
 *.key
 *.pem
 
+# Desktop app local config (normally lives outside the repo under
+# ~/Library/Application Support/BowtieContentTool; guarded here in case
+# BOWTIE_CONFIG_DIR is pointed inside the repo)
+BowtieContentTool/
+
+# Desktop packaging artifacts (also covered by src-tauri/.gitignore and build/)
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/resources/
+src-tauri/gen/
+src-tauri/icons/*.png
+src-tauri/icons/*.icns
+src-tauri/icons/*.ico
+
 # IDE
 .vscode/
 .idea/

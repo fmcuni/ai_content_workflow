@@ -9,6 +9,7 @@ from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
 )
 
+from content_tool import prompts_store
 from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
@@ -16,12 +17,12 @@ from content_tool.api.routes.personas import router as personas_router
 from content_tool.api.routes.prompts import router as prompts_router
 from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
+from content_tool.api.routes.setup import router as setup_router
 from content_tool.api.routes.topic_batches import router as topic_batches_router
 from content_tool.api.routes.wp_options import router as wp_options_router
-from content_tool import prompts_store
 from content_tool.api.sse import RunExecutor
 from content_tool.api.wp_options_cache import TtlCache
-from content_tool.config import get_settings
+from content_tool.config import Settings, get_settings, is_configured
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.gemini.client import RealGeminiClient
 from content_tool.observability.logging import configure_logging
@@ -32,23 +33,13 @@ from content_tool.wordpress.seo_plugin import detect_seo_plugin
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
-    engine = make_engine(settings.postgres_url)
-    sf = make_session_factory(engine)
-    gemini = RealGeminiClient(
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
-        thinking_level=settings.gemini_thinking_level,
-    )
-    seo_plugin = None
+async def _resolve_seo_plugin(settings: Settings) -> str | None:
     configured = settings.wp_seo_plugin.strip().lower()
     if configured in ("yoast", "rankmath"):
-        seo_plugin = configured  # explicit override; skip network detection
-    elif settings.wp_base_url:
+        return configured  # explicit override; skip network detection
+    if settings.wp_base_url:
         try:
-            seo_plugin = await detect_seo_plugin(
+            resolved = await detect_seo_plugin(
                 settings.wp_base_url,
                 username=settings.wp_username,
                 app_password=settings.wp_app_password,
@@ -58,12 +49,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "SEO plugin detection failed; SEO meta will be skipped on publish",
                 exc_info=True,
             )
-            seo_plugin = None
-    if seo_plugin is None:
-        logger.warning(
-            "No SEO plugin resolved; meta description will NOT be sent on publish. "
-            "Set WP_SEO_PLUGIN=yoast to force it."
-        )
+            return None
+        if resolved is not None:
+            return resolved
+    logger.warning(
+        "No SEO plugin resolved; meta description will NOT be sent on publish. "
+        "Set WP_SEO_PLUGIN=yoast to force it."
+    )
+    return None
+
+
+async def init_runtime(app: FastAPI, settings: Settings) -> None:
+    """Wire the credentialed runtime (DB, Gemini, WP, executor) onto ``app.state``.
+
+    Idempotent: disposes a prior engine so it can run again after first-run setup
+    without a process restart. Caller must ensure credentials are present.
+    """
+    assert settings.postgres_url and settings.gemini_api_key, "init_runtime requires credentials"
+
+    prior_engine = getattr(app.state, "engine", None)
+    if prior_engine is not None:
+        await prior_engine.dispose()
+
+    engine = make_engine(settings.postgres_url)
+    sf = make_session_factory(engine)
+    gemini = RealGeminiClient(
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
+        thinking_level=settings.gemini_thinking_level,
+    )
+    seo_plugin = await _resolve_seo_plugin(settings)
     wp_client = WordPressClient(
         settings.wp_base_url,
         username=settings.wp_username,
@@ -82,6 +97,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await executor.recover_orphaned()
     except Exception:
         logger.exception("orphaned run recovery failed at startup")
+
+    app.state.engine = engine
     app.state.session_factory = sf
     prompts_store.configure(sf)
     app.state.run_executor = executor
@@ -90,10 +107,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.gemini_client = gemini
     app.state.seo_plugin = seo_plugin
     app.state.wp_target = settings.wp_target
+    app.state.configured = True
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Default to an unconfigured runtime so routes can detect "needs setup".
+    app.state.engine = None
+    app.state.session_factory = None
+    app.state.run_executor = None
+    app.state.wp_client = None
+    app.state.gemini_client = None
+    app.state.configured = False
+
+    settings = get_settings()
+    if is_configured(settings):
+        await init_runtime(app, settings)
+    else:
+        logger.info("awaiting setup: credentials not configured")
+
     try:
         yield
     finally:
-        await engine.dispose()
+        engine = getattr(app.state, "engine", None)
+        if engine is not None:
+            await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -112,6 +150,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    app.include_router(setup_router)
     app.include_router(runs_router)
     app.include_router(articles_router)
     app.include_router(compliance_router)

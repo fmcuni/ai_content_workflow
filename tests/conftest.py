@@ -40,8 +40,12 @@ def postgres_url(postgres_container) -> str:
     return postgres_container.get_connection_url()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def apply_migrations(postgres_url):
+    # Not autouse: only DB-consuming fixtures depend on this, so pure unit tests
+    # never spin a container or apply schema. Set POSTGRES_URL here so code under
+    # test that reads it sees the same database the tests actually use.
+    os.environ["POSTGRES_URL"] = postgres_url
     # When pointed at an EXTERNAL_POSTGRES_URL (e.g. local Supabase), the
     # operator is responsible for applying schema via `supabase db reset`
     # before the test run. The Alembic baseline has been retired (see
@@ -51,20 +55,42 @@ def apply_migrations(postgres_url):
     # Apply baseline migration + seed directly for the testcontainers path.
     # Strip psql meta-commands (\restrict / \unrestrict) and Supabase-only
     # extensions that don't exist in a plain postgres:16 image.
+    # Strip statements that only make sense on a real Supabase instance and
+    # break on a plain postgres:16 image: psql meta-commands (\restrict /
+    # \unrestrict), Supabase-only extensions, and the supabase_realtime
+    # publication (which Supabase pre-creates but a bare image does not).
     _STRIP = re.compile(
-        r"^\\.+$\n?|CREATE EXTENSION IF NOT EXISTS[^;]+;",
+        r"^\\.+$\n?|CREATE EXTENSION IF NOT EXISTS[^;]+;|ALTER PUBLICATION[^;]+;",
         re.MULTILINE,
     )
+
+    # The dump assigns ownership / grants to Supabase's built-in roles, none of
+    # which exist on a plain image. Pre-create them (idempotently) so the
+    # OWNER TO / GRANT / ALTER DEFAULT PRIVILEGES statements apply cleanly.
+    _ROLE_BOOTSTRAP = """
+    DO $$
+    DECLARE role_name text;
+    BEGIN
+        FOREACH role_name IN ARRAY ARRAY['postgres', 'anon', 'authenticated', 'service_role']
+        LOOP
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = role_name) THEN
+                EXECUTE format('CREATE ROLE %I', role_name);
+            END IF;
+        END LOOP;
+    END $$;
+    """
+
+    baseline = _STRIP.sub(
+        "",
+        Path("supabase/migrations/20260528131043_baseline.sql").read_text(),
+    )
+    seed = Path("supabase/seed.sql").read_text()
 
     async def _bootstrap() -> None:
         url = postgres_url.replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(url)
         try:
-            baseline = _STRIP.sub(
-                "",
-                Path("supabase/migrations/20260528131043_baseline.sql").read_text(),
-            )
-            seed = Path("supabase/seed.sql").read_text()
+            await conn.execute(_ROLE_BOOTSTRAP)
             await conn.execute(baseline)
             await conn.execute(seed)
         finally:
@@ -73,15 +99,17 @@ def apply_migrations(postgres_url):
     asyncio.run(_bootstrap())
 
 
-# get_settings() reads env; set dummies so tests using FakeGeminiClient can construct Settings.
+# get_settings() reads env; set a dummy Gemini key so tests using FakeGeminiClient
+# can construct Settings without a real key. POSTGRES_URL is set lazily by
+# `apply_migrations` only when a database is actually needed, keeping pure unit
+# tests free of any container/DB requirement.
 @pytest.fixture(scope="session", autouse=True)
-def set_test_env(postgres_url):
+def set_test_env():
     os.environ["GEMINI_API_KEY"] = "test-dummy"
-    os.environ["POSTGRES_URL"] = postgres_url
 
 
 @pytest_asyncio.fixture
-async def db_session(postgres_url) -> AsyncGenerator[AsyncSession]:
+async def db_session(postgres_url, apply_migrations) -> AsyncGenerator[AsyncSession]:
     engine = make_engine(postgres_url)
     sf = make_session_factory(engine)
     async with sf() as session:
@@ -93,6 +121,7 @@ async def db_session(postgres_url) -> AsyncGenerator[AsyncSession]:
 @pytest_asyncio.fixture
 async def pg_session_factory(
     postgres_url,
+    apply_migrations,
 ) -> AsyncGenerator[async_sessionmaker[AsyncSession]]:
     """Yields a per-test async_sessionmaker bound to the running postgres container.
 

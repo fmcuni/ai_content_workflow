@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from content_tool.agents.gap_analysis import run_gap_analysis
+from content_tool.config import Settings
 from content_tool.db.models import GapAnalysisRow, Run
 from content_tool.gemini.fake import FakeGeminiClient
 
@@ -37,11 +38,15 @@ async def test_gap_analysis_writes_db_and_returns_parsed(db_session):
     )
     gemini = FakeGeminiClient(canned_responses={"gap_analysis": canned})
 
+    # Pin model/thinking-level so the row assertion is independent of ambient
+    # config (.env.local / desktop config.json) — init kwargs win over env.
+    settings = Settings(gemini_model="gemini-3.5-flash", gemini_thinking_level="high")
     result = await run_gap_analysis(
         session=db_session,
         gemini=gemini,
         run_id=run_id,
         today=date(2026, 5, 21),
+        settings=settings,
     )
 
     assert result.chosen_route == "small_refresh"

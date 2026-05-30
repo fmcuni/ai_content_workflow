@@ -20,12 +20,22 @@ function buildDate() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Self-contained server build for the desktop (Tauri) frontend sidecar.
+  output: "standalone",
+  // Root the file-tracing at this web dir so standalone output lands at
+  // .next/standalone/server.js. Without this, the repo's parent lockfiles make
+  // Next root the trace higher up and nest server.js under the repo path.
+  outputFileTracingRoot: import.meta.dirname,
   env: {
     NEXT_PUBLIC_BUILD_SHA: gitSha(),
     NEXT_PUBLIC_BUILD_DATE: buildDate(),
   },
   async rewrites() {
     return [
+      // Exact rule first so POST /api/setup maps to /setup (not /setup/, which
+      // would 307-redirect and risk dropping the POST body).
+      { source: "/api/setup", destination: `${apiBase}/setup` },
+      { source: "/api/setup/:path*", destination: `${apiBase}/setup/:path*` },
       { source: "/api/runs/:path*", destination: `${apiBase}/runs/:path*` },
       { source: "/api/costs/:path*", destination: `${apiBase}/costs/:path*` },
       { source: "/api/health", destination: `${apiBase}/health` },

@@ -93,8 +93,10 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
 
 ## Ops & Data
 
-- Bowtie is an HK virtual insurer; treat data as Confidential (PHI/PII/HKID).
-  No customer data or secrets in commits, logs, or external tool calls.
+- **Scope:** this app handles public marketing/editorial content only — no
+  customer PII, PHI, HKID, or other Bowtie private data passes through it.
+  Standard hygiene still applies: no secrets/credentials in commits, logs, or
+  external tool calls.
 - Costs: `GET /costs/run/{run_id}` and `/costs/summary`; pricing in
   `config/pricing.yaml` (hot-reloaded).
 - Compliance export: `GET /compliance/export.csv`.
@@ -105,9 +107,9 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
 **Managed Postgres only** — no PostgREST, no Supabase Auth, no `supabase-js`.
 SQLAlchemy/asyncpg owns all data access.
 
-**Schema:** `content_tool` (not `public`) — not auto-exposed to PostgREST/Data API,
-safer for PHI/PII. RLS is enabled on all tables as defense in depth; app connects
-via the dedicated `content_tool_app` role (not the `postgres` superuser).
+**Schema:** `content_tool` (not `public`) — not auto-exposed to PostgREST/Data API.
+RLS is enabled on all tables as defense in depth; app connects via the dedicated
+`content_tool_app` role (not the `postgres` superuser).
 
 **Connection choice:**
 - **Direct connection** (port 5432) — default for the long-lived FastAPI process;
@@ -123,7 +125,6 @@ via the dedicated `content_tool_app` role (not the `postgres` superuser).
 - `supabase db push` — apply pending migrations to the linked prod project
 
 **Prod cutover runbook (E1–E9):** see [Supabase Cutover Runbook (E1–E9)](https://www.notion.so/36fef2b9861481d39723d884070e30fa) in Notion.
-Compliance/security sign-off required before E1 (PHI/PII crosses to new vendor).
 
 ## WordPress publishing
 
