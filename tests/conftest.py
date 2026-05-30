@@ -60,15 +60,16 @@ def apply_migrations(postgres_url):
         re.MULTILINE,
     )
 
+    baseline = _STRIP.sub(
+        "",
+        Path("supabase/migrations/20260528131043_baseline.sql").read_text(),
+    )
+    seed = Path("supabase/seed.sql").read_text()
+
     async def _bootstrap() -> None:
         url = postgres_url.replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(url)
         try:
-            baseline = _STRIP.sub(
-                "",
-                Path("supabase/migrations/20260528131043_baseline.sql").read_text(),
-            )
-            seed = Path("supabase/seed.sql").read_text()
             await conn.execute(baseline)
             await conn.execute(seed)
         finally:
