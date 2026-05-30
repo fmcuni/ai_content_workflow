@@ -122,7 +122,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings = get_settings()
     if is_configured(settings):
-        await init_runtime(app, settings)
+        # Never let a transient dependency hiccup (WordPress/DB unreachable at
+        # launch) crash the lifespan: that would exit uvicorn and leave the
+        # desktop shell pointing at a vanished backend with no recourse. Bind
+        # the port regardless and surface the failure via logs + a degraded
+        # state, so the frontend gate's polling can recover once deps return.
+        try:
+            await init_runtime(app, settings)
+        except Exception:
+            logger.exception("runtime init failed at startup; serving in degraded state")
+            app.state.configured = False
     else:
         logger.info("awaiting setup: credentials not configured")
 
