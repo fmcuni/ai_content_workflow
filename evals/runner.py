@@ -1,10 +1,15 @@
 import asyncio
 import subprocess
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from content_tool.db.models import Eval
+
+# Judge only the most-recent N published runs per nightly run, and skip runs that
+# already have judge scores — bounds the recurring Gemini cost.
+JUDGE_RUN_LIMIT = 5
 
 
 def current_commit_sha() -> str:
@@ -34,16 +39,20 @@ async def record_eval(
 
 
 async def main() -> None:
-    """Run reference evals against last 30 runs and emit results to content_tool.evals."""
+    """Run reference + LLM-judge evals against recent published runs; emit to content_tool.evals."""
     from sqlalchemy import select
 
+    from content_tool import prompts_store
     from content_tool.config import get_settings
     from content_tool.db.connection import make_engine, make_session_factory
     from content_tool.db.models import Citation, Draft, Run
+    from content_tool.gemini.client import RealGeminiClient
+    from evals.judges import JUDGE_METRICS, gather_inputs, score_run
 
     settings = get_settings()
     engine = make_engine(settings.postgres_url)
     sf = make_session_factory(engine)
+    prompts_store.configure(sf)  # judge prompts are DB-backed
 
     async with sf() as session:
         runs = (await session.execute(
@@ -73,6 +82,28 @@ async def main() -> None:
             await record_eval(sf, metric="refine_loop_convergence",
                               fixture_id=str(r.run_id), score=1.0 if converged else 0.0,
                               passed=converged, run_id=r.run_id)
+
+    # LLM-judge pass — bounded to the most recent runs, skipping already-judged ones.
+    assert settings.gemini_api_key, "GEMINI_API_KEY is required for the LLM-judge pass"
+    gemini = RealGeminiClient(
+        api_key=settings.gemini_api_key, model=settings.gemini_model, thinking_level="low"
+    )
+    for r in runs[:JUDGE_RUN_LIMIT]:
+        ctx: dict[str, Any] | None = None
+        async with sf() as session:
+            already = (await session.execute(
+                select(Eval.eval_id)
+                .where(Eval.run_id == r.run_id, Eval.metric.in_(JUDGE_METRICS))
+                .limit(1)
+            )).first()
+            if already is not None:
+                continue
+            ctx = await gather_inputs(session, str(r.run_id))
+        if ctx is None:
+            continue
+        for metric, score, passed, notes in await score_run(gemini, ctx):
+            await record_eval(sf, metric=metric, fixture_id=str(r.run_id),
+                              score=score, passed=passed, judge_notes=notes, run_id=r.run_id)
 
     await engine.dispose()
 

@@ -19,8 +19,13 @@ jobs:
       # (the only place real runs exist). Schema is owned by Supabase migrations,
       # not Alembic (retired), so there is no migration step here. Requires the
       # POSTGRES_URL repo secret = the prod Supabase connection string.
+      # GEMINI_API_KEY powers the LLM-judge pass (brand_voice / hk_localisation /
+      # citation_alignment / coverage) over the most recent published runs. The
+      # plain AI Studio API is geo-blocked from some datacenters; GitHub's
+      # US-hosted runners reach it fine (unlike the HK Cloudflare colo).
       - env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           source .venv/bin/activate
           python -m evals.runner
