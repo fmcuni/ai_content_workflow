@@ -1,0 +1,9 @@
+# Copy to `.dev.vars` for `wrangler dev`; in production set via `wrangler secret put`.
+# Never commit .dev.vars.
+#
+# IMPORTANT: use the plain `postgresql://` scheme here (NOT `postgresql+asyncpg://`
+# — that dialect prefix is for the Python app; the `pg` driver rejects it).
+# Use the Supabase SESSION-mode pooler (reachable over the public internet),
+# never the transaction-mode pooler on port 6543.
+POSTGRES_URL="postgresql://<user>:<password>@<project>.pooler.supabase.com:5432/postgres?sslmode=require"
+GEMINI_API_KEY="<your-gemini-api-key>"

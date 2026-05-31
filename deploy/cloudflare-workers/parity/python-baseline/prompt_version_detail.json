@@ -1,0 +1,1 @@
+{"note":"prompt_versions table is empty in dev — no editor saves have been made yet. Shape when populated: {\"version_id\":\"<uuid>\",\"template_id\":\"audit\",\"sha256\":\"<hex64>\",\"parent_sha256\":null,\"body\":\"<template body>\",\"bytes\":<int>,\"saved_by\":\"<email>\",\"saved_at\":\"<ISO-8601 timestamptz>\",\"kind\":\"save\"}"}

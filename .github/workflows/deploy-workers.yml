@@ -1,0 +1,84 @@
+name: Deploy Workers
+
+# Deploys the Workers-native stack to Cloudflare on push to main.
+#
+# This replaces the retired "Worker + 2 Containers" stack (the old
+# deploy-cloudflare.yml + Dockerfile.cf-backend/.cf-frontend). The Python
+# backend in content_tool/ is NOT deployed here — it remains for the desktop
+# Tauri sidecar, the evals, and local dev. The production backend is now the
+# TypeScript Worker in deploy/cloudflare-workers/.
+#
+# Two Workers are deployed on the personal Cloudflare account (fmc.workers.dev):
+#   - Backend  : bowtie-content-tool-poc  (deploy/cloudflare-workers/)
+#   - Frontend : bowtie-content-tool-web  (web/, OpenNext)
+#
+# Required repo secrets (same names the retired workflow used; they already
+# target the fmc account):
+#   CLOUDFLARE_API_TOKEN   — token with Workers Scripts edit
+#   CLOUDFLARE_ACCOUNT_ID  — target Cloudflare account id
+# wrangler reads both from the environment automatically.
+#
+# Runtime secrets (POSTGRES_URL / GEMINI_API_KEY / WP_*) are NOT synced here.
+# They are set once per Worker via `wrangler secret put` and are preserved
+# across `wrangler deploy` runs.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/cloudflare-workers/**"
+      - "web/**"
+      - "config/**"
+      - "prompts/**"
+      - ".github/workflows/deploy-workers.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-workers
+  cancel-in-progress: false
+
+jobs:
+  deploy-backend:
+    name: Deploy backend Worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: deploy/cloudflare-workers
+        run: npm ci
+
+      - name: Deploy backend Worker (bowtie-content-tool-poc)
+        working-directory: deploy/cloudflare-workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+  deploy-frontend:
+    name: Deploy frontend Worker
+    runs-on: ubuntu-latest
+    # Deploy the frontend after the backend so the API it points at is live.
+    needs: deploy-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Deploy frontend Worker (bowtie-content-tool-web)
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT_PUBLIC_API_BASE: https://bowtie-content-tool-poc.fmc.workers.dev
+        run: npm run cf:deploy

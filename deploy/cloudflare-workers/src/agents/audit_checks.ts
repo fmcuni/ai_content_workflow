@@ -1,0 +1,125 @@
+/**
+ * Deterministic audit checks — TypeScript port of
+ * `content_tool/agents/audit_checks.py` (`run_deterministic_checks`).
+ *
+ * These are the PIPELINE audit's format checks invoked by the audit node
+ * (content_tool/agents/audit.py → run_deterministic_checks). They are NOT the
+ * refresh scanner's published-HTML checks (det-link-broken / det-old-year).
+ *
+ * Each finding's id, category, severity, location, issue, suggested_fix and
+ * must_fix are reproduced byte-for-byte from the Python source so the prompt
+ * fed to Gemini and the persisted rows stay identical across runtimes.
+ */
+
+import type { AuditFinding } from "./schemas";
+
+export interface DeterministicChecksInput {
+  htmlBody: string;
+  citationsDeniedDisplayed: boolean;
+  schemaJsonld: object[] | null;
+}
+
+// Shortcode presence regexes — mirror the Python `re.search` patterns exactly.
+const ADV_PANEL_RE = /\[adv_panel id="\d+"\]/;
+const PAGE_WIDGET_RE = /\[page_widget id="\d+"\]/;
+
+const SOURCES_MARKER = "<h2>資訊來源</h2>";
+const FAQ_WIDGET_MARKER = 'class="editor__item editor__faq"';
+
+/**
+ * Run the pipeline format/citation deterministic checks against a rendered
+ * draft. Returns the findings in the SAME ORDER the Python source appends them
+ * (adv → widget → sources → faq → jsonld → cite-denied).
+ */
+export function runDeterministicChecks(input: DeterministicChecksInput): AuditFinding[] {
+  const { htmlBody, citationsDeniedDisplayed, schemaJsonld } = input;
+  const findings: AuditFinding[] = [];
+
+  if (!ADV_PANEL_RE.test(htmlBody)) {
+    findings.push({
+      id: "det-fmt-adv",
+      category: "format",
+      severity: "high",
+      location: "body",
+      issue: "缺少 [adv_panel id=...] shortcode",
+      suggested_fix: "在首段後加入 adv_panel shortcode",
+      must_fix: true,
+    });
+  }
+
+  if (!PAGE_WIDGET_RE.test(htmlBody)) {
+    findings.push({
+      id: "det-fmt-widget",
+      category: "format",
+      severity: "high",
+      location: "body",
+      issue: "缺少 [page_widget id=...] shortcode",
+      suggested_fix: "在常見問題前加入 page_widget shortcode",
+      must_fix: true,
+    });
+  }
+
+  if (!htmlBody.includes(SOURCES_MARKER)) {
+    findings.push({
+      id: "det-fmt-sources",
+      category: "format",
+      severity: "high",
+      location: "tail",
+      issue: "缺少 <h2>資訊來源</h2> section",
+      suggested_fix: "確保 resolve_citations 已產生資訊來源 section",
+      must_fix: true,
+    });
+  }
+
+  if (!htmlBody.includes(FAQ_WIDGET_MARKER)) {
+    findings.push({
+      id: "det-fmt-faq",
+      category: "format",
+      severity: "high",
+      location: "tail",
+      issue: "缺少 Bowtie FAQ widget div",
+      suggested_fix: "render_html 必須輸出 editor__faq 結構",
+      must_fix: true,
+    });
+  }
+
+  // FAQ JSON-LD is delivered OUT-OF-BAND (schema_jsonld → post meta → schema
+  // filter → <head>), so we don't look for a <script> in the body. Instead:
+  // whenever the visible FAQ widget is present, the schema graph must carry a
+  // matching FAQPage piece.
+  const hasFaqWidget = htmlBody.includes(FAQ_WIDGET_MARKER);
+  const hasFaqPage = (schemaJsonld ?? []).some(
+    (p) => isRecord(p) && p["@type"] === "FAQPage",
+  );
+  if (hasFaqWidget && !hasFaqPage) {
+    findings.push({
+      id: "det-fmt-jsonld",
+      category: "format",
+      severity: "high",
+      location: "head",
+      issue: "FAQ widget 存在但 schema_jsonld 缺少 FAQPage",
+      suggested_fix:
+        "render_html 必須輸出 FAQPage 至 schema_jsonld (經 post meta 交付, 不再注入 body)",
+      must_fix: true,
+    });
+  }
+
+  if (citationsDeniedDisplayed) {
+    findings.push({
+      id: "det-cite-denied",
+      category: "citation",
+      severity: "high",
+      location: "資訊來源",
+      issue: "顯示了被 policy 拒絕的來源",
+      suggested_fix: "改用 GOV / EDU 等高可信來源",
+      must_fix: true,
+    });
+  }
+
+  return findings;
+}
+
+/** Narrow an unknown schema graph entry to a plain object before reading @type. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

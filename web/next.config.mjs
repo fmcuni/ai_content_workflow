@@ -18,10 +18,18 @@ function buildDate() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Build target switch. The default build emits a self-contained `standalone`
+// server for the desktop (Tauri) frontend sidecar. The Cloudflare Workers build
+// (`npm run cf:build`, which sets WEB_BUILD_TARGET=cloudflare) must NOT use
+// standalone output — the OpenNext adapter consumes the regular `.next` build
+// and produces its own Worker bundle.
+const isCloudflare = process.env.WEB_BUILD_TARGET === "cloudflare";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Self-contained server build for the desktop (Tauri) frontend sidecar.
-  output: "standalone",
+  // Omitted for the Cloudflare build (OpenNext bundles the Worker itself).
+  output: isCloudflare ? undefined : "standalone",
   // Root the file-tracing at this web dir so standalone output lands at
   // .next/standalone/server.js. Without this, the repo's parent lockfiles make
   // Next root the trace higher up and nest server.js under the repo path.
@@ -31,21 +39,37 @@ const nextConfig = {
     NEXT_PUBLIC_BUILD_DATE: buildDate(),
   },
   async rewrites() {
+    // Exact (bare-collection) rules come first for every endpoint the app calls
+    // without a sub-path. `:path*` matches the bare path too but emits a trailing
+    // slash (`/personas/`), which the backend's router rejects (and would
+    // 307-redirect a POST, dropping its body — e.g. POST /api/runs to create a run).
     return [
-      // Exact rule first so POST /api/setup maps to /setup (not /setup/, which
-      // would 307-redirect and risk dropping the POST body).
       { source: "/api/setup", destination: `${apiBase}/setup` },
       { source: "/api/setup/:path*", destination: `${apiBase}/setup/:path*` },
+      { source: "/api/runs", destination: `${apiBase}/runs` },
       { source: "/api/runs/:path*", destination: `${apiBase}/runs/:path*` },
       { source: "/api/costs/:path*", destination: `${apiBase}/costs/:path*` },
       { source: "/api/health", destination: `${apiBase}/health` },
+      { source: "/api/articles", destination: `${apiBase}/articles` },
       { source: "/api/articles/:path*", destination: `${apiBase}/articles/:path*` },
+      { source: "/api/refresh", destination: `${apiBase}/refresh` },
       { source: "/api/refresh/:path*", destination: `${apiBase}/refresh/:path*` },
       { source: "/api/wp-options/:path*", destination: `${apiBase}/wp-options/:path*` },
+      { source: "/api/personas", destination: `${apiBase}/personas` },
       { source: "/api/personas/:path*", destination: `${apiBase}/personas/:path*` },
+      { source: "/api/prompts", destination: `${apiBase}/prompts` },
       { source: "/api/prompts/:path*", destination: `${apiBase}/prompts/:path*` },
+      { source: "/api/topic-batches", destination: `${apiBase}/topic-batches` },
       { source: "/api/topic-batches/:path*", destination: `${apiBase}/topic-batches/:path*` },
     ];
   },
 };
 export default nextConfig;
+
+// Wire local Cloudflare bindings into `next dev` so server code can read them
+// during development. Inert in production builds; guarded to dev so it never
+// touches the Tauri `standalone` build.
+if (process.env.NODE_ENV !== "production") {
+  const { initOpenNextCloudflareForDev } = await import("@opennextjs/cloudflare");
+  initOpenNextCloudflareForDev();
+}
