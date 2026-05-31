@@ -50,7 +50,10 @@ jobs:
 
       - name: Install dependencies
         working-directory: deploy/cloudflare-workers
-        run: npm ci
+# npm install (not ci): the lockfile is generated on macOS and omits the
+        # linux-only optional native deps (@emnapi/*), so strict `npm ci` fails on
+        # the ubuntu runner. install resolves the platform deps at deploy time.
+        run: npm install --no-audit --no-fund
 
       - name: Deploy backend Worker (bowtie-content-tool-poc)
         working-directory: deploy/cloudflare-workers
@@ -73,7 +76,10 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+# npm install (not ci): the lockfile is generated on macOS and omits the
+        # linux-only optional native deps (@emnapi/*), so strict `npm ci` fails on
+        # the ubuntu runner. install resolves the platform deps at deploy time.
+        run: npm install --no-audit --no-fund
 
       - name: Deploy frontend Worker (bowtie-content-tool-web)
         working-directory: web
