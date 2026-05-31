@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
-import { listPersonas, getPersonaBySlug } from "../db/personas";
+import { listPersonas, getPersonaBySlug, getPersonaUsage } from "../db/personas";
 
 const personasRouter = new Hono<{ Bindings: Env }>();
 
@@ -17,6 +17,29 @@ personasRouter.get("/", async (c) => {
     listPersonas(sql, includeArchived),
   );
   return c.json(personas);
+});
+
+// GET /personas/:slug/usage
+// Per-status run counts for the persona, mirroring the Python PersonaUsage
+// model: { slug, by_status, total }. 404 (persona not found) if the slug does
+// not resolve — matching Python, which loads the persona first.
+//
+// Registered BEFORE /:slug so Hono's order-sensitive matcher does not let the
+// /:slug catch-all shadow this more specific route.
+personasRouter.get("/:slug/usage", async (c) => {
+  const slug = c.req.param("slug");
+  const ctx = c.executionCtx as ExecutionContext;
+  const usage = await withDb(c.env, ctx, async (sql) => {
+    const persona = await getPersonaBySlug(sql, slug);
+    if (persona === null) {
+      return null;
+    }
+    return getPersonaUsage(sql, slug);
+  });
+  if (usage === null) {
+    return c.json({ detail: "persona not found" }, 404);
+  }
+  return c.json(usage);
 });
 
 // GET /personas/:slug

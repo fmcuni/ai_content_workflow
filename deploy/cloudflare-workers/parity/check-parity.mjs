@@ -140,6 +140,13 @@ async function buildEndpoints() {
     },
   });
 
+  // --- prompt graph (static in-memory topology; default mode=refresh) ---
+  endpoints.push({
+    name: "prompt_graph",
+    path: "/prompts/graph?mode=refresh",
+    note: "static LangGraph topology — must deep-equal between PY and TS",
+  });
+
   // --- prompt templates (list) ---
   endpoints.push({
     name: "prompt_templates",
@@ -183,8 +190,15 @@ async function buildEndpoints() {
       path: `/personas/${encodeURIComponent(personaSlug)}`,
       note: `id=${personaSlug}`,
     });
+    // persona_usage — per-status run counts for the same discovered slug.
+    endpoints.push({
+      name: "persona_usage",
+      path: `/personas/${encodeURIComponent(personaSlug)}/usage`,
+      note: `id=${personaSlug}`,
+    });
   } else {
     endpoints.push({ name: "persona_detail", skip: "no persona slug discoverable" });
+    endpoints.push({ name: "persona_usage", skip: "no persona slug discoverable" });
   }
 
   // article_detail — by article_id.

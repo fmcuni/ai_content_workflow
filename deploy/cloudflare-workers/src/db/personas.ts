@@ -76,6 +76,52 @@ export async function listPersonas(
   return rows.map(normaliseRow);
 }
 
+// Shape returned by GET /personas/:slug/usage — mirrors the Python
+// `PersonaUsage` model (slug, by_status map, total).
+export interface PersonaUsage {
+  slug: string;
+  by_status: Record<string, number>;
+  total: number;
+}
+
+interface StatusCountRow {
+  // COUNT() arrives as a STRING under `fetch_types: false`; coerce to number.
+  status: string;
+  n: string | number;
+}
+
+/**
+ * Return per-status run counts for a persona, mirroring the Python
+ * `/personas/{slug}/usage` aggregation:
+ *
+ *   SELECT status, COUNT(*) FROM runs WHERE persona = :slug GROUP BY status
+ *
+ * `total` is the sum of all per-status counts. COUNT() comes back as a STRING
+ * under `fetch_types: false`, so every count is coerced through Number() before
+ * arithmetic — never string-concatenated.
+ */
+export async function getPersonaUsage(
+  sql: ReturnType<typeof getSql>,
+  slug: string,
+): Promise<PersonaUsage> {
+  const rows = await sql<StatusCountRow[]>`
+    SELECT status, COUNT(*) AS n
+    FROM content_tool.runs
+    WHERE persona = ${slug}
+    GROUP BY status
+  `;
+
+  const byStatus: Record<string, number> = {};
+  let total = 0;
+  for (const row of rows) {
+    const count = typeof row.n === "string" ? Number(row.n) : row.n;
+    byStatus[row.status] = count;
+    total += count;
+  }
+
+  return { slug, by_status: byStatus, total };
+}
+
 /**
  * Return a single persona by slug, or null if not found.
  */

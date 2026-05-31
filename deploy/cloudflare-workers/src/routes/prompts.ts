@@ -3,13 +3,13 @@
 // Mounted at /prompts in src/index.ts. All paths here are RELATIVE to that mount.
 //
 // Implemented:
+//   GET /graph                  — static LangGraph topology by entry mode
 //   GET /templates              — list editable templates (agent + partial), no body
 //   GET /templates/:id          — full template detail
 //   GET /templates/:id/history  — version history, newest-first, body omitted
 //   GET /templates/:id/versions/:versionId — single version with body
 //
-// DEFERRED (depend on in-memory PROMPT_GRAPHS / prompt-graph registry, ported later):
-//   GET /graph
+// DEFERRED (ported later):
 //   GET /user-example
 //   GET /templates/:id/schema
 //   GET /templates/:id/consumers
@@ -17,6 +17,7 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
+import { getPromptGraph } from "../config/prompt_graph";
 import {
   listTemplates,
   getTemplate,
@@ -24,11 +25,30 @@ import {
   getVersion,
 } from "../db/prompts";
 
+const DEFAULT_GRAPH_MODE = "refresh";
+
 const DEFAULT_HISTORY_LIMIT = 50;
 const MIN_HISTORY_LIMIT = 1;
 const MAX_HISTORY_LIMIT = 200;
 
 export const promptsRouter = new Hono<{ Bindings: Env }>();
+
+// ---------------------------------------------------------------------------
+// GET /graph?mode=<mode>
+//
+// Returns the static LangGraph topology for the given entry mode. `mode`
+// defaults to "refresh"; an unknown mode mirrors Python's 404 with the
+// `unknown graph mode '<mode>'` detail message. No DB access — the registry is
+// an in-memory constant (src/config/prompt_graph.ts).
+// ---------------------------------------------------------------------------
+promptsRouter.get("/graph", (c) => {
+  const mode = c.req.query("mode") ?? DEFAULT_GRAPH_MODE;
+  const graph = getPromptGraph(mode);
+  if (graph === null) {
+    return c.json({ detail: `unknown graph mode '${mode}'` }, 404);
+  }
+  return c.json(graph);
+});
 
 // ---------------------------------------------------------------------------
 // GET /templates
