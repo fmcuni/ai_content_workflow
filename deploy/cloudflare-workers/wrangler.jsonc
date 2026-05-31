@@ -1,0 +1,99 @@
+{
+	// Workers-native PoC for the Bowtie AI Content Tool backend.
+	//
+	// Proves the two hard unknowns of a Workers re-platform on the FREE plan:
+	//   1. Postgres (Supabase) from a Worker via `pg` over TCP sockets (nodejs_compat)
+	//   2. Long-running, multi-step LLM work as a Cloudflare Workflow, streaming
+	//      progress to the browser via a Durable Object (SSE)
+	//
+	// No containers, no paid plan. The DB stays on Supabase.
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "bowtie-content-tool-poc",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-30",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true
+	},
+	"workflows": [
+		{
+			"name": "production",
+			"binding": "PRODUCTION",
+			"class_name": "ProductionWorkflow"
+		},
+		{
+			"name": "topic-expansion",
+			"binding": "TOPIC_EXPANSION",
+			"class_name": "TopicExpansionWorkflow"
+		},
+		{
+			"name": "refresh-scan",
+			"binding": "REFRESH_SCAN",
+			"class_name": "RefreshScanWorkflow"
+		}
+	],
+	// Cron Trigger (free plan) — periodic refresh scan (CMS Stage 0). Daily 02:00 UTC.
+	// The scheduled() handler in src/index.ts kicks the REFRESH_SCAN Workflow.
+	"triggers": {
+		"crons": [
+			"0 2 * * *"
+		]
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "RUN_STREAM",
+				"class_name": "RunStream"
+			},
+			// US-pinned proxy DO — DoGeminiClient forwards Gemini calls here so they
+			// egress from a US region (Google AI Studio geo-blocks the Asia/HK colo).
+			{
+				"name": "GEMINI_PROXY",
+				"class_name": "GeminiProxy"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"RunStream"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"GeminiProbe"
+			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"GeminiProxy"
+			]
+		},
+		// Phase 9 cutover — drop the test-only GeminiProbe DO (append-only).
+		{
+			"tag": "v4",
+			"deleted_classes": [
+				"GeminiProbe"
+			]
+		}
+	],
+	// Non-secret. POSTGRES_URL and GEMINI_API_KEY are set via `wrangler secret put`.
+	"vars": {
+		"GEMINI_MODEL": "gemini-3.1-pro-preview",
+		// SSE CORS allow-origin: the deployed frontend Worker (browser-direct SSE to
+		// /runs/:id/events and /topic-batches/:id/events). REST goes via Next rewrites
+		// (server-side, no CORS). See src/http/cors.ts.
+		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev"
+	},
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "58b74deb12184195a83526e6b7040a32"
+		}
+	]
+}

@@ -66,6 +66,27 @@ npm run dev
 
 Backend must be running on http://localhost:8000.
 
+## Deployment (production)
+
+Production runs on a **Workers-native** Cloudflare stack (the database stays on
+Supabase). The Python backend here is still used for the desktop Tauri sidecar,
+the evals suite, and local dev — it is just not the production hosting path.
+
+| Component | Service | URL |
+|---|---|---|
+| Backend (TypeScript Worker — Hono + Workflows + Durable Objects, DB via Hyperdrive) | `bowtie-content-tool-poc` | https://bowtie-content-tool-poc.fmc.workers.dev |
+| Frontend (Next.js via `@opennextjs/cloudflare`) | `bowtie-content-tool-web` | https://bowtie-content-tool-web.fmc.workers.dev |
+
+- **CI:** `.github/workflows/deploy-workers.yml` deploys both Workers to the
+  personal `fmc` Cloudflare account on push to `main`.
+- **Backend source + deploy runbook:** [`deploy/cloudflare-workers/README.md`](deploy/cloudflare-workers/README.md)
+- **Frontend deploy:** `cd web && npm run cf:deploy` (see [`web/README.md`](web/README.md))
+- **Design docs:** spec `docs/superpowers/specs/2026-05-31-workers-native-backend-design.md`,
+  plan `docs/superpowers/plans/2026-05-31-workers-native-backend.md`.
+
+This replaced the retired "Worker + 2 Containers" stack (formerly `deploy/cloudflare/`,
+`Dockerfile.cf-*`, `.github/workflows/deploy-cloudflare.yml` — all removed).
+
 ## WordPress smoke test (staging)
 
 1. Set up an Application Password for your WP user at:

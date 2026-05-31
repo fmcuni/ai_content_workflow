@@ -1,0 +1,35 @@
+{
+  // Cloudflare Worker for the Bowtie AI Content Tool frontend (Next.js 16 via
+  // the OpenNext adapter). Built with `npm run cf:build`; deployed with
+  // `npm run cf:deploy`. Free-plan, no Containers.
+  //
+  // Request model:
+  //   - REST: the app calls relative `/api/*` paths; Next `rewrites()`
+  //     (next.config.mjs) proxy them to the backend Worker (NEXT_PUBLIC_API_BASE).
+  //   - SSE:  the browser opens `${NEXT_PUBLIC_API_BASE}/runs/:id/events` and
+  //     `/topic-batches/:id/events` DIRECTLY against the backend Worker, which
+  //     now returns CORS headers (see deploy/cloudflare-workers/src/http/cors.ts).
+  //
+  // NEXT_PUBLIC_API_BASE is a build-time public var (inlined into the bundle),
+  // so it is NOT set here — pass it when building, e.g.
+  //   NEXT_PUBLIC_API_BASE=https://bowtie-content-tool.<acct>.workers.dev npm run cf:deploy
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bowtie-content-tool-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-30",
+  "compatibility_flags": [
+    // Node.js APIs used by the Next.js server runtime under OpenNext.
+    "nodejs_compat",
+    // Let `fetch()` reach public URLs (the backend Worker) rather than looping
+    // back internally — required for the `/api/*` rewrite proxy to egress.
+    "global_fetch_strictly_public"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  // Static assets (Next build output) served by the Worker.
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  }
+}

@@ -8,24 +8,19 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: content_tool
-          POSTGRES_PASSWORD: content_tool
-          POSTGRES_DB: content_tool
-        ports: ["5432:5432"]
-        options: --health-cmd "pg_isready -U content_tool"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
       - run: uv venv && uv pip install -e ".[dev]"
+      # Evals read the last 30 *published* runs and write results to
+      # content_tool.evals — so they must run against the production Supabase DB
+      # (the only place real runs exist). Schema is owned by Supabase migrations,
+      # not Alembic (retired), so there is no migration step here. Requires the
+      # POSTGRES_URL repo secret = the prod Supabase connection string.
       - env:
-          POSTGRES_URL: postgresql+asyncpg://content_tool:content_tool@localhost:5432/content_tool
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
         run: |
           source .venv/bin/activate
-          alembic upgrade head
           python -m evals.runner

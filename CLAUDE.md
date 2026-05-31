@@ -51,11 +51,34 @@ prompts/             LLM prompt templates (.md)
 supabase/migrations/ Supabase migration files (baseline + future changes)
 supabase/seed.sql    Seed data (personas)
 web/                 Next.js 16 frontend (see web/AGENTS.md before editing)
+deploy/cloudflare-workers/  Production hosting: TypeScript port of the backend as a
+                     Cloudflare Worker (Hono + Workflows + Durable Objects, DB via
+                     postgres.js over Hyperdrive). See its README + AGENTS notes.
 docs/superpowers/    specs/ and plans/ — design docs per feature, dated
 evals/               LLM-judge evals + fixtures (nightly cron + PR label trigger)
 tests/{unit,integration,fixtures}
 scripts/             Cron entrypoints (e.g. refresh_scan)
 ```
+
+## Deployment (production)
+
+Production runs the **Workers-native TypeScript port**, not the Python backend:
+
+| Service | Source | URL |
+|---|---|---|
+| Backend | `deploy/cloudflare-workers/` (`bowtie-content-tool-poc`) | `https://bowtie-content-tool-poc.fmc.workers.dev` |
+| Frontend | `web/` via `@opennextjs/cloudflare` (`bowtie-content-tool-web`) | `https://bowtie-content-tool-web.fmc.workers.dev` |
+
+- CI: `.github/workflows/deploy-workers.yml` deploys both to the `fmc` Cloudflare
+  account on push to `main` (secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).
+  Runtime secrets (`POSTGRES_URL`, `GEMINI_API_KEY`, `WP_*`) are set once via
+  `wrangler secret put` and preserved across deploys.
+- The Python backend (`content_tool/`) is **retained** — it is the desktop Tauri
+  app's bundled sidecar, runs the `evals/` suite, and is used for local dev. It is
+  no longer the production hosting path. (The old Worker+Containers stack —
+  `deploy/cloudflare/`, `Dockerfile.cf-*` — was retired.)
+- Parity gate: `node deploy/cloudflare-workers/parity/check-parity.mjs` diffs the TS
+  backend against the Python reference over read-only routes.
 
 ## Architecture
 
@@ -105,7 +128,12 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
 ## Supabase
 
 **Managed Postgres only** — no PostgREST, no Supabase Auth, no `supabase-js`.
-SQLAlchemy/asyncpg owns all data access.
+SQLAlchemy/asyncpg owns all data access for the Python backend.
+
+**Workers-native backend** (`deploy/cloudflare-workers/`) uses `postgres.js` through
+Cloudflare Hyperdrive (`{ max: 5, fetch_types: false }`) instead of SQLAlchemy/asyncpg —
+still a direct SQL connection to the same Supabase DB; no PostgREST, Data API, or
+`supabase-js` is introduced.
 
 **Schema:** `content_tool` (not `public`) — not auto-exposed to PostgREST/Data API.
 RLS is enabled on all tables as defense in depth; app connects via the dedicated
