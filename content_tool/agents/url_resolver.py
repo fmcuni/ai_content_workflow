@@ -58,7 +58,16 @@ class UrlResolver:
                       "expires_at": datetime.now(UTC) + self._ttl},
             )
             await self._session.execute(stmt)
-            await self._session.commit()
+            # flush (not commit): resolve() runs inside the caller's transaction
+            # (resolve_citations accumulates Citation rows across the grounding
+            # loop and commits once at the end). Committing here would prematurely
+            # persist earlier iterations' Citations, so a later failure could leave
+            # a partial, un-rollback-able write. flush makes the cache row visible
+            # to subsequent lookups within this transaction while leaving the
+            # commit boundary to the caller. Mirrors the Workers port, where the
+            # cache upsert and citation inserts are separate statements that only
+            # land together when the surrounding step succeeds.
+            await self._session.flush()
             return ResolvedUrl(vertex_uri, final, domain, error)
         finally:
             if own:
