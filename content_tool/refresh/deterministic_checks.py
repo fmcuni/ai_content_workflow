@@ -5,7 +5,7 @@ import asyncio
 import itertools
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 import httpx
@@ -110,7 +110,7 @@ async def check_broken_links(html: str, client: httpx.AsyncClient | None = None)
 
 def check_dated_phrasing(html: str, now: datetime | None = None) -> list[Finding]:
     cfg = get_refresh_config()["deterministic"]
-    now = now or datetime.now()
+    now = now or datetime.now(UTC)
     lookback = cfg["dated_phrasing_year_lookback"]
     threshold_year = now.year - lookback
     findings: list[Finding] = []
