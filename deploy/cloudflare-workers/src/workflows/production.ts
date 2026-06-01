@@ -266,7 +266,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       await this.setStatus(runId, "strategy");
       await step.do("outline", async () =>
         this.withSql(async (sql) => {
-          const gemini = this.geminiClient();
+          const gemini = this.geminiClient(runId);
           await runOutline(sql, gemini, {
             runId,
             startMode: "create",
@@ -386,7 +386,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     await this.setStatus(runId, "strategy");
     await step.do("gap-analysis", async () =>
       this.withSql(async (sql) => {
-        const gemini = this.geminiClient();
+        const gemini = this.geminiClient(runId);
         await runGapAnalysis(sql, gemini, {
           runId,
           topic: run.topic,
@@ -407,7 +407,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     // --- outline (refresh): gap payload + existing markdown + chosen_route ---
     const chosenRoute = await step.do("outline", async () =>
       this.withSql<string>(async (sql) => {
-        const gemini = this.geminiClient();
+        const gemini = this.geminiClient(runId);
         const gap = await this.loadGapPayload(sql, runId);
         await runOutline(sql, gemini, {
           runId,
@@ -478,7 +478,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       // --- writer ---
       const draftId = await step.do(`writer-${round}-${iteration}`, async () =>
         this.withSql<string>(async (sql) => {
-          const gemini = this.geminiClient();
+          const gemini = this.geminiClient(runId);
           const result = await runWriter(sql, gemini, {
             run: {
               runId,
@@ -555,7 +555,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       // --- audit ---
       const overallPass = await step.do(`audit-${round}-${iteration}`, async () =>
         this.withSql<boolean>(async (sql) => {
-          const gemini = this.geminiClient();
+          const gemini = this.geminiClient(runId);
           const render = await this.loadRenderForAudit(sql, draftId);
           const citationIntents = toObjectArray(
             (await this.loadDraftMarkup(sql, draftId)).citation_intents,
@@ -942,13 +942,19 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     }
   }
 
-  private geminiClient(): GeminiClient {
+  private geminiClient(runId: string): GeminiClient {
     // Route through the US-pinned GeminiProxy DO: a direct call from this colo
     // (Asia/HK) is geo-blocked by Google AI Studio. DoGeminiClient forwards to a
     // DO obtained with locationHint "enam", which egresses a US IP.
+    //
+    // `runId` enables live thought streaming: the proxy POSTs each thought chunk
+    // to this run's RUN_STREAM hub as a `{agent}.thinking` event, so the UI's
+    // "Model thinking" panel fills in during long steps (matches the Python
+    // backend's in-process emitter).
     return new DoGeminiClient(this.env.GEMINI_PROXY, {
       model: this.modelName(),
       thinkingLevel: DEFAULT_THINKING_LEVEL,
+      runId,
     });
   }
 
