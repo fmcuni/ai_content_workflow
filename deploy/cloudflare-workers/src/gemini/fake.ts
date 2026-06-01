@@ -22,21 +22,31 @@ export interface RecordedCall {
 
 export class FakeGeminiClient implements GeminiClient {
   private readonly canned: Record<string, Record<string, unknown>>;
+  // Optional per-agent grounding chunks (e.g. for topic_existing_search, which
+  // harvests groundingChunks rather than the parsed JSON).
+  private readonly cannedGrounding: Record<string, Record<string, unknown>[]>;
   readonly calls: RecordedCall[] = [];
 
-  constructor(cannedResponses: Record<string, Record<string, unknown>>) {
+  constructor(
+    cannedResponses: Record<string, Record<string, unknown>>,
+    cannedGrounding: Record<string, Record<string, unknown>[]> = {},
+  ) {
     this.canned = { ...cannedResponses };
+    this.cannedGrounding = { ...cannedGrounding };
   }
 
   async generate(opts: GenerateOptions): Promise<GeminiResult> {
-    const { agent, systemPrompt, userPrompt, tools } = opts;
+    const { agent, systemPrompt, userPrompt, responseSchema, tools } = opts;
 
     this.calls.push({ agent, systemPrompt, userPrompt, tools });
 
-    const parsed = this.canned[agent];
-    if (parsed === undefined) {
+    const canned = this.canned[agent];
+    // A plain-text call (no schema) need not have a canned JSON body — e.g.
+    // topic_existing_search, where only the grounding chunks matter.
+    if (canned === undefined && responseSchema !== null) {
       throw new Error(`No canned response for agent=${agent}`);
     }
+    const parsed = canned ?? {};
 
     return {
       parsed,
@@ -45,7 +55,7 @@ export class FakeGeminiClient implements GeminiClient {
       tokensOut: FAKE_TOKENS_OUT,
       thinkingTokens: FAKE_THINKING_TOKENS,
       latencyMs: FAKE_LATENCY_MS,
-      groundingChunks: null,
+      groundingChunks: this.cannedGrounding[agent] ?? null,
       finishReason: null,
     };
   }

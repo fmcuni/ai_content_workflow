@@ -100,6 +100,11 @@ class _ConcurrencyTrackingGemini:
                 # Raise on every attempt so the subgraph's retry exhausts.
                 self._fail_counts[topic] = self._fail_counts.get(topic, 0) + 1
                 raise RuntimeError(f"stub: forced failure for topic {topic!r}")
+            elif agent == "topic_existing_search":
+                # Dedup stage 1: grounded retrieval. No grounding chunks here →
+                # zero existing-article candidates (the common return below sets
+                # grounding_chunks=None), so the judge sees an empty list.
+                payload = {}
             elif agent == "topic_dedup":
                 payload = {
                     "existing": "no",

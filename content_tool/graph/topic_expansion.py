@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from content_tool.agents.topic_dedup import run_topic_dedup
 from content_tool.agents.topic_gen import run_topic_gen
 from content_tool.agents.topic_hot import run_topic_hot
+from content_tool.agents.url_resolver import UrlResolver
 from content_tool.db.topic_batch_model import TopicBatch, TopicCandidate
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.topic_batch import (
@@ -250,10 +251,21 @@ def build_topic_expansion_graph(
             hot_input = TopicHotInput(topic=topic, keywords=keywords)
 
             async def _do_dedup() -> TopicDedupOutput:
-                return await _retry_with_backoff(
-                    lambda: run_topic_dedup(gemini=gemini, input=dedup_input),
-                    label="topic_dedup",
-                )
+                # Dedup needs its own session (the stage-1 URL resolver writes to
+                # url_resolution_cache); it must not share one with the hot call
+                # running concurrently under the same gather. A fresh session per
+                # attempt also keeps retries clean. The resolver flushes within
+                # the session; commit here to persist the cache rows it wrote.
+                async def _call() -> TopicDedupOutput:
+                    async with session_factory() as dedup_session:
+                        resolver = UrlResolver(session=dedup_session)
+                        out = await run_topic_dedup(
+                            gemini=gemini, resolve=resolver.resolve, input=dedup_input
+                        )
+                        await dedup_session.commit()
+                        return out
+
+                return await _retry_with_backoff(_call, label="topic_dedup")
 
             async def _do_hot() -> TopicHotOutput:
                 return await _retry_with_backoff(

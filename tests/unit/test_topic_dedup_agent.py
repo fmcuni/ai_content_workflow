@@ -2,59 +2,132 @@
 import pytest
 
 from content_tool.agents.topic_dedup import run_topic_dedup
+from content_tool.agents.url_resolver import ResolvedUrl
 from content_tool.gemini.fake import FakeGeminiClient
 from content_tool.models.topic_batch import TopicDedupInput
 
+# Grounding chunks the retrieval (stage-1) call returns. Each web.uri is a
+# vertexaisearch redirect; the injected resolver maps it to a real URL.
+_GROUNDING = [
+    {"web": {"uri": "vertex://1", "title": "自願醫保比較"}},
+    {"web": {"uri": "vertex://2", "title": "退保須知"}},
+]
+_BT = "https://www.bowtie.com.hk/blog/zh"
+_RESOLVED = {
+    "vertex://1": ResolvedUrl("vertex://1", f"{_BT}/foo", "bowtie.com.hk"),
+    "vertex://2": ResolvedUrl("vertex://2", f"{_BT}/bar", "bowtie.com.hk"),
+}
+
+
+async def _fake_resolve(uri: str) -> ResolvedUrl:
+    return _RESOLVED.get(uri, ResolvedUrl(uri, None, None, "unresolved"))
+
+
+def _client(verdict: dict, grounding=_GROUNDING) -> FakeGeminiClient:
+    return FakeGeminiClient(
+        canned_responses={"topic_dedup": verdict},
+        canned_grounding={"topic_existing_search": grounding},
+    )
+
 
 @pytest.mark.asyncio
-async def test_topic_dedup_returns_existing_verdict():
-    canned = {
+async def test_topic_dedup_returns_grounded_url():
+    # The judge picks a URL that IS in the grounded candidate list.
+    verdict = {
         "existing": "yes",
         "existing_note": "Bowtie blog 已有同題文章。",
         "existing_url": "https://www.bowtie.com.hk/blog/zh/foo",
     }
-    client = FakeGeminiClient(canned_responses={"topic_dedup": canned})
+    client = _client(verdict)
 
     out = await run_topic_dedup(
         gemini=client,
+        resolve=_fake_resolve,
         input=TopicDedupInput(topic="退保須知", keywords=["退保", "cash value"]),
     )
 
     assert out.existing == "yes"
-    assert out.existing_url.startswith("https://www.bowtie.com.hk")
-    assert out.existing_note
+    assert out.existing_url == "https://www.bowtie.com.hk/blog/zh/foo"
 
 
 @pytest.mark.asyncio
-async def test_topic_dedup_passes_grounding_tools():
-    canned = {"existing": "no", "existing_note": "未找到對應文章。", "existing_url": ""}
-    client = FakeGeminiClient(canned_responses={"topic_dedup": canned})
+async def test_two_stage_call_shape():
+    verdict = {"existing": "no", "existing_note": "未找到對應文章。", "existing_url": ""}
+    client = _client(verdict)
 
     await run_topic_dedup(
         gemini=client,
+        resolve=_fake_resolve,
         input=TopicDedupInput(topic="某新題", keywords=["a", "b"]),
     )
 
-    assert len(client.calls) == 1
-    call = client.calls[0]
-    assert call["agent"] == "topic_dedup"
-    assert call["tools"] == ["googleSearch", "urlContext"]
-    assert "topic:\n某新題" in call["user_prompt"]
-    assert "a, b" in call["user_prompt"]
+    # Stage 1 = grounded retrieval (googleSearch); stage 2 = judge (urlContext).
+    assert len(client.calls) == 2
+    search, judge = client.calls
+    assert search["agent"] == "topic_existing_search"
+    assert search["tools"] == ["googleSearch"]
+    assert "topic:\n某新題" in search["user_prompt"]
+    assert judge["agent"] == "topic_dedup"
+    assert judge["tools"] == ["urlContext"]
+    # The judge prompt embeds the real grounded candidate URLs.
+    assert "https://www.bowtie.com.hk/blog/zh/foo" in judge["user_prompt"]
+    assert "a, b" in judge["user_prompt"]
 
 
 @pytest.mark.asyncio
-async def test_topic_dedup_accepts_not_sure():
-    canned = {
-        "existing": "not_sure",
-        "existing_note": "找到近似但非完全對應的文章。",
-        "existing_url": "https://www.bowtie.com.hk/blog/zh/bar",
+async def test_hallucinated_url_is_blanked_and_downgraded():
+    # Judge fabricates a URL NOT in the grounded list → blanked, yes→not_sure.
+    verdict = {
+        "existing": "yes",
+        "existing_note": "聲稱有文章但 URL 是捏造的。",
+        "existing_url": "https://www.bowtie.com.hk/blog/zh/HALLUCINATED",
     }
-    client = FakeGeminiClient(canned_responses={"topic_dedup": canned})
+    client = _client(verdict)
+
     out = await run_topic_dedup(
         gemini=client,
+        resolve=_fake_resolve,
+        input=TopicDedupInput(topic="x", keywords=["k"]),
+    )
+
+    assert out.existing_url == ""
+    assert out.existing == "not_sure"
+
+
+@pytest.mark.asyncio
+async def test_no_grounded_candidates_renders_empty_list():
+    verdict = {"existing": "no", "existing_note": "搜尋不到。", "existing_url": ""}
+    client = _client(verdict, grounding=[])
+
+    out = await run_topic_dedup(
+        gemini=client,
+        resolve=_fake_resolve,
         input=TopicDedupInput(topic="x", keywords=[]),
     )
-    assert out.existing == "not_sure"
+
+    assert out.existing == "no"
+    judge = client.calls[1]
+    assert "候選文章：（無，搜尋不到相關文章）" in judge["user_prompt"]
     # Empty-keywords path renders 「（無）」 in the user prompt.
-    assert "focus_keywords:\n（無）" in client.calls[0]["user_prompt"]
+    assert "focus_keywords:\n（無）" in judge["user_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_non_bowtie_grounding_is_filtered_out():
+    # A grounded chunk resolving to a non-bowtie domain must not become a candidate.
+    grounding = [{"web": {"uri": "vertex://x", "title": "外站"}}]
+
+    async def resolve(uri: str) -> ResolvedUrl:
+        return ResolvedUrl(uri, "https://example.com/post", "example.com")
+
+    verdict = {"existing": "no", "existing_note": "只有外站結果。", "existing_url": ""}
+    client = _client(verdict, grounding=grounding)
+
+    out = await run_topic_dedup(
+        gemini=client,
+        resolve=resolve,
+        input=TopicDedupInput(topic="x", keywords=["k"]),
+    )
+
+    assert out.existing == "no"
+    assert "候選文章：（無，搜尋不到相關文章）" in client.calls[1]["user_prompt"]
