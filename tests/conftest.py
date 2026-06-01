@@ -52,15 +52,22 @@ def apply_migrations(postgres_url):
     # supabase/migrations/<ts>_baseline.sql).
     if os.environ.get("EXTERNAL_POSTGRES_URL"):
         return
-    # Apply baseline migration + seed directly for the testcontainers path.
-    # Strip psql meta-commands (\restrict / \unrestrict) and Supabase-only
-    # extensions that don't exist in a plain postgres:16 image.
+    # Apply every migration in supabase/migrations/ (sorted) + seed directly for
+    # the testcontainers path. Applying the full set — not just the baseline —
+    # keeps the testcontainers schema in lockstep with `supabase db reset`, so a
+    # new migration (e.g. an added column) is picked up automatically instead of
+    # silently going missing here and breaking integration tests in CI.
     # Strip statements that only make sense on a real Supabase instance and
     # break on a plain postgres:16 image: psql meta-commands (\restrict /
-    # \unrestrict), Supabase-only extensions, and the supabase_realtime
-    # publication (which Supabase pre-creates but a bare image does not).
+    # \unrestrict), Supabase-only extensions, the supabase_realtime publication
+    # (which Supabase pre-creates but a bare image does not), and DB-scoped
+    # `ALTER ROLE ... IN DATABASE postgres ...` defaults (the testcontainers DB
+    # is named `test`, so `IN DATABASE postgres` would error).
     _STRIP = re.compile(
-        r"^\\.+$\n?|CREATE EXTENSION IF NOT EXISTS[^;]+;|ALTER PUBLICATION[^;]+;",
+        r"^\\.+$\n?"
+        r"|CREATE EXTENSION IF NOT EXISTS[^;]+;"
+        r"|ALTER PUBLICATION[^;]+;"
+        r"|ALTER ROLE[^;]*IN DATABASE[^;]+;",
         re.MULTILINE,
     )
 
@@ -80,10 +87,18 @@ def apply_migrations(postgres_url):
     END $$;
     """
 
-    baseline = _STRIP.sub(
-        "",
-        Path("supabase/migrations/20260528131043_baseline.sql").read_text(),
-    )
+    # A migration may be entirely comments once Supabase-only statements are
+    # stripped (e.g. auth_search_path is a single `ALTER ROLE ... IN DATABASE`).
+    # asyncpg errors on a statement-less query, so skip anything with no SQL left.
+    def _has_sql(text: str) -> bool:
+        return bool(re.sub(r"^\s*--.*$", "", text, flags=re.MULTILINE).strip())
+
+    migration_files = sorted(Path("supabase/migrations").glob("*.sql"))
+    migrations = [
+        (f.name, stripped)
+        for f in migration_files
+        if _has_sql(stripped := _STRIP.sub("", f.read_text()))
+    ]
     seed = Path("supabase/seed.sql").read_text()
 
     async def _bootstrap() -> None:
@@ -91,7 +106,11 @@ def apply_migrations(postgres_url):
         conn = await asyncpg.connect(url)
         try:
             await conn.execute(_ROLE_BOOTSTRAP)
-            await conn.execute(baseline)
+            for name, sql in migrations:
+                try:
+                    await conn.execute(sql)
+                except Exception as exc:
+                    raise RuntimeError(f"migration {name} failed: {exc}") from exc
             await conn.execute(seed)
         finally:
             await conn.close()

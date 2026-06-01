@@ -1,15 +1,10 @@
 """Integration-test-only fixtures for the /refresh API routes."""
 from __future__ import annotations
 
-import asyncio
-import os
-import re
 from collections.abc import AsyncGenerator
 from datetime import date
-from pathlib import Path
 from uuid import uuid4
 
-import asyncpg
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -30,6 +25,19 @@ from content_tool.db.models import (
 )
 from content_tool.gemini.fake import FakeGeminiClient
 from content_tool.wordpress.client import WordPressClient
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_schema(apply_migrations):
+    """Guarantee the testcontainers schema exists before any integration test.
+
+    Several tests in this package depend only on `postgres_url` and build their
+    own engine, so they never pull in `apply_migrations` directly. Without an
+    explicit trigger, whichever of those runs first hits a schema-less database
+    ("relation content_tool.runs does not exist"). This autouse session fixture
+    forces `apply_migrations` to run once up front, independent of test order.
+    """
+    return None
 
 
 @pytest_asyncio.fixture
@@ -124,39 +132,6 @@ async def persisted_full_run(
         ))
         await s.commit()
     return str(run_id)
-
-
-_OWNER_STRIP = re.compile(r"ALTER TABLE [^\n]*OWNER TO postgres;", re.MULTILINE)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def seed_prompt_templates(apply_migrations, postgres_url):
-    """Seed content_tool.prompt_templates for the testcontainers path.
-
-    The retired-Alembic baseline ships prompt_versions but not prompt_templates,
-    so the runtime store has no rows to read. This applies the idempotent
-    prompt_templates migration (CREATE TABLE IF NOT EXISTS + INSERT ON CONFLICT
-    DO NOTHING). `ALTER TABLE ... OWNER TO postgres;` is stripped because the
-    testcontainers superuser is `test`, not `postgres`. Skipped under
-    EXTERNAL_POSTGRES_URL, where `supabase db reset` already applied it.
-    """
-    if os.environ.get("EXTERNAL_POSTGRES_URL"):
-        return
-    migration = (
-        Path(__file__).resolve().parents[2]
-        / "supabase/migrations/20260529000001_prompt_templates.sql"
-    )
-    stripped_sql = _OWNER_STRIP.sub("", migration.read_text())
-
-    async def _seed() -> None:
-        url = postgres_url.replace("postgresql+asyncpg://", "postgresql://")
-        conn = await asyncpg.connect(url)
-        try:
-            await conn.execute(stripped_sql)
-        finally:
-            await conn.close()
-
-    asyncio.run(_seed())
 
 
 @pytest_asyncio.fixture
