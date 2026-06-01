@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 
+import { ThoughtMarkdown } from "@/components/ThoughtMarkdown";
 import type { SseEvent } from "@/lib/types";
 
 interface Burst {
@@ -136,9 +137,10 @@ export function ThinkingStream({
                       {formatTime(b.startedAt)}
                     </span>
                   </div>
-                  <p className="font-display text-[14px] leading-relaxed whitespace-pre-wrap text-ink-soft">
-                    {b.text}
-                  </p>
+                  <ThoughtMarkdown
+                    text={b.text}
+                    className="font-display text-[14px] leading-relaxed text-ink-soft"
+                  />
                 </li>
               ))}
             </ol>
