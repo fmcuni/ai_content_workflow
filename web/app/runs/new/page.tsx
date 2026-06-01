@@ -386,7 +386,7 @@ function NewRunForm() {
         )}
 
         <div className="border border-rule overflow-hidden">
-          <div className="hidden md:grid grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_108px_minmax(0,1.1fr)_64px_64px_36px_36px] bg-paper-deep border-b border-rule">
+          <div className="hidden md:grid grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_108px_minmax(0,1.1fr)_88px_88px_36px_36px] bg-paper-deep border-b border-rule">
             {(["№", "Article URL", "Topic", "Focus keywords", "Mode", "Voice", "ADV", "Widget", "", ""] as const).map(
               (t, i) => (
                 <div
@@ -526,7 +526,7 @@ function LedgerRowView({
         status === "error" && "bg-accent/[0.05]",
       )}
     >
-      <div className="grid grid-cols-1 md:grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_108px_minmax(0,1.1fr)_64px_64px_36px_36px]">
+      <div className="grid grid-cols-1 md:grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_108px_minmax(0,1.1fr)_88px_88px_36px_36px]">
         <div className="flex items-center justify-center md:border-r border-rule px-2 py-2 relative">
           <span
             className="font-display text-[20px] text-ink-faint tabular-nums leading-none"
@@ -604,9 +604,14 @@ function LedgerRowView({
 
         <Cell label="ADV">
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
             value={row.acf_adv_id}
-            onChange={(e) => onPatch({ acf_adv_id: parseInt(e.target.value || "0", 10) })}
+            onChange={(e) =>
+              onPatch({ acf_adv_id: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })
+            }
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_adv_id"
           />
@@ -614,9 +619,14 @@ function LedgerRowView({
 
         <Cell label="Widget">
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
             value={row.acf_widget_id}
-            onChange={(e) => onPatch({ acf_widget_id: parseInt(e.target.value || "0", 10) })}
+            onChange={(e) =>
+              onPatch({ acf_widget_id: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })
+            }
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_widget_id"
           />
