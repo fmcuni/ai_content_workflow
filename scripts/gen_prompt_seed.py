@@ -38,6 +38,7 @@ _AGENTS = [
     "writer_create",
     "topic_gen",
     "topic_dedup",
+    "topic_existing_search",
     "topic_hot",
 ]
 _PARTIALS = [

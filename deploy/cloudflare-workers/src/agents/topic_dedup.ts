@@ -1,10 +1,13 @@
 /**
- * Topic-dedup agent — TypeScript port of `content_tool/agents/topic_dedup.py`.
+ * Topic-dedup agent (two-stage) — TypeScript port of
+ * `content_tool/agents/topic_dedup.py`.
  *
- * One Gemini call per candidate: looks up `site:bowtie.com.hk/blog` to decide
- * whether the input topic is already covered. No retry/backoff and no DB writes
- * — those are the TopicExpansionWorkflow's concern (assembled by the lead). This
- * function returns the parsed verdict plus token usage.
+ * Stage 1 (`runExistingArticleSearch`) runs a *grounded* search and returns the
+ * REAL `bowtie.com.hk/blog` article URLs from Gemini's grounding metadata.
+ * Stage 2 (here) is the verdict call: the judge picks `existing_url` strictly
+ * from that real candidate list, so the field can only ever be a verifiable URL
+ * or the empty string — never a hallucination. No retry/backoff and no DB
+ * writes; those are the TopicExpansionWorkflow's concern.
  *
  * Full-width punctuation (：、（無）) is intentional — the prompts are CJK style,
  * matching the Python `build_user_prompt` byte-for-byte.
@@ -13,21 +16,19 @@
 import type { Sql } from "postgres";
 import { getAssembled } from "../prompts/store";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
+import {
+  type ExistingArticle,
+  type UrlResolveFn,
+  runExistingArticleSearch,
+} from "./topic_existing_search";
+import { resolveUrl } from "./url_resolver";
 import { TOPIC_DEDUP_SCHEMA, type TopicDedupOutput } from "./topic_schemas";
-
-// ---------------------------------------------------------------------------
-// Input — mirrors Python TopicDedupInput.
-// ---------------------------------------------------------------------------
 
 export interface TopicDedupInput {
   topic: string;
   keywords: string[];
   onThought?: ThoughtCallback;
 }
-
-// ---------------------------------------------------------------------------
-// Token usage result (mirrors OutlineTokens)
-// ---------------------------------------------------------------------------
 
 export interface TopicDedupTokens {
   tokensIn: number;
@@ -36,58 +37,88 @@ export interface TopicDedupTokens {
   latencyMs: number;
 }
 
-// ---------------------------------------------------------------------------
-// System prompt assembly — mirrors Python `build_system_prompt`.
-// ---------------------------------------------------------------------------
-
 async function buildSystemPrompt(sql: Sql): Promise<string> {
   return getAssembled(sql, "topic_dedup");
 }
 
-// ---------------------------------------------------------------------------
-// User prompt — mirrors Python `build_user_prompt` exactly.
-// ---------------------------------------------------------------------------
+function renderCandidates(candidates: ExistingArticle[]): string {
+  if (candidates.length === 0) {
+    return "候選文章：（無，搜尋不到相關文章）";
+  }
+  const lines = ["候選文章（系統預先搜尋找到的真實 URL，existing_url 只可從這裡照抄其一）："];
+  candidates.forEach((art, i) => {
+    const title = art.title ?? "（無標題）";
+    lines.push(`${i + 1}. ${title} — ${art.url}`);
+  });
+  return lines.join("\n");
+}
 
-export function buildUserPrompt(opts: { topic: string; keywords: string[] }): string {
+export function buildUserPrompt(
+  opts: { topic: string; keywords: string[] },
+  candidates: ExistingArticle[],
+): string {
   const keywords = opts.keywords.length > 0 ? opts.keywords.join(", ") : "（無）";
   return (
     "請判斷以下單一 topic 在 site:bowtie.com.hk/blog 是否已有相同 topic 的文章。" +
     "只輸出符合 schema 的 JSON。\n\n" +
     `topic:\n${opts.topic}\n\n` +
-    `focus_keywords:\n${keywords}\n`
+    `focus_keywords:\n${keywords}\n\n` +
+    `${renderCandidates(candidates)}\n`
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
+/**
+ * Force `existing_url` to be one of the real candidate URLs, else blank.
+ * Defence-in-depth against the judge fabricating a URL despite the prompt. If
+ * blanking would leave a `yes` verdict with no source, downgrade to `not_sure`.
+ */
+function constrainToCandidates(
+  output: TopicDedupOutput,
+  candidates: ExistingArticle[],
+): TopicDedupOutput {
+  const byKey = new Map<string, string>();
+  for (const art of candidates) byKey.set(art.url.replace(/\/+$/, ""), art.url);
+  const matched = byKey.get((output.existing_url ?? "").replace(/\/+$/, ""));
+  if (matched !== undefined) {
+    return { ...output, existing_url: matched };
+  }
+  const existing = output.existing === "yes" ? "not_sure" : output.existing;
+  return { ...output, existing, existing_url: "" };
+}
 
 /**
- * Run the topic-dedup agent for one candidate. Assembles the system + user
- * prompt, calls Gemini with structured output and the googleSearch + urlContext
- * grounding tools, and returns the parsed verdict plus token usage. No DB writes.
+ * Run the two-stage topic-dedup for one candidate. `sql` backs the stage-1 URL
+ * resolver (vertexaisearch redirect → real URL, cached in url_resolution_cache).
+ * `resolve` is injectable for tests; it defaults to the sql-backed resolver.
  */
 export async function runTopicDedup(
   sql: Sql,
   gemini: GeminiClient,
   input: TopicDedupInput,
+  resolve: UrlResolveFn = (uri) => resolveUrl(sql, uri),
 ): Promise<{ output: TopicDedupOutput; tokens: TopicDedupTokens }> {
+  const candidates = await runExistingArticleSearch(sql, gemini, resolve, {
+    topic: input.topic,
+    keywords: input.keywords,
+  });
+
   const systemPrompt = await buildSystemPrompt(sql);
-  const userPrompt = buildUserPrompt({ topic: input.topic, keywords: input.keywords });
+  const userPrompt = buildUserPrompt(
+    { topic: input.topic, keywords: input.keywords },
+    candidates,
+  );
 
   const result = await gemini.generate({
     agent: "topic_dedup",
     systemPrompt,
     userPrompt,
     responseSchema: TOPIC_DEDUP_SCHEMA as Record<string, unknown>,
-    tools: ["googleSearch", "urlContext"],
+    tools: ["urlContext"], // open the real candidate URLs to verify the match
     onThought: input.onThought,
   });
 
-  // Gemini returns a plain object matching TopicDedupOutput's shape when
-  // responseSchema is provided. Route through `unknown` since
-  // `GeminiResult.parsed` is `Record<string, unknown>`.
-  const output = result.parsed as unknown as TopicDedupOutput;
+  const raw = result.parsed as unknown as TopicDedupOutput;
+  const output = constrainToCandidates(raw, candidates);
 
   return {
     output,
