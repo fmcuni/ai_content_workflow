@@ -3,6 +3,7 @@ import postgres from "postgres";
 
 import { personasRouter } from "./routes/personas";
 import { promptsRouter } from "./routes/prompts";
+import { sourcePolicyRouter } from "./routes/source_policy";
 import { articlesRouter } from "./routes/articles";
 import { costsRouter } from "./routes/costs";
 import { wpOptionsRouter } from "./routes/wp-options";
@@ -141,6 +142,7 @@ app.get("/db/ping", async (c) => {
 // serves bare paths.
 app.route("/personas", personasRouter);
 app.route("/prompts", promptsRouter);
+app.route("/source-policy", sourcePolicyRouter);
 app.route("/articles", articlesRouter);
 app.route("/costs", costsRouter);
 app.route("/wp-options", wpOptionsRouter);

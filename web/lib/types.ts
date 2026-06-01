@@ -581,6 +581,48 @@ export interface UserPromptExample {
   prompt: string;
 }
 
+// --- Source policy (editable) ---------------------------------------------
+
+export interface SourcePolicyDoc {
+  deny: { domains: string[] };
+  prefer: { tlds: string[]; domains: string[] };
+  community_exception: { topic_categories: string[]; allowed_domains: string[] };
+}
+
+export interface SourcePolicyResponse {
+  policy_id: string;
+  policy: SourcePolicyDoc;
+  sha256: string;
+  bytes: number;
+  rendered: string;
+}
+
+export interface SourcePolicyPreviewResponse {
+  policy: SourcePolicyDoc;
+  rendered: string;
+}
+
+export interface SourcePolicySaveResponse extends SourcePolicyResponse {
+  version_id: string;
+  saved_at: string;
+  saved_by: string;
+}
+
+export interface SourcePolicyVersionsResponse {
+  policy_id: string;
+  versions: PromptVersionSummary[];
+}
+
+export interface SourcePolicyVersionDetail extends PromptVersionSummary {
+  policy_id: string;
+  policy: SourcePolicyDoc;
+  rendered: string;
+}
+
+export interface SourcePolicyRevertResponse extends SourcePolicySaveResponse {
+  reverted_from_version_id: string;
+}
+
 // --- Desktop first-run setup (mirrors content_tool/api/routes/setup.py) ---
 
 export interface SetupStatus {

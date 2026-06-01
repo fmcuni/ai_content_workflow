@@ -159,6 +159,19 @@ async function buildEndpoints() {
     },
   });
 
+  // --- source policy (live editable policy; both backends read the same row) ---
+  endpoints.push({
+    name: "source_policy",
+    path: "/source-policy",
+    note: "live source policy + rendered block + sha — must deep-equal between PY and TS",
+  });
+  endpoints.push({
+    name: "source_policy_history",
+    path: "/source-policy/history",
+    envDependent: true,
+    note: "save/revert history; identical only if both backends share the same edit history",
+  });
+
   // --- costs summary (env-dependent: usage rows) ---
   endpoints.push({
     name: "costs_summary",

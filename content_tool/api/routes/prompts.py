@@ -9,11 +9,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from content_tool import prompts_store
+from content_tool import prompts_store, source_policy_store
 from content_tool.agents import audit as audit_agent
 from content_tool.agents import gap_analysis as gap_agent
 from content_tool.agents import outline as outline_agent
 from content_tool.agents import writer as writer_agent
+from content_tool.api.editor_auth import require_editor as _require_editor
 from content_tool.api.prompt_graph import PROMPT_GRAPHS
 from content_tool.db.models import (
     AuditRun,
@@ -28,8 +29,6 @@ from content_tool.db.models import (
     Run,
 )
 from content_tool.policy.personas import load_persona_from_yaml
-from content_tool.policy.prompt_editors import load_policy as _load_editor_policy
-from content_tool.policy.source_policy import DEFAULT_POLICY_PATH, SourcePolicy
 from content_tool.prompts_store import TemplateRow
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
@@ -214,25 +213,6 @@ async def template_consumers(
 class _SaveTemplateRequest(BaseModel):
     template: str
     expected_sha256: str = Field(..., min_length=64, max_length=64)
-
-
-async def _require_editor(request: Request) -> str:
-    """Resolve the editor's email from the trusted ``X-Editor-Email`` header.
-
-    The reverse proxy in front of the API is expected to validate SSO and
-    inject this header; the browser does not set it directly. In dev mode
-    (``PROMPT_EDITOR_DEV_MODE=true`` — the default outside CI) a missing
-    header falls back to ``dev@local`` so local work isn't blocked.
-    """
-    email = (request.headers.get("X-Editor-Email") or "").strip().lower()
-    policy = _load_editor_policy()
-    if not email:
-        if policy.dev_mode:
-            return "dev@local"
-        raise HTTPException(401, "missing X-Editor-Email header")
-    if not policy.is_allowed(email) and not policy.dev_mode:
-        raise HTTPException(403, f"{email} is not an authorised prompt editor")
-    return email
 
 
 @router.put("/templates/{template_id}")
@@ -593,12 +573,23 @@ async def preview_template(
                 },
             ) from e
 
-    resolved = _substitute_placeholders(assembled, overrides=body.context, snap=snap)
+    async with sf() as session:
+        source_policy = await source_policy_store.get_policy(session=session)
+    resolved = _substitute_placeholders(
+        assembled,
+        overrides=body.context,
+        snap=snap,
+        source_policy_default=source_policy.to_prompt_block(),
+    )
     return {"resolved": resolved, "route": route_id}
 
 
 def _substitute_placeholders(
-    text: str, *, overrides: dict[str, str], snap: dict[str, TemplateRow]
+    text: str,
+    *,
+    overrides: dict[str, str],
+    snap: dict[str, TemplateRow],
+    source_policy_default: str = "",
 ) -> str:
     """Fill `{name}` placeholders with overrides or sensible defaults.
 
@@ -621,10 +612,7 @@ def _substitute_placeholders(
     if "source_policy_block" in overrides:
         source_policy_block = overrides["source_policy_block"]
     else:
-        try:
-            source_policy_block = SourcePolicy.load_from(DEFAULT_POLICY_PATH).to_prompt_block()
-        except FileNotFoundError:
-            source_policy_block = "（preview: source policy not configured）"  # noqa: RUF001
+        source_policy_block = source_policy_default
 
     if "create_mode_block" in overrides:
         create_mode_block = overrides["create_mode_block"]

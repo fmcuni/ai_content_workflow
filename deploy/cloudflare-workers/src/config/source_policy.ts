@@ -44,6 +44,69 @@ export const SOURCE_POLICY_RAW = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Canonical structure + serializer — the DB-backed editable policy
+// ---------------------------------------------------------------------------
+
+/** The normalised policy shape stored as canonical JSON in the DB row. */
+export interface CleanPolicy {
+  deny: { domains: string[] };
+  prefer: { tlds: string[]; domains: string[] };
+  community_exception: { topic_categories: string[]; allowed_domains: string[] };
+}
+
+function asSection(raw: unknown, key: string): Record<string, unknown> | undefined {
+  if (raw !== null && typeof raw === "object" && key in raw) {
+    const v = (raw as Record<string, unknown>)[key];
+    if (v !== null && typeof v === "object") return v as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function cleanList(section: Record<string, unknown> | undefined, key: string): string[] {
+  const raw = section?.[key];
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw as unknown[]) {
+    const s = String(item).trim().toLowerCase();
+    if (s.length > 0 && !seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
+ * Normalise an arbitrary policy mapping into the canonical structure: trim +
+ * lowercase + de-dup each list, fixed key order. Mirrors
+ * ``content_tool.source_policy_store.clean`` so the rendered prompt block and
+ * the sha256 token stay in parity across both backends.
+ */
+export function cleanPolicy(raw: unknown): CleanPolicy {
+  const deny = asSection(raw, "deny");
+  const prefer = asSection(raw, "prefer");
+  const ce = asSection(raw, "community_exception");
+  return {
+    deny: { domains: cleanList(deny, "domains") },
+    prefer: { tlds: cleanList(prefer, "tlds"), domains: cleanList(prefer, "domains") },
+    community_exception: {
+      topic_categories: cleanList(ce, "topic_categories"),
+      allowed_domains: cleanList(ce, "allowed_domains"),
+    },
+  };
+}
+
+/**
+ * Canonical compact JSON of a (cleaned) policy. Matches the Python
+ * ``json.dumps(separators=(",", ":"))`` of the same cleaned object byte-for-byte
+ * (verified), so the sha256 concurrency token is portable across backends.
+ */
+export function canonicalPolicyJson(raw: unknown): string {
+  return JSON.stringify(cleanPolicy(raw));
+}
+
+// ---------------------------------------------------------------------------
 // Types — mirror the Python PolicyDecision dataclass
 // ---------------------------------------------------------------------------
 
@@ -117,12 +180,13 @@ export class SourcePolicy {
   readonly communityTopicCategories: ReadonlySet<string>;
   readonly communityAllowedDomains: ReadonlySet<string>;
 
-  constructor() {
-    this.denyDomains = new Set(SOURCE_POLICY_RAW.deny.domains);
-    this.preferTlds = SOURCE_POLICY_RAW.prefer.tlds;
-    this.preferDomains = new Set(SOURCE_POLICY_RAW.prefer.domains);
-    this.communityTopicCategories = new Set(SOURCE_POLICY_RAW.community_exception.topic_categories);
-    this.communityAllowedDomains = new Set(SOURCE_POLICY_RAW.community_exception.allowed_domains);
+  constructor(raw: unknown = SOURCE_POLICY_RAW) {
+    const c = cleanPolicy(raw);
+    this.denyDomains = new Set(c.deny.domains);
+    this.preferTlds = c.prefer.tlds;
+    this.preferDomains = new Set(c.prefer.domains);
+    this.communityTopicCategories = new Set(c.community_exception.topic_categories);
+    this.communityAllowedDomains = new Set(c.community_exception.allowed_domains);
   }
 
   /**

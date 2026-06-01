@@ -13,7 +13,12 @@
 import type { Sql } from "postgres";
 import type { PromptTemplateRow } from "../db/schema";
 import { loadPersona, toPromptBlock } from "../agents/persona";
-import { sourcePolicyInstance } from "../config/source_policy";
+import { getPolicy } from "../source_policy/store";
+
+// Re-exported for existing callers (routes/prompts.ts) — the implementations
+// now live in a neutral module so the source-policy store can share them
+// without an import cycle.
+export { sha256Hex, utf8ByteLength } from "../util/hash";
 
 // ---------------------------------------------------------------------------
 // Constants — mirror content_tool/api/routes/prompts.py
@@ -70,22 +75,6 @@ export const REQUIRED_PLACEHOLDERS: Readonly<Record<string, readonly string[]>> 
 
 export function isEditable(row: Pick<PromptTemplateRow, "category">): boolean {
   return EDITABLE_CATEGORIES.has(row.category);
-}
-
-// ---------------------------------------------------------------------------
-// Hashing / sizing — match Python's hashlib.sha256(text.utf8).hexdigest() and
-// len(text.encode("utf-8")).
-// ---------------------------------------------------------------------------
-
-const UTF8 = new TextEncoder();
-
-export function utf8ByteLength(text: string): number {
-  return UTF8.encode(text).length;
-}
-
-export async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", UTF8.encode(text));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +180,7 @@ export async function substitutePreview(
 
   const sourcePolicyBlock = Object.hasOwn(overrides, "source_policy_block")
     ? (overrides["source_policy_block"] ?? "")
-    : sourcePolicyInstance.toPromptBlock();
+    : (await getPolicy(sql)).toPromptBlock();
 
   let createModeBlock: string;
   if (Object.hasOwn(overrides, "create_mode_block")) {

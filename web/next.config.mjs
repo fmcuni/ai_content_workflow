@@ -64,6 +64,8 @@ const nextConfig = {
       { source: "/api/personas/:path*", destination: `${apiBase}/personas/:path*` },
       { source: "/api/prompts", destination: `${apiBase}/prompts` },
       { source: "/api/prompts/:path*", destination: `${apiBase}/prompts/:path*` },
+      { source: "/api/source-policy", destination: `${apiBase}/source-policy` },
+      { source: "/api/source-policy/:path*", destination: `${apiBase}/source-policy/:path*` },
       { source: "/api/topic-batches", destination: `${apiBase}/topic-batches` },
       { source: "/api/topic-batches/:path*", destination: `${apiBase}/topic-batches/:path*` },
     ];

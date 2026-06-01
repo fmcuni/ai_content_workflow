@@ -11,7 +11,7 @@ import { toJsonb } from "../db/serialize";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import { getAssembled } from "../prompts/store";
 import { loadPersona, toPromptBlock } from "./persona";
-import { SourcePolicy } from "../config/source_policy";
+import { getPolicy } from "../source_policy/store";
 import {
   WRITER_OUTPUT_SCHEMA,
   type WriterOutput,
@@ -124,7 +124,7 @@ async function buildSystemPrompt(
 ): Promise<string> {
   const template = await getAssembled(sql, `writer_${route}`);
   const persona = await loadPersona(sql, personaName);
-  const policy = new SourcePolicy();
+  const policy = await getPolicy(sql);
   return template
     .replace("{persona_block}", toPromptBlock(persona, contextText))
     .replace("{today_date}", todayIso())
