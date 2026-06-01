@@ -56,10 +56,11 @@ import type { AuthVars } from "../auth/middleware";
 type AuthApp = Hono<{ Bindings: Record<string, unknown>; Variables: AuthVars }>;
 
 /** Mirror index.ts: gate /admin/* with requireRole("admin"), then mount. */
-function appWith(authEmail: string): AuthApp {
+function appWith(authEmail: string, authUserId?: string): AuthApp {
   const app = new Hono<{ Bindings: Record<string, unknown>; Variables: AuthVars }>();
   app.use("*", async (c, next) => {
     c.set("userEmail", authEmail);
+    if (authUserId !== undefined) c.set("userId", authUserId);
     await next();
   });
   app.use("/admin/*", requireRole("admin"));
@@ -124,6 +125,50 @@ describe("PUT /admin/users/:id/role", () => {
       role: "author",
     });
     expect(res.status).toBe(404);
+  });
+
+  it("rejects an admin demoting THEIR OWN role to a non-admin role with 409 (M2)", async () => {
+    state.actorRole = "admin";
+    state.target = { id: "self1", email: "admin@b.com", name: "Me", role: "admin" };
+    const res = await req(
+      appWith("admin@b.com", "self1"),
+      "PUT",
+      "/admin/users/self1/role",
+      { role: "viewer" },
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.error).toBe("self_demotion_forbidden");
+    // The role must NOT have changed.
+    expect(state.target.role).toBe("admin");
+  });
+
+  it("allows an admin to change a DIFFERENT user's role to viewer (M2 does not over-block)", async () => {
+    state.actorRole = "admin";
+    state.target = { id: "u2", email: "other@b.com", name: "Other", role: "admin" };
+    const res = await req(
+      appWith("admin@b.com", "self1"),
+      "PUT",
+      "/admin/users/u2/role",
+      { role: "viewer" },
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.role).toBe("viewer");
+  });
+
+  it("allows an admin to keep their OWN role as admin (no-op self update)", async () => {
+    state.actorRole = "admin";
+    state.target = { id: "self1", email: "admin@b.com", name: "Me", role: "admin" };
+    const res = await req(
+      appWith("admin@b.com", "self1"),
+      "PUT",
+      "/admin/users/self1/role",
+      { role: "admin" },
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.role).toBe("admin");
   });
 });
 

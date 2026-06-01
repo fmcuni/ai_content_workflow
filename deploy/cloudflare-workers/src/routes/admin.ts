@@ -71,6 +71,26 @@ adminRouter.put("/users/:id/role", async (c) => {
   }
   const newRole: Role = body.role;
 
+  // Self-demotion lockout guard: an admin must not strip their OWN admin role,
+  // which could lock the system out of role management. Comparing the target id
+  // to the acting session user id is simpler and race-free vs counting admins;
+  // BOOTSTRAP_ADMIN_EMAILS remains the ultimate recovery path either way.
+  const actingUserId = c.get("userId");
+  if (
+    typeof actingUserId === "string" &&
+    actingUserId.length > 0 &&
+    actingUserId === targetId &&
+    newRole !== "admin"
+  ) {
+    return c.json(
+      {
+        error: "self_demotion_forbidden",
+        message: "an admin cannot remove their own admin role",
+      },
+      409,
+    );
+  }
+
   const actor = resolveActorIdentity(
     { userEmail: c.get("userEmail"), userId: c.get("userId") },
     null,

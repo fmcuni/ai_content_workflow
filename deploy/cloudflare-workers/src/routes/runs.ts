@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
@@ -87,6 +88,8 @@ interface ResumeBody {
   edited_outline?: unknown;
   new_route?: string | null;
   notes?: string | null;
+  /** Break-glass reason for the HITL_1 self-approval bar (admin only). */
+  override_reason?: string | null;
 }
 
 interface Hitl2Comment {
@@ -299,6 +302,30 @@ function toDateGmt(iso: string): string {
     return iso.replace(/Z$|[+-]\d{2}:\d{2}$/, "");
   }
   return d.toISOString().replace(/\.\d{3}Z$/, "").replace(/Z$/, "");
+}
+
+/**
+ * Explicit identity guard for the segregation-of-duties (4-eyes) routes
+ * (HITL_2 approve, republish, HITL_1 resume approve).
+ *
+ * SoD compares the run's author to the acting session identity. If NO session
+ * email is present (e.g. an SSE-ticket identity carries only a user id, or some
+ * future path bypasses the cookie session), the comparison could silently pass
+ * and let an unidentified actor approve/publish. We refuse those actions unless
+ * a session email — the compliance record-of-truth identity — is present.
+ *
+ * Returns a 401 `Response` to short-circuit, or `null` to proceed. Read paths
+ * and the /events stream never call this.
+ */
+function requireSessionForSod(c: Context<{ Bindings: Env; Variables: AuthVars }>): Response | null {
+  const userEmail = c.get("userEmail");
+  if (typeof userEmail === "string" && userEmail.trim().length > 0) {
+    return null;
+  }
+  return c.json(
+    { error: "session_required", message: "an authenticated session is required for this action" },
+    401,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +557,59 @@ runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
   const body = await c.req.json<ResumeBody>().catch(() => ({}) as ResumeBody);
   const decision = body.decision ?? "approve";
 
+  // Segregation of duties (4-eyes): the author of a run must not approve its
+  // source selection at HITL_1. Only `approve` is a publish-adjacent approval;
+  // edit_outline / override_route / cancel are NOT approvals, so the bar applies
+  // to `approve` alone. Resolved + checked BEFORE the gate claim / sendEvent so a
+  // forbidden actor never mutates run state. Break-glass: an admin may override
+  // with a non-empty override_reason (recorded below + flagged in the response).
+  let sodOverride: { reason: string } | null = null;
+  if (decision === "approve") {
+    // SoD relies on a session identity; refuse if none is present (FIX M1).
+    const sessionGuard = requireSessionForSod(c);
+    if (sessionGuard !== null) {
+      return sessionGuard;
+    }
+    const actor = resolveActorIdentity(
+      { userEmail: c.get("userEmail"), userId: c.get("userId") },
+      null,
+    );
+    const sodRow = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+      const rows = await sql<{ created_by: string | null }[]>`
+        SELECT created_by FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+      `;
+      return rows[0] ?? null;
+    });
+    if (sodRow !== null) {
+      const actorRole = (await loadRole(c)) ?? "viewer";
+      const verdict = evaluateSod({
+        createdBy: sodRow.created_by,
+        actor,
+        actorRole,
+        overrideReason: body.override_reason,
+      });
+      if (!verdict.allowed) {
+        return c.json(
+          {
+            error: "self_approval_forbidden",
+            message: "the author of a run cannot approve or publish it",
+          },
+          403,
+        );
+      }
+      if (verdict.override) {
+        sodOverride = { reason: verdict.reason };
+        auditLog("rbac.sod_override", {
+          action: "hitl_1_approve",
+          run_id: runId,
+          actor,
+          author: sodRow.created_by,
+          reason: verdict.reason,
+        });
+      }
+    }
+  }
+
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<{ status: string }[]>`
       SELECT status FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
@@ -591,6 +671,9 @@ runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
     },
   });
 
+  if (sodOverride !== null) {
+    return c.json({ ok: true, sod_override: true, override_reason: sodOverride.reason });
+  }
   return c.json({ ok: true });
 });
 
@@ -616,6 +699,11 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
   // override_reason (recorded below + flagged in the response).
   let sodOverride: { reason: string } | null = null;
   if (decision === "approve") {
+    // SoD relies on a session identity; refuse if none is present (FIX M1).
+    const sessionGuard = requireSessionForSod(c);
+    if (sessionGuard !== null) {
+      return sessionGuard;
+    }
     const sodRow = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
       const rows = await sql<{ created_by: string | null }[]>`
         SELECT created_by FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
@@ -814,7 +902,7 @@ runsRouter.options("/:id/events", (c) =>
 // ---------------------------------------------------------------------------
 // POST /:id/dry-publish — preview the WP REST payload WITHOUT calling WP
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/dry-publish", async (c) => {
+runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
   const ov = await c.req
     .json<DryPublishBody>()
@@ -1756,6 +1844,11 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
 
   // Segregation of duties (4-eyes): the author of a run must not publish it.
   // Break-glass: an admin may override with a non-empty override_reason.
+  // SoD relies on a session identity; refuse if none is present (FIX M1).
+  const sessionGuard = requireSessionForSod(c);
+  if (sessionGuard !== null) {
+    return sessionGuard;
+  }
   const actor = resolveActorIdentity(
     { userEmail: c.get("userEmail"), userId: c.get("userId") },
     null,
