@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -8,7 +8,15 @@ from httpx import Response
 from sqlalchemy import select
 
 from content_tool.agents.publish import publish_to_wordpress
-from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Render, Run
+from content_tool.db.models import (
+    Article,
+    Draft,
+    FetchedArticle,
+    GapAnalysisRow,
+    OutlineRow,
+    Render,
+    Run,
+)
 from content_tool.wordpress.client import WordPressClient
 
 
@@ -58,6 +66,58 @@ async def test_publish_node_updates_runs(db_session):
     updated = (await db_session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
     assert updated.wp_pushed_post_id == 98785
     assert updated.status == "published"
+
+
+@pytest.mark.asyncio
+async def test_publish_node_stamps_last_persisted_at_on_refresh(db_session):
+    """A successful refresh publish must stamp the inventory article's
+    last_persisted_at so the refresh scanner's staleness reference tracks the
+    republish instead of drifting off first_seen_at."""
+    article_url = "https://e.com/refresh-target"
+    # Seed an inventory Article with an OLD last_persisted_at.
+    old = datetime(2026, 1, 1, tzinfo=UTC)
+    db_session.add(Article(
+        article_url=article_url, topic="x", persona="bowtie-editor",
+        last_persisted_at=old, next_scan_due_at=old + timedelta(days=30),
+    ))
+    run_id = uuid4()
+    db_session.add(Run(
+        run_id=run_id, created_by="x", status="hitl_2",
+        article_url=article_url, topic="x", keywords=[], mode="auto",
+        acf_adv_id=1, acf_widget_id=2, persona="bowtie-editor",
+        today_date=date(2026, 5, 21), chosen_route="small_refresh",
+        wp_publish_status="draft",
+    ))
+    await db_session.commit()
+    db_session.add(FetchedArticle(run_id=run_id, wp_post_id=55501, wp_categories=[],
+                                  raw_html="x", markdown="x"))
+    draft = Draft(run_id=run_id, iteration=0, diagnose="d", markup_raw="x",
+                  final_markup="x", citation_intents=[])
+    db_session.add(draft)
+    await db_session.commit()
+    await db_session.refresh(draft)
+    db_session.add(Render(draft_id=draft.draft_id, seo_title="t", meta_description="m",
+                          html_body="<p>x</p>", excerpt_suggestion="e", slug_suggestion=None))
+    await db_session.commit()
+
+    with respx.mock(assert_all_called=True) as r:
+        r.put("https://wp.example.com/wp-json/wp/v2/posts/55501").mock(
+            return_value=Response(200, json={
+                "id": 55501, "link": "https://wp.example.com/x", "status": "draft",
+                "modified_gmt": "2026-05-21T10:00:00", "slug": "x",
+            })
+        )
+        client = WordPressClient("https://wp.example.com", username="u", app_password="p")  # noqa: S106
+        await publish_to_wordpress(
+            session=db_session, run_id=run_id, wp_client=client, seo_plugin="yoast",
+            if_unmodified_since=None,
+        )
+
+    article = (await db_session.execute(
+        select(Article).where(Article.article_url == article_url)
+    )).scalar_one()
+    assert article.last_persisted_at is not None
+    assert article.last_persisted_at > old
 
 
 @pytest.mark.asyncio

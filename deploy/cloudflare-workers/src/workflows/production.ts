@@ -747,6 +747,17 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
                 status = 'published'
             WHERE run_id = ${runId}::uuid
           `;
+          // Stamp the inventory article's last_persisted_at so the refresh
+          // scanner's staleness reference tracks the republish instead of
+          // drifting off first_seen_at (mirrors publish.py). No-op if the URL
+          // isn't in the inventory.
+          if (run.article_url !== null && run.article_url !== "") {
+            await sql`
+              UPDATE content_tool.articles
+              SET last_persisted_at = now()
+              WHERE article_url = ${run.article_url}
+            `;
+          }
         } else {
           await sql`
             UPDATE content_tool.runs

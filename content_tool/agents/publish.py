@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_tool.db.models import Draft, FetchedArticle, Render, Run
+from content_tool.db.models import Article, Draft, FetchedArticle, Render, Run
 from content_tool.wordpress.client import (
     SCHEMA_JSONLD_META_KEY,
     WP_DEFAULT_PAGE_TEMPLATE,
@@ -137,5 +137,18 @@ async def publish_to_wordpress(
     if is_create_mode:
         update_values["article_url"] = result.link
     await session.execute(update(Run).where(Run.run_id == run_id).values(**update_values))
+
+    # Refresh mode re-publishes an existing inventory article: stamp its
+    # last_persisted_at so the refresh scanner's staleness reference
+    # (scanner.py: `article.last_persisted_at or first_seen_at`) tracks the
+    # republish instead of drifting off first_seen_at forever. No-op if the URL
+    # isn't in the inventory. (Create mode has no inventory Article row yet.)
+    if not is_create_mode and run.article_url:
+        await session.execute(
+            update(Article)
+            .where(Article.article_url == run.article_url)
+            .values(last_persisted_at=datetime.now(UTC))
+        )
+
     await session.commit()
     return {"id": result.id, "link": result.link, "status": result.status}
