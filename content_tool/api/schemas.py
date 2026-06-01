@@ -153,6 +153,10 @@ class OutlineEditRequest(BaseModel):
     """
 
     outline: dict
+    # Optimistic-concurrency guard. When set, the save is rejected (409) if the
+    # stored outline version has moved on since the client loaded it. Omit for
+    # the single-user sidecar / backwards compatibility (last-write-wins).
+    expected_version: int | None = None
 
 
 class ArticleEditRequest(BaseModel):
@@ -165,6 +169,10 @@ class ArticleEditRequest(BaseModel):
     html_body: str
     seo_title: str
     meta_description: str
+    # Optimistic-concurrency guard against the latest Render's version. When set,
+    # the save is rejected (409) if another reviewer saved since this client
+    # loaded the render. Omit for single-user sidecar / backwards compatibility.
+    expected_version: int | None = None
     wp_publish_status: Literal["draft", "future", "publish"] | None = None
     wp_author_id: int | None = None
     wp_category_ids: list[int] | None = None

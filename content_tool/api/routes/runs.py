@@ -551,6 +551,9 @@ async def get_outline(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  #
             "payload": row.payload,
             "edited_by_human": row.edited_by_human,
             "human_edits": row.human_edits,
+            # Optimistic-concurrency token — echo back as `expected_version` on
+            # PUT /outline so a stale edit is rejected instead of clobbering.
+            "version": row.version,
         }
 
 
@@ -592,6 +595,9 @@ async def get_latest_render(run_id: UUID, sf=Depends(get_session_factory)) -> di
             "schema_jsonld": render.schema_jsonld,
             "excerpt_suggestion": render.excerpt_suggestion,
             "slug_suggestion": render.slug_suggestion,
+            # Optimistic-concurrency token — echo back as `expected_version` on
+            # PUT /article so a stale edit is rejected instead of clobbering.
+            "version": render.version,
         }
 
 
@@ -614,13 +620,29 @@ async def edit_outline(
         ).scalar_one_or_none()
         if not row:
             raise HTTPException(404, "no outline for this run")
-        await session.execute(
-            update(OutlineRow)
-            .where(OutlineRow.run_id == run_id)
-            .values(edited_by_human=True, human_edits=payload.outline)
+        stmt = update(OutlineRow).where(OutlineRow.run_id == run_id)
+        if payload.expected_version is not None:
+            stmt = stmt.where(OutlineRow.version == payload.expected_version)
+        result = await session.execute(
+            stmt.values(
+                edited_by_human=True,
+                human_edits=payload.outline,
+                version=OutlineRow.version + 1,
+            )
         )
+        if result.rowcount == 0:
+            # Conditional WHERE matched no row → another reviewer saved since the
+            # client loaded this outline. `row.version` is the committed current.
+            raise HTTPException(
+                409,
+                {
+                    "error": "stale_version",
+                    "message": "outline was changed since you loaded it",
+                    "current_version": row.version,
+                },
+            )
         await session.commit()
-    return {"ok": True}
+    return {"ok": True, "version": row.version + 1}
 
 
 @router.put("/{run_id}/article")
@@ -648,15 +670,28 @@ async def edit_article(
         if not render:
             raise HTTPException(404, "no render for this run")
 
-        await session.execute(
-            update(Render)
-            .where(Render.render_id == render.render_id)
-            .values(
+        stmt = update(Render).where(Render.render_id == render.render_id)
+        if payload.expected_version is not None:
+            stmt = stmt.where(Render.version == payload.expected_version)
+        result = await session.execute(
+            stmt.values(
                 html_body=payload.html_body,
                 seo_title=payload.seo_title,
                 meta_description=payload.meta_description,
+                version=Render.version + 1,
             )
         )
+        if result.rowcount == 0:
+            # Conditional WHERE matched no row → another reviewer saved since the
+            # client loaded this render. `render.version` is the committed current.
+            raise HTTPException(
+                409,
+                {
+                    "error": "stale_version",
+                    "message": "article was changed since you loaded it",
+                    "current_version": render.version,
+                },
+            )
 
         wp_values: dict = {
             field: getattr(payload, field)

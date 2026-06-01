@@ -831,9 +831,9 @@ runsRouter.get("/:id/outline", async (c) => {
   const runId = c.req.param("id");
   const row = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<
-      { payload: unknown; edited_by_human: boolean; human_edits: unknown }[]
+      { payload: unknown; edited_by_human: boolean; human_edits: unknown; version: number }[]
     >`
-      SELECT payload, edited_by_human, human_edits
+      SELECT payload, edited_by_human, human_edits, version
       FROM content_tool.outlines
       WHERE run_id = ${runId}
       LIMIT 1
@@ -847,6 +847,9 @@ runsRouter.get("/:id/outline", async (c) => {
     payload: pgJson(row.payload),
     edited_by_human: row.edited_by_human,
     human_edits: pgJson(row.human_edits),
+    // Optimistic-concurrency token — echo back as `expected_version` on
+    // PUT /outline so a stale edit is rejected instead of clobbering.
+    version: row.version,
   });
 });
 
@@ -900,11 +903,12 @@ runsRouter.get("/:id/render", async (c) => {
         schema_jsonld: unknown;
         excerpt_suggestion: string | null;
         slug_suggestion: string | null;
+        version: number;
       }[]
     >`
       SELECT
         r.seo_title, r.meta_description, r.html_body, r.faq_schema_jsonld,
-        r.schema_jsonld, r.excerpt_suggestion, r.slug_suggestion
+        r.schema_jsonld, r.excerpt_suggestion, r.slug_suggestion, r.version
       FROM content_tool.renders r
       JOIN content_tool.drafts d ON d.draft_id = r.draft_id
       WHERE d.run_id = ${runId}
@@ -924,6 +928,9 @@ runsRouter.get("/:id/render", async (c) => {
     schema_jsonld: pgJson(row.schema_jsonld),
     excerpt_suggestion: row.excerpt_suggestion,
     slug_suggestion: row.slug_suggestion,
+    // Optimistic-concurrency token — echo back as `expected_version` on
+    // PUT /article so a stale edit is rejected instead of clobbering.
+    version: row.version,
   });
 });
 
@@ -1016,6 +1023,7 @@ interface Hitl2SnapshotRow {
 
 interface OutlineEditBody {
   outline?: unknown;
+  expected_version?: number | null;
 }
 
 interface ArticleEditBody {
@@ -1030,6 +1038,7 @@ interface ArticleEditBody {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  expected_version?: number | null;
 }
 
 interface ApplyEditsBody {
@@ -1346,23 +1355,54 @@ runsRouter.put("/:id/outline", async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<OutlineEditBody>().catch(() => ({}) as OutlineEditBody);
 
-  const found = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-    const rows = await sql<{ run_id: string }[]>`
-      SELECT run_id FROM content_tool.outlines WHERE run_id = ${runId} LIMIT 1
+  const expectedVersion = body.expected_version ?? null;
+
+  const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ version: number }[]>`
+      SELECT version FROM content_tool.outlines WHERE run_id = ${runId} LIMIT 1
     `;
-    if (rows[0] === undefined) {
-      return false;
+    const existing = rows[0];
+    if (existing === undefined) {
+      return { kind: "not_found" as const };
     }
-    await sql`
-      UPDATE content_tool.outlines
-      SET edited_by_human = TRUE, human_edits = ${toJsonb(sql, body.outline ?? null)}
-      WHERE run_id = ${runId}
-    `;
-    return true;
+    // Conditional UPDATE: only add the `AND version = $expected` guard when the
+    // caller supplied an expected_version. Either way bump version by one.
+    const result =
+      expectedVersion === null
+        ? await sql`
+            UPDATE content_tool.outlines
+            SET edited_by_human = TRUE,
+                human_edits = ${toJsonb(sql, body.outline ?? null)},
+                version = version + 1
+            WHERE run_id = ${runId}
+          `
+        : await sql`
+            UPDATE content_tool.outlines
+            SET edited_by_human = TRUE,
+                human_edits = ${toJsonb(sql, body.outline ?? null)},
+                version = version + 1
+            WHERE run_id = ${runId} AND version = ${expectedVersion}
+          `;
+    if (result.count === 0) {
+      // Conditional WHERE matched no row → another reviewer saved since the
+      // client loaded this outline. `existing.version` is the committed current.
+      return { kind: "stale" as const, currentVersion: existing.version };
+    }
+    return { kind: "ok" as const };
   });
 
-  if (!found) {
+  if (outcome.kind === "not_found") {
     return c.json({ detail: "no outline for this run" }, 404);
+  }
+  if (outcome.kind === "stale") {
+    return c.json(
+      {
+        error: "stale_version",
+        message: "outline was changed since you loaded it",
+        current_version: outcome.currentVersion,
+      },
+      409,
+    );
   }
   return c.json({ ok: true });
 });
@@ -1376,9 +1416,11 @@ runsRouter.put("/:id/article", async (c) => {
     .json<ArticleEditBody>()
     .catch(() => ({}) as ArticleEditBody);
 
+  const expectedVersion = body.expected_version ?? null;
+
   const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-    const renderRows = await sql<{ render_id: string }[]>`
-      SELECT r.render_id
+    const renderRows = await sql<{ render_id: string; version: number }[]>`
+      SELECT r.render_id, r.version
       FROM content_tool.renders r
       JOIN content_tool.drafts d ON d.draft_id = r.draft_id
       WHERE d.run_id = ${runId}
@@ -1392,17 +1434,35 @@ runsRouter.put("/:id/article", async (c) => {
         SELECT draft_id FROM content_tool.drafts WHERE run_id = ${runId} LIMIT 1
       `;
       return draftRows[0] === undefined
-        ? ("no_draft" as const)
-        : ("no_render" as const);
+        ? ({ kind: "no_draft" as const })
+        : ({ kind: "no_render" as const });
     }
 
-    await sql`
-      UPDATE content_tool.renders
-      SET html_body = ${body.html_body ?? ""},
-          seo_title = ${body.seo_title ?? ""},
-          meta_description = ${body.meta_description ?? ""}
-      WHERE render_id = ${render.render_id}
-    `;
+    // Conditional UPDATE: only add the `AND version = $expected` guard when the
+    // caller supplied an expected_version. Either way bump version by one.
+    const result =
+      expectedVersion === null
+        ? await sql`
+            UPDATE content_tool.renders
+            SET html_body = ${body.html_body ?? ""},
+                seo_title = ${body.seo_title ?? ""},
+                meta_description = ${body.meta_description ?? ""},
+                version = version + 1
+            WHERE render_id = ${render.render_id}
+          `
+        : await sql`
+            UPDATE content_tool.renders
+            SET html_body = ${body.html_body ?? ""},
+                seo_title = ${body.seo_title ?? ""},
+                meta_description = ${body.meta_description ?? ""},
+                version = version + 1
+            WHERE render_id = ${render.render_id} AND version = ${expectedVersion}
+          `;
+    if (result.count === 0) {
+      // Conditional WHERE matched no row → another reviewer saved since the
+      // client loaded this render. `render.version` is the committed current.
+      return { kind: "stale" as const, currentVersion: render.version };
+    }
 
     // Only overwrite WP metadata fields the caller actually supplied (non-null);
     // COALESCE preserves the existing value for omitted fields.
@@ -1419,14 +1479,24 @@ runsRouter.put("/:id/article", async (c) => {
         wp_publish_at = COALESCE(${body.wp_publish_at ?? null}, wp_publish_at)
       WHERE run_id = ${runId}
     `;
-    return "ok" as const;
+    return { kind: "ok" as const };
   });
 
-  if (outcome === "no_draft") {
+  if (outcome.kind === "no_draft") {
     return c.json({ detail: "no draft for this run" }, 404);
   }
-  if (outcome === "no_render") {
+  if (outcome.kind === "no_render") {
     return c.json({ detail: "no render for this run" }, 404);
+  }
+  if (outcome.kind === "stale") {
+    return c.json(
+      {
+        error: "stale_version",
+        message: "article was changed since you loaded it",
+        current_version: outcome.currentVersion,
+      },
+      409,
+    );
   }
   return c.json({ ok: true });
 });
