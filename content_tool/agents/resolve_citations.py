@@ -76,7 +76,7 @@ async def run_resolve_citations(
             allowed_for_display.append((domain, resolved.final_url))
 
     sources_md = _build_sources_md(allowed_for_display)
-    final_markup = draft.markup_raw.rstrip() + "\n" + sources_md
+    final_markup = (draft.markup_raw or "").rstrip() + "\n" + sources_md
 
     await session.execute(
         update(Draft).where(Draft.draft_id == draft_id).values(final_markup=final_markup)

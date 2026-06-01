@@ -15,6 +15,16 @@ export function useRunEvents(runId: string | null) {
   const [events, setEvents] = useState<SseEvent[]>([]);
   const ctrl = useRef<AbortController | null>(null);
 
+  // Reset accumulated events when the run changes — without this, a new run
+  // inherits the previous run's events (the effect cleanup only aborts the
+  // connection). This is React's recommended "adjust state during render"
+  // pattern, which avoids a synchronous setState inside the effect.
+  const [trackedRunId, setTrackedRunId] = useState(runId);
+  if (runId !== trackedRunId) {
+    setTrackedRunId(runId);
+    setEvents([]);
+  }
+
   useEffect(() => {
     if (!runId) return;
     const ctl = new AbortController();

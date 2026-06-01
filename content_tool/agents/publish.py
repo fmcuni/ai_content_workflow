@@ -129,7 +129,7 @@ async def publish_to_wordpress(
 
     update_values: dict[str, object] = {
         "wp_pushed_post_id": result.id,
-        "wp_pushed_at": datetime.utcnow(),
+        "wp_pushed_at": datetime.now(UTC),
         "status": "published",
     }
     # Create-mode: WP just minted a brand-new draft post. Backfill the URL

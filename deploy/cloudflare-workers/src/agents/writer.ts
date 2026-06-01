@@ -132,9 +132,50 @@ async function buildSystemPrompt(
 }
 
 /**
+ * Reproduce Python `json.dumps(value, ensure_ascii=False)` exactly: compact
+ * `JSON.stringify` re-spaced to Python's default `", "` / `": "` separators
+ * (outside string literals), with non-ASCII preserved. Same logic as the
+ * helper in audit.ts — the writer prompt must be byte-identical to the Python
+ * reference so prompt-sha parity holds.
+ */
+function pyJsonDumps(value: unknown): string {
+  return reSpaceJson(JSON.stringify(value));
+}
+
+function reSpaceJson(compact: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of compact) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (!inString && (ch === ":" || ch === ",")) {
+      out += ch + " ";
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
  * Build the writer user prompt — EXACT field order, labels, and JSON encoding
- * from Python `build_user_prompt`. JSON.stringify (no spacing) mirrors
- * `json.dumps(..., ensure_ascii=False)`; non-ASCII is preserved by default.
+ * from Python `build_user_prompt`. `pyJsonDumps` reproduces
+ * `json.dumps(..., ensure_ascii=False)` (spaced separators); non-ASCII is
+ * preserved by default.
  */
 export function buildUserPrompt(input: {
   run: WriterRunInput;
@@ -151,8 +192,8 @@ export function buildUserPrompt(input: {
     `acf_adv_id: ${run.acfAdvId}\n` +
     `acf_widget_id: ${run.acfWidgetId}\n` +
     `topic_category: ${run.topicCategory || "N/A"}\n\n` +
-    `# outline\n${JSON.stringify(outline)}\n\n` +
-    `# gap_analysis\n${JSON.stringify(gapAnalysis)}\n\n` +
+    `# outline\n${pyJsonDumps(outline)}\n\n` +
+    `# gap_analysis\n${pyJsonDumps(gapAnalysis)}\n\n` +
     `# existing_article_markdown\n${existingMarkdown}\n`;
   if (run.editNote) {
     base +=
@@ -161,7 +202,7 @@ export function buildUserPrompt(input: {
   if (refineNotes && refineNotes.length > 0) {
     base +=
       `\n# refine_notes（上一輪 audit 必修問題）\n` +
-      `${JSON.stringify(refineNotes)}\n`;
+      `${pyJsonDumps(refineNotes)}\n`;
   }
   return base;
 }
@@ -288,7 +329,7 @@ export async function runWriter(
   // existing markdown, concatenated exactly as in Python writer_context.
   const writerContext =
     `${run.topic}\n${run.keywords.join(" ")}\n` +
-    `${JSON.stringify(outline)}\n${existingMarkdown}`;
+    `${pyJsonDumps(outline)}\n${existingMarkdown}`;
 
   const systemPrompt = await buildSystemPrompt(
     sql,

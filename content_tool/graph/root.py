@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +16,8 @@ from content_tool.graph.strategy import build_strategy_graph
 from content_tool.models.state import ContentToolState
 from content_tool.observability.cost import CostCalculator
 from content_tool.wordpress.client import WordPressClient
+
+_logger = logging.getLogger(__name__)
 
 MAX_HITL2_ROUNDS = 3
 
@@ -44,14 +47,25 @@ def build_root_graph(
                     seo_plugin=seo_plugin,  # type: ignore[arg-type]
                     if_unmodified_since=None,
                 )
-            settings = get_settings()
-            cost_calc = CostCalculator.load_from(config_path("pricing.yaml"))
-            async with session_factory() as session:
-                await write_compliance_log(
-                    session=session,
-                    run_id=UUID(state["run_id"]),
-                    cost_calc=cost_calc,
-                    gemini_model=settings.gemini_model,
+            # The WP post is already published and the run row is committed as
+            # "published" by publish_to_wordpress. A failure writing the
+            # compliance log must NOT propagate out of this node — that would
+            # let LangGraph mark the run "failed" even though publishing
+            # succeeded. Log and continue; the audit row can be backfilled.
+            try:
+                settings = get_settings()
+                cost_calc = CostCalculator.load_from(config_path("pricing.yaml"))
+                async with session_factory() as session:
+                    await write_compliance_log(
+                        session=session,
+                        run_id=UUID(state["run_id"]),
+                        cost_calc=cost_calc,
+                        gemini_model=settings.gemini_model,
+                    )
+            except Exception:
+                _logger.exception(
+                    "compliance log write failed after successful publish (run_id=%s)",
+                    state["run_id"],
                 )
             # Create-mode: surface the freshly-minted WP draft link on graph
             # state so downstream nodes / SSE subscribers see the URL the

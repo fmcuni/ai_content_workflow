@@ -84,9 +84,10 @@ export function ThinkingStream({
     if (!el) return;
     if (pinned.current) {
       // rAF lets the just-appended chunk lay out before we measure scrollHeight.
-      requestAnimationFrame(() => {
+      const id = requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
       });
+      return () => cancelAnimationFrame(id);
     }
   }, [totalLen, bursts.length, open]);
 
