@@ -86,8 +86,38 @@ phase is one or more PRs. Migrations are pushed before the code that reads them.
 - **Compliance**: actor role + `sod_override` in `GET /compliance/export.csv`.
 - **Conventional commits**, scoped: `feat(authz):`, `fix(concurrency):`, etc.
 
-## Open items to confirm before build
-1. **Admin break-glass for SoD** — include (recommended) or hard-block with no
-   override?
-2. **New-signup default role** — `viewer` (recommended) vs `author`?
-3. **Bootstrap admins** — which emails seed the first Admin(s)?
+## Status — SHIPPED 2026-06-01 (branch `feat/multi-user-resilience`)
+All phases implemented and committed; full suites green (Python testcontainers,
+Workers vitest 239, web vitest 59; tsc clean). A security review of the authz
+layer was run and its HIGH/MEDIUM findings fixed (SoD extended to HITL_1,
+dry-publish gated, session-required guard, admin self-demotion block).
+
+Commits: docs → `feat(concurrency)` 1A → `feat(concurrency)` 1B/1C/1D →
+`feat(authz)` Phase 2 → `fix(authz)` security review.
+
+## Decisions resolved (defaults applied — confirm or adjust)
+1. **Admin break-glass for SoD** — INCLUDED. Admin may override the 4-eyes block
+   with a non-empty `override_reason`; recorded as a `rbac.sod_override` audit
+   event + `sod_override:true` in the response.
+2. **New-signup default role** — `viewer` (least privilege; an Admin promotes).
+3. **Bootstrap admins** — NOT hard-coded. `BOOTSTRAP_ADMIN_EMAILS` (comma-sep
+   env/secret on the Worker) are treated as admin regardless of stored role, so
+   a fresh DB is never locked out. **Set this secret before/at first deploy.**
+
+## Deployment runbook (prod = Workers)
+1. `supabase db push` — apply `20260601000005` (version cols) +
+   `20260601000006` (user.role) BEFORE deploying the new Worker code.
+2. `wrangler secret put BOOTSTRAP_ADMIN_EMAILS` on `bowtie-content-tool-poc`
+   (e.g. the platform owner's `@bowtie.com.hk` address).
+3. Deploy both Workers (CI on push to `main`) + the web Worker (carries the
+   `/api/me` + `/api/admin/*` rewrites).
+4. Promote real reviewers/admins via the new **Users** admin page. Hard 4-eyes
+   needs ≥2 active reviewers (or 1 reviewer + 1 admin) to keep articles moving.
+
+## Deferred / not done
+- Security review LOW/MEDIUM M3 (snapshot identity helper consistency) and M4
+  (`/db/ping` schema exposure) — low value, left as-is.
+- H3 (viewer can read unpublished editorial content) — accepted by design;
+  app scope is public marketing content, no PII/PHI (CLAUDE.md).
+- Per-user/per-team run ownership scoping — out of scope (single editorial team).
+- Python backend authz — intentionally dev-only; enforcement is Workers + DB.
