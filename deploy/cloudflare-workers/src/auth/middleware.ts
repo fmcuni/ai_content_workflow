@@ -6,6 +6,10 @@ import { verifyTicket } from "./ticket";
 
 export interface AuthVars {
   userId: string;
+  /** Authenticated user's email — the compliance record-of-truth identity.
+   * Set on the cookie/session path; absent on the SSE ticket path (the ticket
+   * carries only the user id) and when AUTH_DISABLED bypasses the gate. */
+  userEmail?: string;
 }
 
 type AuthContext = Context<{ Bindings: Env; Variables: AuthVars }>;
@@ -46,6 +50,7 @@ export async function requireAuth(c: AuthContext, next: Next): Promise<Response 
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session?.user) return c.json({ error: "unauthorized" }, 401);
     c.set("userId", session.user.id);
+    c.set("userEmail", session.user.email);
   } finally {
     c.executionCtx.waitUntil(sql.end().catch(() => undefined));
   }

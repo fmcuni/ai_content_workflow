@@ -127,3 +127,27 @@ async def test_snapshot_prunes_to_retention_cap(postgres_url):
     assert count == _HITL2_SNAPSHOT_KEEP
     assert newest == "<p>newest</p>"
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_stamps_editor_email_as_created_by(postgres_url):
+    """The snapshot's created_by must reflect the supplied editor identity (email),
+    not a hardcoded placeholder."""
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+    run_id = uuid4()
+    await _seed_run(sf, run_id)
+    app = _make_app(sf)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post(
+            f"/runs/{run_id}/hitl2-snapshots",
+            json={
+                "trigger": "manual",
+                "editor_email": "author@bowtie.com.hk",
+                "html_body": "<p>draft</p>",
+            },
+        )
+    assert r.status_code == 200
+    assert r.json()["created_by"] == "author@bowtie.com.hk"
+    await engine.dispose()

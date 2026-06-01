@@ -375,14 +375,18 @@ async def hitl_2(
         )
         comments_json = [c.model_dump() for c in (payload.comments or [])]
 
+        is_approve = payload.decision == "approve"
         await session.execute(
             update(Run).where(Run.run_id == run_id).values(
                 hitl_2_decision=payload.decision,
                 hitl_2_notes=payload.notes,
                 hitl_2_comments=comments_json,
                 hitl_2_iteration=new_iteration,
-                approved_at=datetime.now(UTC) if payload.decision == "approve" else None,
-                approved_by="placeholder-editor",  # Plan 4 binds real identity
+                approved_at=datetime.now(UTC) if is_approve else None,
+                # Real approver identity (email) — only stamped on approve, the
+                # event the compliance log records. Falls back to "unknown" when
+                # the sidecar runs without an authenticated identity.
+                approved_by=(payload.editor_email or "unknown") if is_approve else None,
                 wp_publish_status=payload.wp_publish_status,
                 wp_author_id=payload.wp_author_id,
                 wp_category_ids=payload.wp_category_ids,
@@ -393,6 +397,41 @@ async def hitl_2(
                 wp_publish_at=payload.wp_publish_at,
             )
         )
+
+        # Persist any human inline edits onto the latest render BEFORE resuming,
+        # so the publish step pushes the reviewer's edited content (mirrors
+        # PUT /article). Only on approve — request_changes triggers an AI rewrite
+        # and reject is terminal, so neither needs the manual edit persisted.
+        if is_approve:
+            edited: dict[str, str] = {}
+            if payload.edited_html_body is not None:
+                edited["html_body"] = payload.edited_html_body
+            if payload.edited_seo_title is not None:
+                edited["seo_title"] = payload.edited_seo_title
+            if payload.edited_meta_description is not None:
+                edited["meta_description"] = payload.edited_meta_description
+            if edited:
+                latest_draft = (
+                    await session.execute(
+                        select(Draft)
+                        .where(Draft.run_id == run_id)
+                        .order_by(Draft.iteration.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if latest_draft is not None:
+                    render_row = (
+                        await session.execute(
+                            select(Render).where(Render.draft_id == latest_draft.draft_id)
+                        )
+                    ).scalar_one_or_none()
+                    if render_row is not None:
+                        await session.execute(
+                            update(Render)
+                            .where(Render.render_id == render_row.render_id)
+                            .values(**edited)
+                        )
+
         await session.commit()
 
     state_update: dict = {
@@ -438,7 +477,7 @@ async def save_hitl2_snapshot(
         snap = Hitl2Snapshot(
             snapshot_id=uuid4(),
             run_id=run_id,
-            created_by="placeholder-editor",  # Plan 4 binds real identity
+            created_by=payload.editor_email or "unknown",  # real author identity (email)
             trigger=payload.trigger,
             html_body=payload.html_body,
             seo_title=payload.seo_title,
