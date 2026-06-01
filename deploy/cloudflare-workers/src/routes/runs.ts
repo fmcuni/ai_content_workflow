@@ -1506,7 +1506,13 @@ runsRouter.post("/:id/hitl2-snapshots", requireRole("author"), async (c) => {
   const body = await c.req
     .json<Hitl2SnapshotBody>()
     .catch(() => ({}) as Hitl2SnapshotBody);
-  const editorEmail = c.get("userEmail") ?? "unknown";
+  // Audit identity: bind `created_by` to the authenticated session (email →
+  // userId → "unknown"), consistent with the create-run / hitl-2 sites. The
+  // snapshot body carries no `editor_email`, so the payload fallback is null.
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    null,
+  );
 
   const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<{ run_id: string }[]>`

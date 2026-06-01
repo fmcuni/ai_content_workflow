@@ -102,13 +102,14 @@ Commits: docs → `feat(concurrency)` 1A → `feat(concurrency)` 1B/1C/1D →
 2. **New-signup default role** — `viewer` (least privilege; an Admin promotes).
 3. **Bootstrap admins** — NOT hard-coded. `BOOTSTRAP_ADMIN_EMAILS` (comma-sep
    env/secret on the Worker) are treated as admin regardless of stored role, so
-   a fresh DB is never locked out. **Set this secret before/at first deploy.**
+   a fresh DB is never locked out. First admin: **`franco.ma@bowtie.com.hk`**.
+   **Set this secret before/at first deploy.**
 
 ## Deployment runbook (prod = Workers)
 1. `supabase db push` — apply `20260601000005` (version cols) +
    `20260601000006` (user.role) BEFORE deploying the new Worker code.
 2. `wrangler secret put BOOTSTRAP_ADMIN_EMAILS` on `bowtie-content-tool-poc`
-   (e.g. the platform owner's `@bowtie.com.hk` address).
+   → `franco.ma@bowtie.com.hk` (the first admin).
 3. Deploy both Workers (CI on push to `main`) + the web Worker (carries the
    `/api/me` + `/api/admin/*` rewrites).
 4. Promote real reviewers/admins via the new **Users** admin page. Hard 4-eyes

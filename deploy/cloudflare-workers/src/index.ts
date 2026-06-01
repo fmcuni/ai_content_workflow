@@ -156,7 +156,9 @@ app.post("/refresh/scan", requireRole("author"));
 app.post("/refresh/scan/:articleId", requireRole("author"));
 
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
-app.get("/db/ping", async (c) => {
+// Admin-only: the response enumerates content_tool table names + Postgres
+// version, so it stays behind requireRole("admin") (not just any viewer).
+app.get("/db/ping", requireRole("admin"), async (c) => {
   // Connect through Hyperdrive (no upstream TLS handshake on the hot path → no
   // free-plan subrequest blowup). fetch_types:false trims pg_catalog round-trips.
   const sql = postgres(c.env.HYPERDRIVE.connectionString, {
