@@ -2,14 +2,13 @@
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { SectionHead } from "@/components/SectionHead";
-import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { TipTapEditor } from "@/components/TipTapEditor";
 import { CommentsSidebar } from "@/components/CommentsSidebar";
+import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
+import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import { api } from "@/lib/api";
 import type { Hitl2Comment } from "@/lib/types";
 
@@ -64,26 +63,29 @@ export default function RegeneratePage({ params }: { params: Promise<{ runId: st
   });
 
   return (
-    <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 pb-32">
-      <div className="mb-4">
-        <Link
-          href={`/runs/${runId}`}
-          className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-        >
-          ← Run · {shortId}
-        </Link>
-      </div>
-
-      <SectionHead
-        kicker={<>Regenerate · <span className="text-accent">{shortId}</span></>}
-        hed="Editor's review"
-        dek="Mark up the published draft with anchored comments and overall notes, then let the AI regenerate. The new draft lands on the edit page for you to verify and re-push."
-      />
-
-      {run.data && <RunTaskDetails run={run.data} />}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
-        <section>
+    <RunEditorShell
+      runId={runId}
+      run={run.data}
+      kicker={<>Regenerate · <span className="text-accent">{shortId}</span></>}
+      hed="Editor's review"
+      dek="Mark up the published draft with anchored comments and overall notes, then let the AI regenerate. The new draft lands on the edit page for you to verify and re-push."
+      actionBar={
+        <>
+          <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
+            Round {(run.data?.hitl_2_iteration ?? 0) + 1}
+          </span>
+          <Button
+            variant="primary"
+            disabled={!renderReady || regen.isPending || !hasFeedback}
+            title={!hasFeedback ? "Add a comment or note first." : ""}
+            onClick={() => regen.mutate()}
+          >
+            {regen.isPending ? "Regenerating…" : "Regenerate with AI ↺"}
+          </Button>
+        </>
+      }
+    >
+      <section>
           <p className="kicker mb-3">Current article — select text to comment</p>
           {render.isPending && (
             <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider animate-pulse">
@@ -104,16 +106,7 @@ export default function RegeneratePage({ params }: { params: Promise<{ runId: st
             />
           )}
 
-          <div className="mt-6">
-            <p className="kicker mb-2">Notes to AI</p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              placeholder="Overall direction — e.g. 'lede should be punchier, lead with the surgery question.'"
-              className="w-full resize-y border border-rule bg-paper rounded px-3 py-2 text-[14px] text-ink focus:outline-none focus:border-accent"
-            />
-          </div>
+          <NotesToAi value={notes} onChange={setNotes} />
         </section>
 
         <aside className="lg:sticky lg:top-[6.25rem] self-start lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto">
@@ -128,23 +121,6 @@ export default function RegeneratePage({ params }: { params: Promise<{ runId: st
             onFocus={setFocusedCommentId}
           />
         </aside>
-      </div>
-
-      <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
-        <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-end gap-3">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
-            Round {(run.data?.hitl_2_iteration ?? 0) + 1}
-          </span>
-          <Button
-            variant="primary"
-            disabled={!renderReady || regen.isPending || !hasFeedback}
-            title={!hasFeedback ? "Add a comment or note first." : ""}
-            onClick={() => regen.mutate()}
-          >
-            {regen.isPending ? "Regenerating…" : "Regenerate with AI ↺"}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </RunEditorShell>
   );
 }
