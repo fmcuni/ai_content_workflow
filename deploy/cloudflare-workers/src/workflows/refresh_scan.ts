@@ -121,13 +121,17 @@ export class RefreshScanWorkflow extends WorkflowEntrypoint<Env, RefreshScanPara
     }
 
     // --- 3. aggregate counts into the TickResult envelope ---------------------
+    // `finishedAt` is stamped inside a step so it is memoized: a bare new Date()
+    // in the run() body would re-stamp to a later wall-clock time on every replay
+    // after hibernation, making the returned TickResult non-deterministic.
+    const finishedAt = await step.do("finished-at", async () => new Date().toISOString());
     const result: TickResult = {
       scanned: 0,
       evaluationsCreated: 0,
       llmCalls: 0,
       estCostUsdCents: 0,
       startedAt: setup.startedAt,
-      finishedAt: new Date().toISOString(),
+      finishedAt,
       skipped: [...setup.skipped],
     };
 

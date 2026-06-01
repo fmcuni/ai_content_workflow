@@ -86,7 +86,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
         });
         return "ok";
       });
-      await this.emit(batchId, "graph.error", { message });
+      await this.emitStep(step, "emit-graph-error", batchId, "graph.error", { message });
       throw err;
     }
     return { batchId };
@@ -117,7 +117,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
     );
 
     // --- 2. topic_gen ------------------------------------------------------
-    await this.setStatus(batchId, "generating");
+    await this.statusStep(step, "status-generating", batchId, "generating");
     const generated: GeneratedTopic[] = await step.do("topic-gen", async () =>
       this.withSql<GeneratedTopic[]>(async (sql) => {
         const gemini = this.geminiClient();
@@ -134,10 +134,12 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
         return output.topics.map((t) => ({ topic: t.topic, keywords: t.keywords }));
       }),
     );
-    await this.emit(batchId, "topic_gen.done", { count: generated.length });
+    await this.emitStep(step, "emit-topic-gen-done", batchId, "topic_gen.done", {
+      count: generated.length,
+    });
 
     // --- 3. fan_out: persist one candidate row per generated topic --------
-    await this.setStatus(batchId, "analysing");
+    await this.statusStep(step, "status-analysing", batchId, "analysing");
     const candidateIds: string[] = await step.do("fan-out", async () =>
       this.withSql<string[]>(async (sql) => {
         const ids: string[] = [];
@@ -171,7 +173,9 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
         ),
       );
     }
-    await this.emit(batchId, "analyse_candidate.done", { count: candidateIds.length });
+    await this.emitStep(step, "emit-analyse-done", batchId, "analyse_candidate.done", {
+      count: candidateIds.length,
+    });
 
     // --- 5. aggregate ------------------------------------------------------
     const finalStatus = await step.do("aggregate", async () =>
@@ -195,8 +199,10 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
         return status;
       }),
     );
-    await this.emit(batchId, "aggregate.done", { status: finalStatus });
-    await this.emit(batchId, "graph.completed", {});
+    await this.emitStep(step, "emit-aggregate-done", batchId, "aggregate.done", {
+      status: finalStatus,
+    });
+    await this.emitStep(step, "emit-graph-completed", batchId, "graph.completed", {});
   }
 
   /**
@@ -273,6 +279,36 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
         WHERE batch_id = ${batchId}::uuid
       `;
       return undefined;
+    });
+  }
+
+  // Durable side-effect wrappers — on a Workflows replay after hibernation the
+  // run() body re-executes; only completed step.do() callbacks are memoized. A
+  // bare setStatus/emit would re-fire on every wake (duplicate status writes +
+  // duplicate batch SSE events), so each runs inside a uniquely-labelled step.
+
+  private async statusStep(
+    step: WorkflowStep,
+    label: string,
+    batchId: string,
+    status: string,
+  ): Promise<void> {
+    await step.do(label, async () => {
+      await this.setStatus(batchId, status);
+      return "ok";
+    });
+  }
+
+  private async emitStep(
+    step: WorkflowStep,
+    label: string,
+    batchId: string,
+    eventName: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await step.do(label, async () => {
+      await this.emit(batchId, eventName, payload);
+      return "ok";
     });
   }
 
