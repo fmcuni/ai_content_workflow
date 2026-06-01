@@ -113,6 +113,8 @@ async def run_audit(
         render.html_body,
         citations_denied_displayed=denied_displayed,
         schema_jsonld=render.schema_jsonld,
+        adv_enabled=run.acf_adv_id != 0,
+        widget_enabled=run.acf_widget_id != 0,
     )
 
     sys_prompt = await build_system_prompt(

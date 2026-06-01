@@ -171,9 +171,20 @@ def render_html(markdown: str) -> RenderResult:
     md = MarkdownIt("commonmark").enable(["table"])
     body_html = md.render(rest)
 
-    # Replace shortcodes (after MD rendering — they survive as raw text inside <p>)
-    body_html = _ADV_RE.sub(lambda m: f'[adv_panel id="{m.group(1)}"]', body_html)
-    body_html = _WIDGET_RE.sub(lambda m: f'[page_widget id="{m.group(1)}"]', body_html)
+    # Replace shortcodes (after MD rendering — they survive as raw text inside <p>).
+    # An id of 0 is the "no element" sentinel — drop the shortcode entirely so the
+    # published article carries no adv_panel / page_widget block.
+    body_html = _ADV_RE.sub(
+        lambda m: "" if m.group(1) == "0" else f'[adv_panel id="{m.group(1)}"]',
+        body_html,
+    )
+    body_html = _WIDGET_RE.sub(
+        lambda m: "" if m.group(1) == "0" else f'[page_widget id="{m.group(1)}"]',
+        body_html,
+    )
+    # A dropped shortcode leaves an empty <p></p> behind (markdown-it wraps each
+    # standalone shortcode line in a paragraph). Strip those so no blank block ships.
+    body_html = re.sub(r"<p>\s*</p>", "", body_html)
 
     # FAQ widget + JSON-LD
     faq_html = _build_faq_html(faq_items)

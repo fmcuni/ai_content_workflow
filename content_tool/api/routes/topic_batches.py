@@ -509,8 +509,16 @@ async def promote_candidates(
         for item in payload.promotions:
             cand = by_id[item.candidate_id]
             persona = cand.persona_slug or batch.persona_default or "bowtie-editor"
-            adv_id = cand.acf_adv_id or batch.acf_adv_id_default or 0
-            widget_id = cand.acf_widget_id or batch.acf_widget_id_default or 0
+            # Null-aware: a candidate with no acf id inherits the batch default,
+            # but an explicit 0 ("no element") is honoured, not overridden.
+            adv_id = cand.acf_adv_id if cand.acf_adv_id is not None else batch.acf_adv_id_default
+            adv_id = adv_id if adv_id is not None else 0
+            widget_id = (
+                cand.acf_widget_id
+                if cand.acf_widget_id is not None
+                else batch.acf_widget_id_default
+            )
+            widget_id = widget_id if widget_id is not None else 0
             run_payload_kwargs: dict[str, Any] = {
                 "topic": cand.topic,
                 "keywords": list(cand.keywords or []),

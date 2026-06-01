@@ -37,8 +37,8 @@ function blankRow(persona = DEFAULT_PERSONA): CreateRow {
     keywords: "",
     persona,
     edit_note: "",
-    acf_adv_id: 1,
-    acf_widget_id: 1,
+    acf_adv_id: 0,
+    acf_widget_id: 0,
     status: "idle",
     result: null,
   };
@@ -83,8 +83,8 @@ export function CreateLedger() {
             mode: "auto",
             persona: r.persona || DEFAULT_PERSONA,
             edit_note: r.edit_note.trim() || null,
-            acf_adv_id: r.acf_adv_id || 1,
-            acf_widget_id: r.acf_widget_id || 1,
+            acf_adv_id: r.acf_adv_id,
+            acf_widget_id: r.acf_widget_id,
             topic_category: null,
             editor_email: "",
             topic_candidate_id: null,
@@ -133,7 +133,7 @@ export function CreateLedger() {
       </div>
 
       <div className="border border-rule overflow-hidden">
-        <div className="hidden md:grid grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.8fr)_108px_minmax(0,1.1fr)_64px_64px_36px_36px] bg-paper-deep border-b border-rule">
+        <div className="hidden md:grid grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.8fr)_108px_minmax(0,1.1fr)_88px_88px_36px_36px] bg-paper-deep border-b border-rule">
           {(["№", "Topic", "Focus keywords", "Mode", "Voice", "ADV", "Widget", "", ""] as const).map(
             (t, i) => (
               <div
@@ -264,7 +264,7 @@ function CreateRowView({
         status === "error" && "bg-accent/[0.05]",
       )}
     >
-      <div className="grid grid-cols-1 md:grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.8fr)_108px_minmax(0,1.1fr)_64px_64px_36px_36px]">
+      <div className="grid grid-cols-1 md:grid-cols-[40px_minmax(0,2.2fr)_minmax(0,1.8fr)_108px_minmax(0,1.1fr)_88px_88px_36px_36px]">
         <div className="flex items-center justify-center md:border-r border-rule px-2 py-2 relative">
           <span
             className="font-display text-[20px] text-ink-faint tabular-nums leading-none"
@@ -283,7 +283,7 @@ function CreateRowView({
           <Input
             value={row.topic}
             onChange={(e) => onPatch({ topic: e.target.value })}
-            placeholder="Topic in plain English"
+            placeholder="Article topic"
           />
         </Cell>
 
@@ -333,9 +333,15 @@ function CreateRowView({
 
         <Cell label="ADV">
           <Input
-            type="number"
-            value={row.acf_adv_id}
-            onChange={(e) => onPatch({ acf_adv_id: parseInt(e.target.value || "0", 10) })}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            value={row.acf_adv_id === 0 ? "" : row.acf_adv_id}
+            onChange={(e) =>
+              onPatch({ acf_adv_id: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })
+            }
+            placeholder="none"
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_adv_id"
           />
@@ -343,9 +349,15 @@ function CreateRowView({
 
         <Cell label="Widget">
           <Input
-            type="number"
-            value={row.acf_widget_id}
-            onChange={(e) => onPatch({ acf_widget_id: parseInt(e.target.value || "0", 10) })}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            value={row.acf_widget_id === 0 ? "" : row.acf_widget_id}
+            onChange={(e) =>
+              onPatch({ acf_widget_id: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })
+            }
+            placeholder="none"
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_widget_id"
           />

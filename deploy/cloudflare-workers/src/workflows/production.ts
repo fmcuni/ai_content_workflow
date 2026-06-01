@@ -570,6 +570,8 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
             citationsSummary,
             schemaJsonld: toObjectArrayOrNull(render.schema_jsonld),
             citationsDeniedDisplayed,
+            advEnabled: run.acf_adv_id !== 0,
+            widgetEnabled: run.acf_widget_id !== 0,
             todayDate: run.today_date.slice(0, 10),
           });
           return audit.overall_pass;

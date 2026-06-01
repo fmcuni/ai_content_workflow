@@ -40,8 +40,8 @@ function rowFromCandidate(c: TopicCandidate, fallbackPersona: string): LocalRowS
     topic: c.topic,
     keywords: c.keywords.join(", "),
     persona: c.persona_slug ?? fallbackPersona,
-    acf_adv_id: c.acf_adv_id ?? 1,
-    acf_widget_id: c.acf_widget_id ?? 1,
+    acf_adv_id: c.acf_adv_id ?? 0,
+    acf_widget_id: c.acf_widget_id ?? 0,
     promote_mode: c.promote_mode ?? "create",
     selected: c.status === "candidate" && c.existing === "no",
     edit_note: c.operator_note ?? "",
@@ -440,7 +440,6 @@ function CandidateRow({
             value={local.keywords}
             onChange={(e) => commitKeywords(e.target.value)}
             disabled={!editable}
-            placeholder="kw1, kw2, kw3"
             className="font-mono text-[12px]"
           />
         </div>
@@ -492,14 +491,18 @@ function CandidateRow({
 
         <div className="border-r border-rule px-2 py-2">
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
             disabled={!editable}
-            value={local.acf_adv_id}
+            value={local.acf_adv_id === 0 ? "" : local.acf_adv_id}
             onChange={(e) => {
-              const n = parseInt(e.target.value || "0", 10);
+              const n = parseInt(e.target.value.replace(/\D/g, "") || "0", 10);
               onLocal({ acf_adv_id: n });
               onPatchServer({ acf_adv_id: n, editor_email: "" });
             }}
+            placeholder="none"
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_adv_id"
           />
@@ -507,14 +510,18 @@ function CandidateRow({
 
         <div className="border-r border-rule px-2 py-2">
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
             disabled={!editable}
-            value={local.acf_widget_id}
+            value={local.acf_widget_id === 0 ? "" : local.acf_widget_id}
             onChange={(e) => {
-              const n = parseInt(e.target.value || "0", 10);
+              const n = parseInt(e.target.value.replace(/\D/g, "") || "0", 10);
               onLocal({ acf_widget_id: n });
               onPatchServer({ acf_widget_id: n, editor_email: "" });
             }}
+            placeholder="none"
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_widget_id"
           />
@@ -569,7 +576,6 @@ function CandidateRow({
                 value={local.edit_note}
                 onChange={(e) => commitNote(e.target.value)}
                 rows={2}
-                placeholder="What the desk wants on this article (steers the outline & draft)."
                 className="bg-paper text-[13px]"
               />
             ) : (

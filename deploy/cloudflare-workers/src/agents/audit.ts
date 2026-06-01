@@ -37,6 +37,9 @@ export interface AuditInput {
   citationsSummary: object[];
   schemaJsonld: object[] | null;
   citationsDeniedDisplayed: boolean;
+  /** acf id of 0 = "no element"; skips the shortcode presence check. Default true. */
+  advEnabled?: boolean;
+  widgetEnabled?: boolean;
   todayDate: string; // YYYY-MM-DD
   onThought?: ThoughtCallback;
 }
@@ -171,6 +174,8 @@ export async function runAudit(
     htmlBody: input.htmlBody,
     citationsDeniedDisplayed: input.citationsDeniedDisplayed,
     schemaJsonld: input.schemaJsonld,
+    advEnabled: input.advEnabled,
+    widgetEnabled: input.widgetEnabled,
   });
 
   const systemPrompt = await buildSystemPrompt(

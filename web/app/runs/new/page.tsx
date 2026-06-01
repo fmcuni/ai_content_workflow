@@ -46,8 +46,8 @@ function blankRow(persona = DEFAULT_PERSONA): LedgerRow {
     mode: "auto",
     persona,
     edit_note: "",
-    acf_adv_id: 1,
-    acf_widget_id: 1,
+    acf_adv_id: 0,
+    acf_widget_id: 0,
     status: "idle",
     result: null,
   };
@@ -203,8 +203,8 @@ function NewRunForm() {
             mode: r.mode,
             persona: r.persona || DEFAULT_PERSONA,
             edit_note: r.edit_note.trim() || null,
-            acf_adv_id: r.acf_adv_id || 1,
-            acf_widget_id: r.acf_widget_id || 1,
+            acf_adv_id: r.acf_adv_id,
+            acf_widget_id: r.acf_widget_id,
             topic_category: null,
             editor_email: "",
             triggered_by_evaluation_id: evaluationId ?? undefined,
@@ -554,7 +554,7 @@ function LedgerRowView({
           <Input
             value={row.topic}
             onChange={(e) => onPatch({ topic: e.target.value })}
-            placeholder="Topic in plain English"
+            placeholder="Article topic"
           />
         </Cell>
 
@@ -608,10 +608,11 @@ function LedgerRowView({
             inputMode="numeric"
             pattern="[0-9]*"
             maxLength={6}
-            value={row.acf_adv_id}
+            value={row.acf_adv_id === 0 ? "" : row.acf_adv_id}
             onChange={(e) =>
               onPatch({ acf_adv_id: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })
             }
+            placeholder="none"
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_adv_id"
           />
@@ -623,10 +624,11 @@ function LedgerRowView({
             inputMode="numeric"
             pattern="[0-9]*"
             maxLength={6}
-            value={row.acf_widget_id}
+            value={row.acf_widget_id === 0 ? "" : row.acf_widget_id}
             onChange={(e) =>
               onPatch({ acf_widget_id: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })
             }
+            placeholder="none"
             className="font-mono text-[12px] tabular-nums"
             aria-label="acf_widget_id"
           />

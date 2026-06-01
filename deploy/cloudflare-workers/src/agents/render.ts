@@ -198,8 +198,17 @@ export function renderHtml(markupRaw: string): RenderOutput {
   let bodyHtml = md.render(rest);
 
   // Replace shortcodes after MD rendering (they survive as raw text inside <p>).
-  bodyHtml = bodyHtml.replace(ADV_RE, (_m, id: string) => `[adv_panel id="${id}"]`);
-  bodyHtml = bodyHtml.replace(WIDGET_RE, (_m, id: string) => `[page_widget id="${id}"]`);
+  // An id of 0 is the "no element" sentinel — drop the shortcode entirely so the
+  // published article carries no adv_panel / page_widget block.
+  bodyHtml = bodyHtml.replace(ADV_RE, (_m, id: string) =>
+    id === "0" ? "" : `[adv_panel id="${id}"]`,
+  );
+  bodyHtml = bodyHtml.replace(WIDGET_RE, (_m, id: string) =>
+    id === "0" ? "" : `[page_widget id="${id}"]`,
+  );
+  // A dropped shortcode leaves an empty <p></p> behind (markdown-it wraps each
+  // standalone shortcode line in a paragraph). Strip those so no blank block ships.
+  bodyHtml = bodyHtml.replace(/<p>\s*<\/p>/g, "");
 
   const faqHtml = buildFaqHtml(faqItems);
   const faqJsonld = faqItems.length > 0 ? buildFaqJsonld(faqItems) : null;

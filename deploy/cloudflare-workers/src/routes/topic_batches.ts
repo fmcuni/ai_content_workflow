@@ -697,8 +697,10 @@ topicBatchesRouter.post("/:id/promote", async (c) => {
       const runId = crypto.randomUUID();
       const persona =
         cand.persona_slug || batch.persona_default || DEFAULT_PERSONA;
-      const advId = cand.acf_adv_id || batch.acf_adv_id_default || 0;
-      const widgetId = cand.acf_widget_id || batch.acf_widget_id_default || 0;
+      // Null-aware: a candidate with no acf id inherits the batch default, but
+      // an explicit 0 ("no element") is honoured rather than overridden.
+      const advId = (cand.acf_adv_id ?? batch.acf_adv_id_default) ?? 0;
+      const widgetId = (cand.acf_widget_id ?? batch.acf_widget_id_default) ?? 0;
       const keywords = pgJson<string[]>(cand.keywords) ?? [];
       const editNote = (cand.operator_note ?? "").trim() || null;
       const articleUrl = mode === "refresh" ? cand.existing_url : null;

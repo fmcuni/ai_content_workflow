@@ -40,8 +40,8 @@ export function BriefForm() {
   const [priorityFocus, setPriorityFocus] = useState("");
   const [notes, setNotes] = useState("");
   const [persona, setPersona] = useState(DEFAULT_PERSONA);
-  const [acfAdvId, setAcfAdvId] = useState(1);
-  const [acfWidgetId, setAcfWidgetId] = useState(1);
+  const [acfAdvId, setAcfAdvId] = useState(0);
+  const [acfWidgetId, setAcfWidgetId] = useState(0);
 
   const personas = personasQ.data ?? [];
 
@@ -66,8 +66,8 @@ export function BriefForm() {
         priority_focus: priorityFocus.trim() || null,
         notes: notes.trim() || null,
         persona_default: persona || DEFAULT_PERSONA,
-        acf_adv_id_default: acfAdvId || 1,
-        acf_widget_id_default: acfWidgetId || 1,
+        acf_adv_id_default: acfAdvId,
+        acf_widget_id_default: acfWidgetId,
         editor_email: "",
       };
       return topicBatchesApi.create(payload);
@@ -99,7 +99,6 @@ export function BriefForm() {
           <Input
             value={researchTheme}
             onChange={(e) => setResearchTheme(e.target.value)}
-            placeholder="e.g. 保險新手指南 · 自願醫保入門"
             autoFocus
           />
         </BriefField>
@@ -108,7 +107,6 @@ export function BriefForm() {
           <Input
             value={targetAudience}
             onChange={(e) => setTargetAudience(e.target.value)}
-            placeholder="e.g. 25–40 歲香港首置家庭"
           />
         </BriefField>
 
@@ -147,7 +145,6 @@ export function BriefForm() {
             value={mustCover}
             onChange={(e) => setMustCover(e.target.value)}
             rows={3}
-            placeholder={"e.g.\n中港兩地門診比較\n免找數網絡"}
           />
         </BriefField>
 
@@ -156,7 +153,6 @@ export function BriefForm() {
             value={mustAvoid}
             onChange={(e) => setMustAvoid(e.target.value)}
             rows={3}
-            placeholder={"e.g.\n吹奏式語氣\n直接拿同業作對標"}
           />
         </BriefField>
 
@@ -165,7 +161,6 @@ export function BriefForm() {
             value={priorityFocus}
             onChange={(e) => setPriorityFocus(e.target.value)}
             rows={2}
-            placeholder="e.g. 着重 ASEO 拆解，先 first-time buyer 後 renewal。"
           />
         </BriefField>
 
@@ -174,7 +169,6 @@ export function BriefForm() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            placeholder="Anything the wire should know before going out."
           />
         </BriefField>
 
@@ -208,9 +202,12 @@ export function BriefForm() {
 
           <BriefField label="ADV" hint="acf_adv_id">
             <Input
-              type="number"
-              value={acfAdvId}
-              onChange={(e) => setAcfAdvId(parseInt(e.target.value || "0", 10))}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={acfAdvId === 0 ? "" : acfAdvId}
+              onChange={(e) => setAcfAdvId(parseInt(e.target.value.replace(/\D/g, "") || "0", 10))}
               className="font-mono text-[12px] tabular-nums"
               aria-label="acf_adv_id"
             />
@@ -218,9 +215,14 @@ export function BriefForm() {
 
           <BriefField label="Widget" hint="acf_widget_id">
             <Input
-              type="number"
-              value={acfWidgetId}
-              onChange={(e) => setAcfWidgetId(parseInt(e.target.value || "0", 10))}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={acfWidgetId === 0 ? "" : acfWidgetId}
+              onChange={(e) =>
+                setAcfWidgetId(parseInt(e.target.value.replace(/\D/g, "") || "0", 10))
+              }
               className="font-mono text-[12px] tabular-nums"
               aria-label="acf_widget_id"
             />

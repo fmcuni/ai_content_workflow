@@ -17,6 +17,14 @@ export interface DeterministicChecksInput {
   htmlBody: string;
   citationsDeniedDisplayed: boolean;
   schemaJsonld: object[] | null;
+  /**
+   * Whether the run carries an adv_panel / page_widget element. An acf id of 0
+   * is the "no element" sentinel — the shortcode is intentionally absent, so its
+   * presence check is skipped rather than flagged as a must-fix finding.
+   * Defaults to true to preserve behaviour for callers that do not pass it.
+   */
+  advEnabled?: boolean;
+  widgetEnabled?: boolean;
 }
 
 // Shortcode presence regexes — mirror the Python `re.search` patterns exactly.
@@ -33,9 +41,11 @@ const FAQ_WIDGET_MARKER = 'class="editor__item editor__faq"';
  */
 export function runDeterministicChecks(input: DeterministicChecksInput): AuditFinding[] {
   const { htmlBody, citationsDeniedDisplayed, schemaJsonld } = input;
+  const advEnabled = input.advEnabled ?? true;
+  const widgetEnabled = input.widgetEnabled ?? true;
   const findings: AuditFinding[] = [];
 
-  if (!ADV_PANEL_RE.test(htmlBody)) {
+  if (advEnabled && !ADV_PANEL_RE.test(htmlBody)) {
     findings.push({
       id: "det-fmt-adv",
       category: "format",
@@ -47,7 +57,7 @@ export function runDeterministicChecks(input: DeterministicChecksInput): AuditFi
     });
   }
 
-  if (!PAGE_WIDGET_RE.test(htmlBody)) {
+  if (widgetEnabled && !PAGE_WIDGET_RE.test(htmlBody)) {
     findings.push({
       id: "det-fmt-widget",
       category: "format",

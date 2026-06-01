@@ -7,10 +7,15 @@ def run_deterministic_checks(
     *,
     citations_denied_displayed: bool,
     schema_jsonld: list[dict[str, Any]] | None = None,
+    adv_enabled: bool = True,
+    widget_enabled: bool = True,
 ) -> list[dict[str, Any]]:
+    # ``adv_enabled`` / ``widget_enabled`` are False when the run's acf id is 0
+    # (the "no element" sentinel): the shortcode is intentionally absent, so its
+    # presence check is skipped rather than flagged as a must-fix finding.
     findings: list[dict[str, Any]] = []
 
-    if not re.search(r'\[adv_panel id="\d+"\]', html_body):
+    if adv_enabled and not re.search(r'\[adv_panel id="\d+"\]', html_body):
         findings.append({
             "id": "det-fmt-adv", "category": "format", "severity": "high",
             "location": "body", "issue": "缺少 [adv_panel id=...] shortcode",
@@ -18,7 +23,7 @@ def run_deterministic_checks(
             "must_fix": True,
         })
 
-    if not re.search(r'\[page_widget id="\d+"\]', html_body):
+    if widget_enabled and not re.search(r'\[page_widget id="\d+"\]', html_body):
         findings.append({
             "id": "det-fmt-widget", "category": "format", "severity": "high",
             "location": "body", "issue": "缺少 [page_widget id=...] shortcode",
