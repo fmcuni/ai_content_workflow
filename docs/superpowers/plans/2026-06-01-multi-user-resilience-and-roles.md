@@ -86,6 +86,18 @@ phase is one or more PRs. Migrations are pushed before the code that reads them.
 - **Compliance**: actor role + `sod_override` in `GET /compliance/export.csv`.
 - **Conventional commits**, scoped: `feat(authz):`, `fix(concurrency):`, etc.
 
+## ⚠️ Model change — 2026-06-02 (supersedes the role/SoD sections below)
+Requirements changed: **publishing no longer requires 4-eyes**, and an
+**editor (or above) can review and publish** (including their own articles).
+The role model collapsed from four roles to **three: `viewer < editor < admin`**
+(author+reviewer merged into `editor`), and **segregation of duties was removed
+entirely** (no self-approval block, no break-glass). Migration
+`20260602000001_role_taxonomy_editor.sql` remaps the enum (applied to prod).
+Capability map now: read=viewer; create/edit/regenerate/promote/HITL_1+HITL_2
+approve/dry-publish/republish=**editor**; prompts/personas/source-policy/delete/
+manage-users=**admin**. The four-role + SoD text in §3 below is historical.
+Commit: `refactor(authz): collapse to viewer/editor/admin, remove SoD`.
+
 ## Status — SHIPPED 2026-06-01 (branch `feat/multi-user-resilience`)
 All phases implemented and committed; full suites green (Python testcontainers,
 Workers vitest 239, web vitest 59; tsc clean). A security review of the authz

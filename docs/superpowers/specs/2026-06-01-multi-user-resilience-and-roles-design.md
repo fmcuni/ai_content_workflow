@@ -1,9 +1,16 @@
 # Multi-User Resilience & User Roles — Design
 
 **Date:** 2026-06-01
-**Status:** Proposed
+**Status:** Implemented, then amended 2026-06-02 — see note below.
 **Scope:** Make the app safe for concurrent multi-user use and introduce
 role-based authorization. Public marketing/editorial content only — no PII/PHI.
+
+> **Amendment 2026-06-02:** The four-role + hard-4-eyes model in §3 was
+> superseded. Final model is **three roles `viewer < editor < admin`** with
+> **no segregation of duties** — an `editor` (author+reviewer merged) reviews
+> and publishes, including their own articles; `admin` adds config, delete, and
+> user-role management. SoD / break-glass were removed. §3.1/§3.2 below are
+> historical; the concurrency design (§4) is unchanged.
 
 ---
 
