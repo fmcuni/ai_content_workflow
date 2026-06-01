@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import type { Context } from "hono";
 import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
@@ -17,9 +16,7 @@ import { resolvePublishStatus } from "../wordpress/publish_status";
 import { restartGuard } from "./run_guards";
 import type { AuthVars } from "../auth/middleware";
 import { resolveActorIdentity } from "./identity";
-import { loadRole, requireRole } from "../auth/authz";
-import { evaluateSod } from "../auth/sod";
-import { auditLog } from "../auth/audit";
+import { requireRole } from "../auth/authz";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
 // ---------------------------------------------------------------------------
@@ -88,8 +85,6 @@ interface ResumeBody {
   edited_outline?: unknown;
   new_route?: string | null;
   notes?: string | null;
-  /** Break-glass reason for the HITL_1 self-approval bar (admin only). */
-  override_reason?: string | null;
 }
 
 interface Hitl2Comment {
@@ -116,9 +111,6 @@ interface Hitl2Body {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
-  /** Break-glass reason for the segregation-of-duties self-approval bar. Only
-   * honored when the actor's effective role is `admin` (see ../auth/sod). */
-  override_reason?: string | null;
 }
 
 interface DryPublishBody {
@@ -304,30 +296,6 @@ function toDateGmt(iso: string): string {
   return d.toISOString().replace(/\.\d{3}Z$/, "").replace(/Z$/, "");
 }
 
-/**
- * Explicit identity guard for the segregation-of-duties (4-eyes) routes
- * (HITL_2 approve, republish, HITL_1 resume approve).
- *
- * SoD compares the run's author to the acting session identity. If NO session
- * email is present (e.g. an SSE-ticket identity carries only a user id, or some
- * future path bypasses the cookie session), the comparison could silently pass
- * and let an unidentified actor approve/publish. We refuse those actions unless
- * a session email — the compliance record-of-truth identity — is present.
- *
- * Returns a 401 `Response` to short-circuit, or `null` to proceed. Read paths
- * and the /events stream never call this.
- */
-function requireSessionForSod(c: Context<{ Bindings: Env; Variables: AuthVars }>): Response | null {
-  const userEmail = c.get("userEmail");
-  if (typeof userEmail === "string" && userEmail.trim().length > 0) {
-    return null;
-  }
-  return c.json(
-    { error: "session_required", message: "an authenticated session is required for this action" },
-    401,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -337,7 +305,7 @@ const runsRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 // ---------------------------------------------------------------------------
 // POST / — create a run
 // ---------------------------------------------------------------------------
-runsRouter.post("/", requireRole("author"), async (c) => {
+runsRouter.post("/", requireRole("editor"), async (c) => {
   const body = await c.req
     .json<CreateRunBody>()
     .catch(() => ({}) as CreateRunBody);
@@ -501,7 +469,7 @@ runsRouter.get("/:id", async (c) => {
 // transient Workflows error would strand the run at `pending`, where the guard
 // would refuse any further restart.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
+runsRouter.post("/:id/restart", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
   const claim = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -552,63 +520,10 @@ runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/resume — HITL_1 decision
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
+runsRouter.post("/:id/resume", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<ResumeBody>().catch(() => ({}) as ResumeBody);
   const decision = body.decision ?? "approve";
-
-  // Segregation of duties (4-eyes): the author of a run must not approve its
-  // source selection at HITL_1. Only `approve` is a publish-adjacent approval;
-  // edit_outline / override_route / cancel are NOT approvals, so the bar applies
-  // to `approve` alone. Resolved + checked BEFORE the gate claim / sendEvent so a
-  // forbidden actor never mutates run state. Break-glass: an admin may override
-  // with a non-empty override_reason (recorded below + flagged in the response).
-  let sodOverride: { reason: string } | null = null;
-  if (decision === "approve") {
-    // SoD relies on a session identity; refuse if none is present (FIX M1).
-    const sessionGuard = requireSessionForSod(c);
-    if (sessionGuard !== null) {
-      return sessionGuard;
-    }
-    const actor = resolveActorIdentity(
-      { userEmail: c.get("userEmail"), userId: c.get("userId") },
-      null,
-    );
-    const sodRow = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-      const rows = await sql<{ created_by: string | null }[]>`
-        SELECT created_by FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
-      `;
-      return rows[0] ?? null;
-    });
-    if (sodRow !== null) {
-      const actorRole = (await loadRole(c)) ?? "viewer";
-      const verdict = evaluateSod({
-        createdBy: sodRow.created_by,
-        actor,
-        actorRole,
-        overrideReason: body.override_reason,
-      });
-      if (!verdict.allowed) {
-        return c.json(
-          {
-            error: "self_approval_forbidden",
-            message: "the author of a run cannot approve or publish it",
-          },
-          403,
-        );
-      }
-      if (verdict.override) {
-        sodOverride = { reason: verdict.reason };
-        auditLog("rbac.sod_override", {
-          action: "hitl_1_approve",
-          run_id: runId,
-          actor,
-          author: sodRow.created_by,
-          reason: verdict.reason,
-        });
-      }
-    }
-  }
 
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<{ status: string }[]>`
@@ -671,16 +586,13 @@ runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
     },
   });
 
-  if (sodOverride !== null) {
-    return c.json({ ok: true, sod_override: true, override_reason: sodOverride.reason });
-  }
   return c.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
 // POST /:id/hitl-2 — HITL_2 decision
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
+runsRouter.post("/:id/hitl-2", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<Hitl2Body>().catch(() => ({}) as Hitl2Body);
   const decision = body.decision ?? "approve";
@@ -692,53 +604,6 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
     { userEmail: c.get("userEmail"), userId: c.get("userId") },
     body.editor_email,
   );
-
-  // Segregation of duties (4-eyes): the author of a run must not approve it.
-  // Only `approve` publishes; request_changes/reject do not, so the bar applies
-  // to approve alone. Break-glass: an admin may override with a non-empty
-  // override_reason (recorded below + flagged in the response).
-  let sodOverride: { reason: string } | null = null;
-  if (decision === "approve") {
-    // SoD relies on a session identity; refuse if none is present (FIX M1).
-    const sessionGuard = requireSessionForSod(c);
-    if (sessionGuard !== null) {
-      return sessionGuard;
-    }
-    const sodRow = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-      const rows = await sql<{ created_by: string | null }[]>`
-        SELECT created_by FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
-      `;
-      return rows[0] ?? null;
-    });
-    if (sodRow !== null) {
-      const actorRole = (await loadRole(c)) ?? "viewer";
-      const verdict = evaluateSod({
-        createdBy: sodRow.created_by,
-        actor: editorEmail,
-        actorRole,
-        overrideReason: body.override_reason,
-      });
-      if (!verdict.allowed) {
-        return c.json(
-          {
-            error: "self_approval_forbidden",
-            message: "the author of a run cannot approve or publish it",
-          },
-          403,
-        );
-      }
-      if (verdict.override) {
-        sodOverride = { reason: verdict.reason };
-        auditLog("rbac.sod_override", {
-          action: "hitl_2_approve",
-          run_id: runId,
-          actor: editorEmail,
-          author: sodRow.created_by,
-          reason: verdict.reason,
-        });
-      }
-    }
-  }
 
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<RunHitl2StateRow[]>`
@@ -873,12 +738,6 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
     },
   });
 
-  // Surface the SoD break-glass so the caller/UI can show it; the compliance_log
-  // row has no column for it (no migration), so the structured audit line above
-  // + this response flag are the record-of-truth.
-  if (sodOverride !== null) {
-    return c.json({ ok: true, sod_override: true, override_reason: sodOverride.reason });
-  }
   return c.json({ ok: true });
 });
 
@@ -902,7 +761,7 @@ runsRouter.options("/:id/events", (c) =>
 // ---------------------------------------------------------------------------
 // POST /:id/dry-publish — preview the WP REST payload WITHOUT calling WP
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
+runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const ov = await c.req
     .json<DryPublishBody>()
@@ -1277,11 +1136,6 @@ interface ApplyEditsBody {
   notes?: string | null;
 }
 
-interface RepublishBody {
-  /** Break-glass reason for the SoD self-publish bar (admin only). */
-  override_reason?: string | null;
-}
-
 interface RepublishRunRow {
   start_mode: string;
   created_by: string | null;
@@ -1422,7 +1276,7 @@ runsRouter.get("/:id/existing-post", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/existing-post/refresh — re-read the post from WP, update the cache
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/existing-post/refresh", requireRole("author"), async (c) => {
+runsRouter.post("/:id/existing-post/refresh", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
   const run = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -1501,7 +1355,7 @@ runsRouter.post("/:id/existing-post/refresh", requireRole("author"), async (c) =
 // ---------------------------------------------------------------------------
 // POST /:id/hitl2-snapshots — persist one autosave / version-history snapshot
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl2-snapshots", requireRole("author"), async (c) => {
+runsRouter.post("/:id/hitl2-snapshots", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<Hitl2SnapshotBody>()
@@ -1593,7 +1447,7 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/outline — persist a post-hoc outline edit (outlines.human_edits)
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/outline", requireRole("author"), async (c) => {
+runsRouter.put("/:id/outline", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<OutlineEditBody>().catch(() => ({}) as OutlineEditBody);
 
@@ -1652,7 +1506,7 @@ runsRouter.put("/:id/outline", requireRole("author"), async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/article — persist body/SEO onto the latest render + WP meta on the run
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/article", requireRole("author"), async (c) => {
+runsRouter.put("/:id/article", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ArticleEditBody>()
@@ -1751,7 +1605,7 @@ runsRouter.put("/:id/article", requireRole("author"), async (c) => {
 // created and nothing is published — that happens through Save / Approve. Works
 // on a paused HITL_2 run or a finished one alike, since it never touches state.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/apply-edits", requireRole("author"), async (c) => {
+runsRouter.post("/:id/apply-edits", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ApplyEditsBody>()
@@ -1796,11 +1650,8 @@ runsRouter.post("/:id/apply-edits", requireRole("author"), async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/republish — re-push the persisted render + WP metadata to WordPress
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
+runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
-  const reqBody = await c.req
-    .json<RepublishBody>()
-    .catch(() => ({}) as RepublishBody);
 
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<RepublishRunRow[]>`
@@ -1847,45 +1698,6 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
 
   const { run, render, fetchedPostId } = data;
   const isRefresh = run.start_mode === "refresh";
-
-  // Segregation of duties (4-eyes): the author of a run must not publish it.
-  // Break-glass: an admin may override with a non-empty override_reason.
-  // SoD relies on a session identity; refuse if none is present (FIX M1).
-  const sessionGuard = requireSessionForSod(c);
-  if (sessionGuard !== null) {
-    return sessionGuard;
-  }
-  const actor = resolveActorIdentity(
-    { userEmail: c.get("userEmail"), userId: c.get("userId") },
-    null,
-  );
-  const actorRole = (await loadRole(c)) ?? "viewer";
-  const sodVerdict = evaluateSod({
-    createdBy: run.created_by,
-    actor,
-    actorRole,
-    overrideReason: reqBody.override_reason,
-  });
-  if (!sodVerdict.allowed) {
-    return c.json(
-      {
-        error: "self_approval_forbidden",
-        message: "the author of a run cannot approve or publish it",
-      },
-      403,
-    );
-  }
-  let republishOverride: { reason: string } | null = null;
-  if (sodVerdict.override) {
-    republishOverride = { reason: sodVerdict.reason };
-    auditLog("rbac.sod_override", {
-      action: "republish",
-      run_id: runId,
-      actor,
-      author: run.created_by,
-      reason: sodVerdict.reason,
-    });
-  }
 
   let client: WordPressClient;
   try {
@@ -1963,9 +1775,6 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
     wp_post_id: result.id,
     link: result.link ?? null,
     status: result.status,
-    ...(republishOverride !== null
-      ? { sod_override: true, override_reason: republishOverride.reason }
-      : {}),
   });
 });
 

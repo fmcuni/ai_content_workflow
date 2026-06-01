@@ -93,9 +93,9 @@ beforeEach(() => {
 
 describe("PUT /admin/users/:id/role", () => {
   it("rejects a non-admin actor with 403", async () => {
-    state.actorRole = "reviewer";
-    const res = await req(appWith("reviewer@b.com"), "PUT", "/admin/users/u1/role", {
-      role: "author",
+    state.actorRole = "editor";
+    const res = await req(appWith("editor@b.com"), "PUT", "/admin/users/u1/role", {
+      role: "editor",
     });
     expect(res.status).toBe(403);
   });
@@ -111,18 +111,18 @@ describe("PUT /admin/users/:id/role", () => {
 
   it("updates the role for an admin actor and returns the user", async () => {
     const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u1/role", {
-      role: "reviewer",
+      role: "editor",
     });
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.id).toBe("u1");
-    expect(json.role).toBe("reviewer");
+    expect(json.role).toBe("editor");
   });
 
   it("returns 404 when the target user does not exist", async () => {
     state.target = null;
     const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u404/role", {
-      role: "author",
+      role: "editor",
     });
     expect(res.status).toBe(404);
   });
@@ -182,8 +182,8 @@ describe("GET /admin/users", () => {
   });
 
   it("rejects a non-admin with 403", async () => {
-    state.actorRole = "author";
-    const res = await req(appWith("author@b.com"), "GET", "/admin/users", undefined);
+    state.actorRole = "editor";
+    const res = await req(appWith("editor@b.com"), "GET", "/admin/users", undefined);
     expect(res.status).toBe(403);
   });
 });

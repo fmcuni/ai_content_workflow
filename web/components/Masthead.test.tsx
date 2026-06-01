@@ -21,7 +21,7 @@ vi.mock("@/lib/use-role", () => ({
 import { Masthead } from "@/components/Masthead";
 
 function setRole(role: Role) {
-  const rank: Record<Role, number> = { viewer: 0, author: 1, reviewer: 2, admin: 3 };
+  const rank: Record<Role, number> = { viewer: 0, editor: 1, admin: 2 };
   mockUseRole.mockReturnValue({
     role,
     email: `${role}@bowtie.com.hk`,
@@ -48,7 +48,7 @@ describe("Masthead nav role gating", () => {
   });
 
   it("hides the Users link from non-admins", () => {
-    setRole("reviewer");
+    setRole("editor");
     render(<Masthead />);
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
   });

@@ -2,7 +2,7 @@
  * Unit tests for the pure RBAC helpers (no DB / HTTP harness).
  *
  *   - effectiveRole: bootstrap-admin override (case-insensitive), null/default
- *   - roleMeetsRequirement: the cumulative viewer < author < reviewer < admin scale
+ *   - roleMeetsRequirement: the cumulative viewer < editor < admin scale
  *   - coerceRole / isRole: enum narrowing + validation
  */
 import { describe, expect, it } from "vitest";
@@ -22,7 +22,7 @@ function envWith(bootstrap?: string): Env {
 
 describe("effectiveRole", () => {
   it("returns the stored role when no bootstrap list is set", () => {
-    expect(effectiveRole("reviewer", "someone@bowtie.com.hk", envWith())).toBe("reviewer");
+    expect(effectiveRole("editor", "someone@bowtie.com.hk", envWith())).toBe("editor");
   });
 
   it("defaults to viewer when the stored role is null", () => {
@@ -55,41 +55,42 @@ describe("effectiveRole", () => {
 
   it("does not promote a non-bootstrap email", () => {
     const env = envWith("boss@bowtie.com.hk");
-    expect(effectiveRole("author", "peon@bowtie.com.hk", env)).toBe("author");
+    expect(effectiveRole("editor", "peon@bowtie.com.hk", env)).toBe("editor");
   });
 
   it("ignores a null/empty email (no bootstrap match possible)", () => {
     const env = envWith("boss@bowtie.com.hk");
-    expect(effectiveRole("author", null, env)).toBe("author");
+    expect(effectiveRole("editor", null, env)).toBe("editor");
     expect(effectiveRole(null, "", env)).toBe("viewer");
   });
 });
 
 describe("roleMeetsRequirement", () => {
   it("passes when the role exactly meets the requirement", () => {
-    expect(roleMeetsRequirement("author", "author")).toBe(true);
+    expect(roleMeetsRequirement("editor", "editor")).toBe(true);
   });
 
   it("passes when the role exceeds the requirement", () => {
     expect(roleMeetsRequirement("admin", "viewer")).toBe(true);
-    expect(roleMeetsRequirement("reviewer", "author")).toBe(true);
+    expect(roleMeetsRequirement("editor", "viewer")).toBe(true);
+    expect(roleMeetsRequirement("admin", "editor")).toBe(true);
   });
 
   it("fails when the role is below the requirement", () => {
-    expect(roleMeetsRequirement("author", "reviewer")).toBe(false);
+    expect(roleMeetsRequirement("editor", "admin")).toBe(false);
+    expect(roleMeetsRequirement("viewer", "editor")).toBe(false);
     expect(roleMeetsRequirement("viewer", "admin")).toBe(false);
   });
 
-  it("orders the cumulative ranks viewer < author < reviewer < admin", () => {
-    expect(ROLE_RANK.viewer).toBeLessThan(ROLE_RANK.author);
-    expect(ROLE_RANK.author).toBeLessThan(ROLE_RANK.reviewer);
-    expect(ROLE_RANK.reviewer).toBeLessThan(ROLE_RANK.admin);
+  it("orders the cumulative ranks viewer < editor < admin", () => {
+    expect(ROLE_RANK.viewer).toBeLessThan(ROLE_RANK.editor);
+    expect(ROLE_RANK.editor).toBeLessThan(ROLE_RANK.admin);
   });
 });
 
 describe("coerceRole / isRole", () => {
   it("coerces a known role string", () => {
-    expect(coerceRole("reviewer")).toBe("reviewer");
+    expect(coerceRole("editor")).toBe("editor");
   });
 
   it("coerces unknown / null / undefined to viewer", () => {

@@ -3,23 +3,22 @@
 // what controls to show/disable. Keep ROLE_RANK and CAPABILITY_MIN_ROLE in sync
 // with the backend.
 
-export type Role = "viewer" | "author" | "reviewer" | "admin";
+export type Role = "viewer" | "editor" | "admin";
 
-export const ROLES: readonly Role[] = ["viewer", "author", "reviewer", "admin"] as const;
+export const ROLES: readonly Role[] = ["viewer", "editor", "admin"] as const;
 
-// Cumulative ranks: viewer < author < reviewer < admin.
+// Cumulative ranks: viewer < editor < admin.
 export const ROLE_RANK: Record<Role, number> = {
   viewer: 0,
-  author: 1,
-  reviewer: 2,
-  admin: 3,
+  editor: 1,
+  admin: 2,
 };
 
 // Capability → minimum role required.
 export type Capability =
   // viewer
   | "read"
-  // author
+  // editor
   | "create_run"
   | "edit_outline"
   | "edit_article"
@@ -27,7 +26,6 @@ export type Capability =
   | "apply_edits"
   | "promote_topics"
   | "save_snapshot"
-  // reviewer
   | "hitl1_approve"
   | "hitl2_decide"
   | "publish"
@@ -42,17 +40,16 @@ export type Capability =
 export const CAPABILITY_MIN_ROLE: Record<Capability, Role> = {
   read: "viewer",
 
-  create_run: "author",
-  edit_outline: "author",
-  edit_article: "author",
-  regenerate: "author",
-  apply_edits: "author",
-  promote_topics: "author",
-  save_snapshot: "author",
-
-  hitl1_approve: "reviewer",
-  hitl2_decide: "reviewer",
-  publish: "reviewer",
+  create_run: "editor",
+  edit_outline: "editor",
+  edit_article: "editor",
+  regenerate: "editor",
+  apply_edits: "editor",
+  promote_topics: "editor",
+  save_snapshot: "editor",
+  hitl1_approve: "editor",
+  hitl2_decide: "editor",
+  publish: "editor",
 
   edit_prompts: "admin",
   manage_personas: "admin",
@@ -72,7 +69,7 @@ function isCapability(value: string): value is Capability {
 
 /**
  * True when `role` ranks at or above `required`. `required` may be a bare role
- * ("reviewer") or a capability name ("publish") — the latter is resolved to its
+ * ("editor") or a capability name ("publish") — the latter is resolved to its
  * minimum role via CAPABILITY_MIN_ROLE.
  *
  * Unknown role/requirement strings fail closed (return false) rather than

@@ -62,8 +62,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   const qc = useQueryClient();
 
-  // Editing the draft (manual save, apply-edits, regenerate) is an author-level
-  // capability; the approve/reject/request-changes gate is reviewer-level below.
+  // Editing the draft (manual save, apply-edits, regenerate) and the
+  // approve/reject/request-changes gate are both editor-level capabilities.
   const { can } = useRole();
   const canEdit = can("edit_article");
 

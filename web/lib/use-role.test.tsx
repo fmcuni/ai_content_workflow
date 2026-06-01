@@ -26,12 +26,12 @@ beforeEach(() => {
 
 describe("useRole", () => {
   it("exposes the role from /me and gates capabilities by rank", async () => {
-    mockGetMe.mockResolvedValue({ email: "rev@bowtie.com.hk", role: "reviewer" });
+    mockGetMe.mockResolvedValue({ email: "ed@bowtie.com.hk", role: "editor" });
     const { result } = renderHook(() => useRole(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.role).toBe("reviewer"));
-    expect(result.current.email).toBe("rev@bowtie.com.hk");
-    // reviewer can publish + create, cannot edit prompts (admin)
+    await waitFor(() => expect(result.current.role).toBe("editor"));
+    expect(result.current.email).toBe("ed@bowtie.com.hk");
+    // editor can publish + create, cannot edit prompts (admin)
     expect(result.current.can("publish")).toBe(true);
     expect(result.current.can("create_run")).toBe(true);
     expect(result.current.can("edit_prompts")).toBe(false);
@@ -49,15 +49,18 @@ describe("useRole", () => {
     expect(result.current.can("publish")).toBe(false);
   });
 
-  it("an author can create runs but cannot approve/publish", async () => {
-    mockGetMe.mockResolvedValue({ email: "a@bowtie.com.hk", role: "author" });
+  it("an editor can create, approve, and publish but cannot manage prompts/users", async () => {
+    mockGetMe.mockResolvedValue({ email: "ed2@bowtie.com.hk", role: "editor" });
     const { result } = renderHook(() => useRole(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.role).toBe("author"));
+    await waitFor(() => expect(result.current.role).toBe("editor"));
     expect(result.current.can("create_run")).toBe(true);
     expect(result.current.can("promote_topics")).toBe(true);
-    expect(result.current.can("hitl1_approve")).toBe(false);
-    expect(result.current.can("publish")).toBe(false);
+    expect(result.current.can("hitl1_approve")).toBe(true);
+    expect(result.current.can("hitl2_decide")).toBe(true);
+    expect(result.current.can("publish")).toBe(true);
+    expect(result.current.can("edit_prompts")).toBe(false);
+    expect(result.current.can("manage_users")).toBe(false);
   });
 
   it("an admin can do everything including managing users", async () => {

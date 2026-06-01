@@ -2,7 +2,7 @@
 // Mirrors the Workers backend GET /me and admin user-management contract.
 // See lib/roles.ts for the rank/capability model.
 
-export type UserRole = "viewer" | "author" | "reviewer" | "admin";
+export type UserRole = "viewer" | "editor" | "admin";
 
 export interface MeResponse {
   email: string;

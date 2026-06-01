@@ -120,40 +120,41 @@ app.get("/me", async (c) => {
 
 // --- RBAC route gates -------------------------------------------------------
 // Method+path scoped guards registered BEFORE the corresponding app.route(...)
-// mounts. The `runs` router gates its own mutating routes internally (it owns
-// the SoD logic too); these cover the routers that take only Bindings (no
-// AuthVars in their generic), so gating at the mount keeps their typing intact.
-// Read-only routes are intentionally NOT listed — the requireAuth gate above
-// already enforces an authenticated (viewer) session for them.
+// mounts. The `runs` router gates its own mutating routes internally; these
+// cover the routers that take only Bindings (no AuthVars in their generic), so
+// gating at the mount keeps their typing intact. Read-only routes are
+// intentionally NOT listed — the requireAuth gate above already enforces an
+// authenticated (viewer) session for them.
 
-// prompts: edit (PUT) + revert (POST) → admin. preview (POST) is a pure render
-// of a candidate template, no persistence → author.
+// prompts: edit (PUT) + revert (POST) → admin (config change). preview (POST) is
+// a pure render of a candidate template, no persistence → editor.
 app.put("/prompts/templates/:id", requireRole("admin"));
 app.post("/prompts/templates/:id/revert", requireRole("admin"));
-app.post("/prompts/templates/:id/preview", requireRole("author"));
+app.post("/prompts/templates/:id/preview", requireRole("editor"));
 
-// personas: create / edit / archive / restore → admin.
+// personas: create / edit / archive / restore → admin (config change).
 app.post("/personas", requireRole("admin"));
 app.put("/personas/:slug", requireRole("admin"));
 app.post("/personas/:slug/archive", requireRole("admin"));
 app.post("/personas/:slug/restore", requireRole("admin"));
 
-// source-policy: edit (PUT) + revert (POST) → admin. preview (POST) → author.
+// source-policy: edit (PUT) + revert (POST) → admin (config change).
+// preview (POST) → editor.
 app.put("/source-policy", requireRole("admin"));
 app.post("/source-policy/revert", requireRole("admin"));
-app.post("/source-policy/preview", requireRole("author"));
+app.post("/source-policy/preview", requireRole("editor"));
 
-// topic-batches: create batch + promote topics → author. skip a candidate +
-// close a batch are editorial mutations → author. DELETE batch → admin.
-app.post("/topic-batches", requireRole("author"));
-app.post("/topic-batches/:id/promote", requireRole("author"));
-app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("author"));
-app.post("/topic-batches/:id/close", requireRole("author"));
+// topic-batches: create batch + promote topics → editor. skip a candidate +
+// close a batch are editorial mutations → editor. DELETE batch → admin.
+app.post("/topic-batches", requireRole("editor"));
+app.post("/topic-batches/:id/promote", requireRole("editor"));
+app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("editor"));
+app.post("/topic-batches/:id/close", requireRole("editor"));
 app.delete("/topic-batches/:id", requireRole("admin"));
 
-// refresh: kick a re-audit scan (existing post) → author.
-app.post("/refresh/scan", requireRole("author"));
-app.post("/refresh/scan/:articleId", requireRole("author"));
+// refresh: kick a re-audit scan (existing post) → editor.
+app.post("/refresh/scan", requireRole("editor"));
+app.post("/refresh/scan/:articleId", requireRole("editor"));
 
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
 // Admin-only: the response enumerates content_tool table names + Postgres

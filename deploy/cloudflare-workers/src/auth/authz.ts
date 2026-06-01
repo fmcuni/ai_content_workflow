@@ -1,9 +1,10 @@
 /**
  * Role-based authorization (RBAC) for the Workers backend.
  *
- * Roles are cumulative: viewer < author < reviewer < admin. A capability is
+ * Roles are cumulative: viewer < editor < admin. A capability is
  * granted to a role iff that role's rank meets-or-exceeds the capability's
- * minimum-role rank.
+ * minimum-role rank. There is NO segregation of duties: an editor may approve
+ * and publish their OWN run.
  *
  * The *effective* role layers a break-glass bootstrap on top of the stored
  * role: an email listed in BOOTSTRAP_ADMIN_EMAILS is always `admin`, so a fresh
@@ -23,15 +24,14 @@ import type { AuthVars } from "./middleware";
 /** The Hono environment shape every authenticated route shares. */
 type AuthzEnv = { Bindings: Env; Variables: AuthVars };
 
-export const ROLES = ["viewer", "author", "reviewer", "admin"] as const;
+export const ROLES = ["viewer", "editor", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
 /** Cumulative rank — higher number = more capability. */
 export const ROLE_RANK: Readonly<Record<Role, number>> = {
   viewer: 0,
-  author: 1,
-  reviewer: 2,
-  admin: 3,
+  editor: 1,
+  admin: 2,
 };
 
 /** Context variable key under which the resolved effective role is cached. */

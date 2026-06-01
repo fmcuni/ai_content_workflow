@@ -1,13 +1,16 @@
 /**
- * RBAC + segregation-of-duties tests exercising the real Hono handlers against
- * a stateful fake `sql` (vi.mock on ../db/client), mirroring the pattern in
+ * RBAC tests exercising the real Hono handlers against a stateful fake `sql`
+ * (vi.mock on ../db/client), mirroring the pattern in
  * runs_hitl_concurrency.test.ts.
+ *
+ * Three-role model (viewer < editor < admin), NO segregation of duties: an
+ * editor may approve and publish their OWN run.
  *
  * Coverage:
  *   - requireRole: below-bar → 403, at/above-bar → proceeds
- *   - DELETE /runs/:id (admin gate): author 403, admin 200
- *   - SoD self-approval on HITL_2 approve → 403
- *   - SoD break-glass (admin + override_reason) → 200 + sod_override flag
+ *   - DELETE /runs/:id (admin gate): editor 403, admin 200
+ *   - create / HITL approve / publish require editor; viewer blocked
+ *   - an editor may approve + publish a run they created (no self-approval bar)
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -165,10 +168,10 @@ beforeEach(() => {
 // requireRole gate — DELETE /runs/:id requires admin.
 // ---------------------------------------------------------------------------
 describe("requireRole gate (DELETE /runs/:id → admin)", () => {
-  it("returns 403 for a below-bar role (author) with the flat error body", async () => {
-    state.userRole = "author";
+  it("returns 403 for a below-bar role (editor) with the flat error body", async () => {
+    state.userRole = "editor";
     state.run = { run_id: "r1", status: "published", hitl_2_iteration: 0, created_by: "x@b.com" };
-    const res = await req(appWith("author@b.com"), "DELETE", "/r1", {});
+    const res = await req(appWith("editor@b.com"), "DELETE", "/r1", {});
     expect(res.status).toBe(403);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.error).toBe("forbidden");
@@ -186,7 +189,7 @@ describe("requireRole gate (DELETE /runs/:id → admin)", () => {
   });
 });
 
-describe("requireRole gate (POST /runs → author)", () => {
+describe("requireRole gate (POST /runs → editor)", () => {
   it("returns 403 for a viewer", async () => {
     state.userRole = "viewer";
     const res = await req(appWith("viewer@b.com"), "POST", "/", {
@@ -198,183 +201,66 @@ describe("requireRole gate (POST /runs → author)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Segregation of duties — HITL_2 approve.
+// HITL_2 approve — editor capability, NO segregation of duties.
 // ---------------------------------------------------------------------------
-describe("SoD on HITL_2 approve", () => {
-  it("forbids the run's author from approving it (self_approval_forbidden)", async () => {
-    state.userRole = "reviewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_2",
-      hitl_2_iteration: 0,
-      created_by: "author@b.com",
-    };
-    const res = await req(appWith("author@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
+describe("HITL_2 approve (editor, no SoD)", () => {
+  it("returns 403 for a viewer", async () => {
+    state.userRole = "viewer";
+    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("viewer@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
     expect(res.status).toBe(403);
-    const json = (await res.json()) as Record<string, unknown>;
-    expect(json.error).toBe("self_approval_forbidden");
-    // The run must NOT have moved off the gate (no claim happened).
     expect(state.run.status).toBe("hitl_2");
   });
 
-  it("allows a different reviewer to approve the author's run", async () => {
-    state.userRole = "reviewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_2",
-      hitl_2_iteration: 0,
-      created_by: "author@b.com",
-    };
-    const res = await req(appWith("reviewer@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
+  it("lets an editor approve a run created by someone else", async () => {
+    state.userRole = "editor";
+    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "other@b.com" };
+    const res = await req(appWith("editor@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.sod_override).toBeUndefined();
   });
 
-  it("break-glass: an admin author may self-approve with an override_reason, flagged", async () => {
-    // Admin via bootstrap so loadRole resolves admin regardless of stored role.
-    state.userRole = "viewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_2",
-      hitl_2_iteration: 0,
-      created_by: "boss@b.com",
-    };
-    const app = new Hono<{ Variables: AuthVars }>();
-    app.use("*", async (c, next) => {
-      c.set("userEmail", "boss@b.com");
-      await next();
-    });
-    app.route("/", runsRouter);
-    const executionCtx = {
-      waitUntil: () => undefined,
-      passThroughOnException: () => undefined,
-      props: {},
-    };
-    const res = await app.request(
-      "/r1/hitl-2",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision: "approve", override_reason: "sole on-call editor" }),
-      },
-      { ...makeEnv(), BOOTSTRAP_ADMIN_EMAILS: "boss@b.com" },
-      executionCtx as unknown as ExecutionContext,
-    );
+  it("lets an editor approve their OWN run (no self-approval bar)", async () => {
+    state.userRole = "editor";
+    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "editor@b.com" };
+    const res = await req(appWith("editor@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
-    expect(json.sod_override).toBe(true);
-    expect(json.override_reason).toBe("sole on-call editor");
-  });
-
-  it("break-glass denied for a non-admin author even with a reason", async () => {
-    state.userRole = "reviewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_2",
-      hitl_2_iteration: 0,
-      created_by: "author@b.com",
-    };
-    const res = await req(appWith("author@b.com"), "POST", "/r1/hitl-2", {
-      decision: "approve",
-      override_reason: "let me",
-    });
-    expect(res.status).toBe(403);
+    expect(json.ok).toBe(true);
+    expect(state.run.status).toBe("publishing");
   });
 });
 
 // ---------------------------------------------------------------------------
-// FIX H1 — Segregation of duties on HITL_1 resume approve.
+// HITL_1 resume approve — editor capability, NO segregation of duties.
 // ---------------------------------------------------------------------------
-describe("SoD on HITL_1 resume approve (FIX H1)", () => {
-  it("forbids the run's author from approving its source selection", async () => {
-    state.userRole = "reviewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_1",
-      hitl_2_iteration: 0,
-      created_by: "author@b.com",
-    };
-    const res = await req(appWith("author@b.com"), "POST", "/r1/resume", { decision: "approve" });
+describe("HITL_1 resume approve (editor, no SoD)", () => {
+  it("returns 403 for a viewer", async () => {
+    state.userRole = "viewer";
+    state.run = { run_id: "r1", status: "hitl_1", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("viewer@b.com"), "POST", "/r1/resume", { decision: "approve" });
     expect(res.status).toBe(403);
-    const json = (await res.json()) as Record<string, unknown>;
-    expect(json.error).toBe("self_approval_forbidden");
-    // The run must NOT have moved off the gate (no claim happened).
     expect(state.run.status).toBe("hitl_1");
   });
 
-  it("allows a different reviewer to approve the author's run", async () => {
-    state.userRole = "reviewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_1",
-      hitl_2_iteration: 0,
-      created_by: "author@b.com",
-    };
-    const res = await req(appWith("reviewer@b.com"), "POST", "/r1/resume", { decision: "approve" });
+  it("lets an editor approve their OWN run's source selection", async () => {
+    state.userRole = "editor";
+    state.run = { run_id: "r1", status: "hitl_1", hitl_2_iteration: 0, created_by: "editor@b.com" };
+    const res = await req(appWith("editor@b.com"), "POST", "/r1/resume", { decision: "approve" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.ok).toBe(true);
     expect(json.sod_override).toBeUndefined();
     expect(state.run.status).toBe("production");
   });
-
-  it("break-glass: an admin author may self-approve with an override_reason, flagged", async () => {
-    state.userRole = "viewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_1",
-      hitl_2_iteration: 0,
-      created_by: "boss@b.com",
-    };
-    const app = new Hono<{ Variables: AuthVars }>();
-    app.use("*", async (c, next) => {
-      c.set("userEmail", "boss@b.com");
-      await next();
-    });
-    app.route("/", runsRouter);
-    const executionCtx = {
-      waitUntil: () => undefined,
-      passThroughOnException: () => undefined,
-      props: {},
-    };
-    const res = await app.request(
-      "/r1/resume",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision: "approve", override_reason: "sole on-call editor" }),
-      },
-      { ...makeEnv(), BOOTSTRAP_ADMIN_EMAILS: "boss@b.com" },
-      executionCtx as unknown as ExecutionContext,
-    );
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Record<string, unknown>;
-    expect(json.sod_override).toBe(true);
-    expect(json.override_reason).toBe("sole on-call editor");
-  });
-
-  it("does NOT apply SoD to a non-approval decision (override_route by the author)", async () => {
-    state.userRole = "reviewer";
-    state.run = {
-      run_id: "r1",
-      status: "hitl_1",
-      hitl_2_iteration: 0,
-      created_by: "author@b.com",
-    };
-    const res = await req(appWith("author@b.com"), "POST", "/r1/resume", {
-      decision: "override_route",
-      new_route: "expand",
-    });
-    expect(res.status).toBe(200);
-  });
 });
 
 // ---------------------------------------------------------------------------
-// FIX H2 — dry-publish requires the reviewer (publish-adjacent) capability.
+// dry-publish requires the editor (publish-adjacent) capability.
 // ---------------------------------------------------------------------------
-describe("requireRole gate (POST /runs/:id/dry-publish → reviewer) (FIX H2)", () => {
+describe("requireRole gate (POST /runs/:id/dry-publish → editor)", () => {
   it("returns 403 for a viewer", async () => {
     state.userRole = "viewer";
     state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
@@ -382,17 +268,10 @@ describe("requireRole gate (POST /runs/:id/dry-publish → reviewer) (FIX H2)", 
     expect(res.status).toBe(403);
   });
 
-  it("returns 403 for an author", async () => {
-    state.userRole = "author";
+  it("lets an editor past the gate (handler then runs DB logic — not a 403)", async () => {
+    state.userRole = "editor";
     state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
-    const res = await req(appWith("author@b.com"), "POST", "/r1/dry-publish", {});
-    expect(res.status).toBe(403);
-  });
-
-  it("lets a reviewer past the gate (handler then runs DB logic — not a 403)", async () => {
-    state.userRole = "reviewer";
-    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
-    const res = await req(appWith("reviewer@b.com"), "POST", "/r1/dry-publish", {});
+    const res = await req(appWith("editor@b.com"), "POST", "/r1/dry-publish", {});
     // The fake DB doesn't model the dry-publish run SELECT, so the handler reaches
     // its own "run not found" 404. The point is the requireRole gate PASSED — the
     // response is NOT a 403.
@@ -402,38 +281,24 @@ describe("requireRole gate (POST /runs/:id/dry-publish → reviewer) (FIX H2)", 
 });
 
 // ---------------------------------------------------------------------------
-// FIX M1 — SoD-bearing routes require a session email identity.
+// republish — editor capability, NO segregation of duties. An editor may
+// publish their OWN run.
 // ---------------------------------------------------------------------------
-describe("session_required guard on SoD routes (FIX M1)", () => {
-  it("returns 401 on HITL_2 approve when no session email is present", async () => {
-    state.userRole = "reviewer";
-    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
-    // App wrapper sets only userId (SSE-ticket style) — no userEmail.
-    const app = new Hono<{ Variables: AuthVars }>();
-    app.use("*", async (c, next) => {
-      c.set("userId", "user_123");
-      await next();
-    });
-    app.route("/", runsRouter);
-    const executionCtx = {
-      waitUntil: () => undefined,
-      passThroughOnException: () => undefined,
-      props: {},
-    };
-    const res = await app.request(
-      "/r1/hitl-2",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision: "approve" }),
-      },
-      makeEnv(),
-      executionCtx as unknown as ExecutionContext,
-    );
-    expect(res.status).toBe(401);
-    const json = (await res.json()) as Record<string, unknown>;
-    expect(json.error).toBe("session_required");
-    // The run must NOT have moved off the gate.
-    expect(state.run.status).toBe("hitl_2");
+describe("requireRole gate (POST /runs/:id/republish → editor)", () => {
+  it("returns 403 for a viewer", async () => {
+    state.userRole = "viewer";
+    state.run = { run_id: "r1", status: "published", hitl_2_iteration: 0, created_by: "editor@b.com" };
+    const res = await req(appWith("viewer@b.com"), "POST", "/r1/republish", {});
+    expect(res.status).toBe(403);
+  });
+
+  it("lets an editor past the gate for their OWN run (no self-publish bar)", async () => {
+    state.userRole = "editor";
+    state.run = { run_id: "r1", status: "published", hitl_2_iteration: 0, created_by: "editor@b.com" };
+    const res = await req(appWith("editor@b.com"), "POST", "/r1/republish", {});
+    // The fake DB doesn't model the republish run SELECT, so the handler reaches
+    // its own 404. The point is neither the requireRole gate NOR any SoD bar
+    // returns 403.
+    expect(res.status).not.toBe(403);
   });
 });

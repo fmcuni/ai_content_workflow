@@ -11,8 +11,8 @@ import {
 describe("roleMeetsRequirement", () => {
   it("treats roles as cumulative: a higher rank satisfies a lower required role", () => {
     expect(roleMeetsRequirement("admin", "viewer")).toBe(true);
-    expect(roleMeetsRequirement("reviewer", "author")).toBe(true);
-    expect(roleMeetsRequirement("author", "viewer")).toBe(true);
+    expect(roleMeetsRequirement("admin", "editor")).toBe(true);
+    expect(roleMeetsRequirement("editor", "viewer")).toBe(true);
   });
 
   it("returns true when role exactly equals the required role", () => {
@@ -22,21 +22,19 @@ describe("roleMeetsRequirement", () => {
   });
 
   it("returns false when the role ranks below the required role", () => {
-    expect(roleMeetsRequirement("viewer", "author")).toBe(false);
-    expect(roleMeetsRequirement("author", "reviewer")).toBe(false);
-    expect(roleMeetsRequirement("reviewer", "admin")).toBe(false);
+    expect(roleMeetsRequirement("viewer", "editor")).toBe(false);
+    expect(roleMeetsRequirement("editor", "admin")).toBe(false);
   });
 
   it("resolves capability names to their minimum role", () => {
-    // author capability
-    expect(roleMeetsRequirement("author", "create_run")).toBe(true);
+    // editor capabilities (create/edit + approve + publish)
+    expect(roleMeetsRequirement("editor", "create_run")).toBe(true);
     expect(roleMeetsRequirement("viewer", "create_run")).toBe(false);
-    // reviewer capability
-    expect(roleMeetsRequirement("reviewer", "publish")).toBe(true);
-    expect(roleMeetsRequirement("author", "publish")).toBe(false);
+    expect(roleMeetsRequirement("editor", "publish")).toBe(true);
+    expect(roleMeetsRequirement("viewer", "publish")).toBe(false);
     // admin capability
     expect(roleMeetsRequirement("admin", "manage_users")).toBe(true);
-    expect(roleMeetsRequirement("reviewer", "manage_users")).toBe(false);
+    expect(roleMeetsRequirement("editor", "manage_users")).toBe(false);
   });
 
   it("grants the read capability to every role", () => {

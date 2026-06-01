@@ -70,7 +70,7 @@ export default function AdminUsersPage() {
       <SectionHead
         kicker="Desk · Administration"
         hed="Users & Roles"
-        dek="Grant the role each teammate needs. Roles are cumulative: viewer < author < reviewer < admin."
+        dek="Grant the role each teammate needs. Roles are cumulative: viewer < editor < admin."
       />
 
       {roleLoading && <p className="text-ink-faint">Checking your access…</p>}
