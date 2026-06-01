@@ -7,7 +7,7 @@ import type {
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
-  RefreshEvaluation, RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse,
+  RefreshEvaluation, Render, RepublishResponse, RunSummary, ScanResponse,
   SetupConfigureResult, SetupRequest, SetupStatus, SetupVerifyResult,
   SourcePolicyDoc, SourcePolicyPreviewResponse, SourcePolicyResponse, SourcePolicyRevertResponse,
   SourcePolicySaveResponse, SourcePolicyVersionDetail, SourcePolicyVersionsResponse,
@@ -108,11 +108,6 @@ export const api = {
     http<{ ok: boolean }>(`${BASE}/${runId}/restart`, { method: "POST" }),
   deleteRun: (runId: string) =>
     http<{ ok: boolean }>(`${BASE}/${runId}`, { method: "DELETE" }),
-  regenerate: (runId: string, body: RegenerateRequest) =>
-    http<{ ok: boolean; iteration: number; draft_id: string }>(
-      `${BASE}/${runId}/regenerate`,
-      { method: "POST", body: JSON.stringify(body) },
-    ),
   applyEdits: (runId: string, body: ApplyEditsRequest) =>
     http<ApplyEditsResponse>(`${BASE}/${runId}/apply-edits`, {
       method: "POST",

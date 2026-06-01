@@ -50,7 +50,7 @@ test.describe("run-editor shared shell (read-only)", () => {
     "set E2E_EMAIL / E2E_PASSWORD in web/.env.test.local",
   );
 
-  test("renders the shared shell on /edit, /regenerate, /hitl2", async ({ page }) => {
+  test("renders shared shell on /edit & /hitl2; /regenerate redirects to /edit", async ({ page }) => {
     await login(page);
     const runId = await firstRunId(page);
 
@@ -62,13 +62,10 @@ test.describe("run-editor shared shell (read-only)", () => {
     await expect(page.getByRole("tab", { name: /WP metadata/i })).toBeVisible(); // EditorRail
     await page.screenshot({ path: "test-results/run-editor-edit.png", fullPage: true });
 
-    // --- /regenerate (shell + notes only, comments-only rail) --------------
+    // --- /regenerate is retired → must redirect to /edit -------------------
     await page.goto(`${BASE}/runs/${runId}/regenerate`);
-    await expect(page.getByRole("link", { name: /Run ·/ })).toBeVisible();
-    await expect(page.getByText("Notes to AI", { exact: false })).toBeVisible();
-    // Regenerate must NOT have the WP-metadata rail (reduced feature set).
-    await expect(page.getByRole("tab", { name: /WP metadata/i })).toHaveCount(0);
-    await page.screenshot({ path: "test-results/run-editor-regenerate.png", fullPage: true });
+    await page.waitForURL(`**/runs/${runId}/edit`, { timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: /Edit outline & article/i })).toBeVisible();
 
     // --- /hitl2 (may be gate-resolved/read-only; shell still renders) ------
     await page.goto(`${BASE}/runs/${runId}/hitl2`);
