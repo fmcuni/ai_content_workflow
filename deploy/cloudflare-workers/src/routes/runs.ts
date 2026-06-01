@@ -15,6 +15,7 @@ import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
 import { restartGuard } from "./run_guards";
 import type { AuthVars } from "../auth/middleware";
+import { resolveActorIdentity } from "./identity";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,14 @@ const DEFAULT_LIST_LIMIT = 50;
 
 // HITL_2 request_changes cap — must match the Python guard.
 const HITL_2_MAX_ITERATIONS = 3;
+
+// Run-status sentinels the ProductionWorkflow sets WHILE PAUSED at each HITL gate
+// (src/workflows/production.ts gateStep). A decision is only valid when the run
+// is parked at the matching gate, so the resume/hitl-2 handlers claim the
+// transition with `AND status = <gate status>` — this both rejects stale-tab
+// posts and single-flights the sendEvent to the workflow instance.
+const HITL_1_GATE_STATUS = "hitl_1";
+const HITL_2_GATE_STATUS = "hitl_2";
 
 // Gemini defaults for the synchronous apply-edits route (mirror refresh.ts).
 const DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview";
@@ -87,6 +96,9 @@ interface Hitl2Body {
   decision?: "approve" | "request_changes" | "reject";
   notes?: string | null;
   comments?: Hitl2Comment[];
+  /** Ignored for audit fields when a session identity is present — `approved_by`
+   * is session-derived (see ./identity). Accepted only as a dev fallback. */
+  editor_email?: string | null;
   edited_html_body?: string | null;
   edited_seo_title?: string | null;
   edited_meta_description?: string | null;
@@ -200,6 +212,7 @@ interface RunDetailRow extends RunListRow {
 }
 
 interface RunHitl2StateRow {
+  status: string;
   hitl_2_iteration: number;
 }
 
@@ -316,7 +329,12 @@ runsRouter.post("/", async (c) => {
   const persona = body.persona ?? "bowtie-editor";
   const acfAdvId = body.acf_adv_id ?? 0;
   const acfWidgetId = body.acf_widget_id ?? 0;
-  const createdBy = body.editor_email ?? "";
+  // Audit identity: bind `created_by` to the authenticated session, ignoring any
+  // client-supplied `editor_email` when a session is present (see ./identity).
+  const createdBy = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email,
+  );
   const topicCategory = body.topic_category ?? null;
   const editNote = body.edit_note ?? null;
   const topicCandidateId = body.topic_candidate_id ?? null;
@@ -506,7 +524,31 @@ runsRouter.post("/:id/resume", async (c) => {
   const body = await c.req.json<ResumeBody>().catch(() => ({}) as ResumeBody);
   const decision = body.decision ?? "approve";
 
-  await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+  const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ status: string }[]>`
+      SELECT status FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (rows[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+
+    // Atomic gate claim (matches /hitl-2 + the version-guard style): the run must
+    // be PAUSED at the HITL_1 gate. The workflow sets status = 'hitl_1' right
+    // before `step.waitForEvent("await-hitl1")`, so this rejects a stale-tab
+    // decision and single-flights the sendEvent — only the request that flips the
+    // status away from the gate proceeds. `result.count === 0` → 409.
+    const claim = await sql`
+      UPDATE content_tool.runs
+      SET hitl_1_decision = ${decision}, hitl_1_notes = ${body.notes ?? null}
+      WHERE run_id = ${runId} AND status = ${HITL_1_GATE_STATUS}
+    `;
+    if (claim.count === 0) {
+      return { error: "not_at_gate" as const };
+    }
+
+    // Only apply the side-effect edits once the gate is ours, so a losing
+    // concurrent request cannot clobber the outline / route of a run that has
+    // already moved on.
     if (decision === "edit_outline" && body.edited_outline !== undefined) {
       await sql`
         UPDATE content_tool.outlines
@@ -521,12 +563,15 @@ runsRouter.post("/:id/resume", async (c) => {
         WHERE run_id = ${runId}
       `;
     }
-    await sql`
-      UPDATE content_tool.runs
-      SET hitl_1_decision = ${decision}, hitl_1_notes = ${body.notes ?? null}
-      WHERE run_id = ${runId}
-    `;
+    return { ok: true as const };
   });
+
+  if ("error" in guard) {
+    if (guard.error === "not_found") {
+      return c.json({ detail: "run not found" }, 404);
+    }
+    return c.json({ detail: "run is not awaiting a HITL_1 decision" }, 409);
+  }
 
   const env = c.env as RunsEnv;
   const instance = await env.PRODUCTION.get(runId);
@@ -551,30 +596,54 @@ runsRouter.post("/:id/hitl-2", async (c) => {
   const body = await c.req.json<Hitl2Body>().catch(() => ({}) as Hitl2Body);
   const decision = body.decision ?? "approve";
   const comments = body.comments ?? [];
-  // Compliance record-of-truth: the authenticated session email (NOT the
-  // client-supplied payload). "unknown" only when AUTH_DISABLED bypasses the gate.
-  const editorEmail = c.get("userEmail") ?? "unknown";
+  // Compliance record-of-truth: the authenticated session identity (NOT the
+  // client-supplied payload). Falls back to the payload only on the AUTH_DISABLED
+  // dev path where no session exists, then to "unknown" (see ./identity).
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email,
+  );
 
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<RunHitl2StateRow[]>`
-      SELECT hitl_2_iteration FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+      SELECT status, hitl_2_iteration FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
     `;
     const current = rows[0];
     if (current === undefined) {
       return { error: "not_found" as const };
     }
 
-    // Belt + braces against tab races — UI also disables this.
-    if (decision === "request_changes" && current.hitl_2_iteration >= HITL_2_MAX_ITERATIONS) {
-      return { error: "cap_reached" as const };
-    }
-
-    const newIteration =
+    // Atomic claim of the HITL_2 decision (optimistic-concurrency, matches the
+    // PUT /article + /outline version-guard style). Two guards are folded into
+    // the WHERE clause so the read-then-write TOCTOU windows close:
+    //
+    //  - status = 'awaiting_hitl_2': the run must actually be PAUSED at the
+    //    HITL_2 gate. The workflow sets this exact status right before
+    //    `step.waitForEvent("await-hitl2-*")`, so this both rejects a stale tab
+    //    that posts after the gate moved on AND single-flights the sendEvent —
+    //    only the request that flips the status away from the gate proceeds to
+    //    `instance.sendEvent`. (Defense in depth: Cloudflare Workflows already
+    //    delivers one waitForEvent per gate; this stops a second decision from
+    //    racing in before the first wakes the workflow.)
+    //  - hitl_2_iteration < MAX (request_changes only): two concurrent
+    //    `request_changes` cannot both pass the cap — the bound lives IN the
+    //    conditional UPDATE, not in a separate read-then-check.
+    //
+    // `result.count` is the affected-row count; 0 means a guard rejected the
+    // write. The pre-SELECT above lets us tell 404 (no row) from 409 (a guard
+    // matched no row) and pick the precise 409 reason.
+    //
+    // request_changes → increment, guarded by status + cap.
+    // approve / reject → leave the counter untouched (no cap applies).
+    const newIteration = sql`hitl_2_iteration${
+      decision === "request_changes" ? sql` + 1` : sql``
+    }`;
+    const capGuard =
       decision === "request_changes"
-        ? current.hitl_2_iteration + 1
-        : current.hitl_2_iteration;
+        ? sql`AND hitl_2_iteration < ${HITL_2_MAX_ITERATIONS}`
+        : sql``;
 
-    await sql`
+    const result = await sql`
       UPDATE content_tool.runs SET
         hitl_2_decision = ${decision},
         hitl_2_notes = ${body.notes ?? null},
@@ -591,7 +660,21 @@ runsRouter.post("/:id/hitl-2", async (c) => {
         wp_excerpt = ${body.wp_excerpt ?? null},
         wp_publish_at = ${body.wp_publish_at ?? null}
       WHERE run_id = ${runId}
+        AND status = ${HITL_2_GATE_STATUS} ${capGuard}
     `;
+    if (result.count === 0) {
+      // The row exists (checked above) but the conditional WHERE matched nothing.
+      // Disambiguate: a `request_changes` that is at the gate but over the cap is
+      // a cap rejection; anything else is the run not being paused at HITL_2.
+      if (
+        decision === "request_changes" &&
+        current.status === HITL_2_GATE_STATUS &&
+        current.hitl_2_iteration >= HITL_2_MAX_ITERATIONS
+      ) {
+        return { error: "cap_reached" as const };
+      }
+      return { error: "not_at_gate" as const };
+    }
 
     // Persist human inline edits onto the latest render BEFORE sendEvent so the
     // workflow's publish step pushes the reviewer's edited content (mirrors
@@ -624,7 +707,12 @@ runsRouter.post("/:id/hitl-2", async (c) => {
     if (guard.error === "not_found") {
       return c.json({ detail: "run not found" }, 404);
     }
-    return c.json({ detail: "request_changes cap reached" }, 409);
+    if (guard.error === "cap_reached") {
+      return c.json({ detail: "request_changes cap reached" }, 409);
+    }
+    // not_at_gate — the run is not paused at HITL_2 (already decided, or a
+    // concurrent request already claimed the gate).
+    return c.json({ detail: "run is not awaiting a HITL_2 decision" }, 409);
   }
 
   const env = c.env as RunsEnv;

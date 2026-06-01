@@ -19,6 +19,19 @@ from content_tool.wordpress.client import WordPressClient
 
 logger = logging.getLogger(__name__)
 
+
+class RunAlreadyExecutingError(RuntimeError):
+    """Raised when a second graph task is requested for a run already in flight.
+
+    Two concurrent ``start``/``resume``/``restart`` calls for the same run would
+    otherwise spawn duplicate LangGraph tasks (double publish, racing checkpoint
+    writes). Callers surface this as HTTP 409.
+    """
+
+    def __init__(self, run_id: UUID) -> None:
+        super().__init__(f"run {run_id} is already executing")
+        self.run_id = run_id
+
 # state.next tuple → Run.status when the root graph is paused at an interrupt.
 _NEXT_TO_STATUS: dict[tuple[str, ...], str] = {
     ("production",): "hitl_1",
@@ -172,10 +185,23 @@ class RunExecutor:
         )
         return list(rows)
 
+    def _assert_no_live_task(self, run_id: UUID) -> None:
+        """Refuse to spawn a duplicate task when one is already in flight.
+
+        A finished task (``done()``) is fine to replace — it lets a completed or
+        failed run be started again (e.g. restart). A still-running task means a
+        concurrent start/resume is mid-execution and must not be duplicated.
+        """
+        existing = self._tasks.get(run_id)
+        if existing is not None and not existing.done():
+            raise RunAlreadyExecutingError(run_id)
+
     async def start(self, run_id: UUID) -> None:
+        self._assert_no_live_task(run_id)
         self._tasks[run_id] = asyncio.create_task(self._run(run_id))
 
     async def resume(self, run_id: UUID, update: dict[str, Any]) -> None:
+        self._assert_no_live_task(run_id)
         self._tasks[run_id] = asyncio.create_task(self._run(run_id, resume=True, update=update))
 
     async def restart(self, run_id: UUID) -> None:

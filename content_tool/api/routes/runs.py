@@ -25,7 +25,7 @@ from content_tool.api.schemas import (
     RepublishResponse,
     ResumeRequest,
 )
-from content_tool.api.sse import sse_stream
+from content_tool.api.sse import RunAlreadyExecutingError, sse_stream
 from content_tool.db.models import (
     AuditRun,
     ComplianceLog,
@@ -134,7 +134,10 @@ async def create_run(
         created_at = row.created_at
         article_id = row.article_id
 
-    await runner.start(run_id)
+    try:
+        await runner.start(run_id)
+    except RunAlreadyExecutingError as e:
+        raise HTTPException(409, "run already executing") from e
     return CreateRunResponse(
         run_id=run_id,
         status="pending",
@@ -323,7 +326,10 @@ async def resume_run(
             )
             await session.commit()
 
-    await runner.resume(run_id, state_update)
+    try:
+        await runner.resume(run_id, state_update)
+    except RunAlreadyExecutingError as e:
+        raise HTTPException(409, "run already executing") from e
     return {"ok": True}
 
 
@@ -336,18 +342,33 @@ async def restart_run(
     """Re-run a failed run from the top.
 
     Only ``failed`` runs are restartable — an in-flight or completed run must
-    not have its checkpoint wiped out from under it.
+    not have its checkpoint wiped out from under it. The ``failed → pending``
+    transition is claimed with a conditional UPDATE so two concurrent restarts
+    can't both drive the executor (TOCTOU between the read and the claim).
     """
+    from sqlalchemy import update
+
     async with sf() as session:
         row = (
             await session.execute(select(Run).where(Run.run_id == run_id))
         ).scalar_one_or_none()
         if not row:
             raise HTTPException(404, "run not found")
-        if row.status != "failed":
+        # Atomically claim the failed run. Only the request that flips
+        # failed→pending proceeds; a concurrent restart sees rowcount 0.
+        result = await session.execute(
+            update(Run)
+            .where(Run.run_id == run_id, Run.status == "failed")
+            .values(status="pending")
+        )
+        await session.commit()
+        if result.rowcount == 0:
             raise HTTPException(409, "only failed runs can be restarted")
 
-    await runner.restart(run_id)
+    try:
+        await runner.restart(run_id)
+    except RunAlreadyExecutingError as e:
+        raise HTTPException(409, "run already executing") from e
     return {"ok": True}
 
 
@@ -364,39 +385,62 @@ async def hitl_2(
         if not row:
             raise HTTPException(404, "run not found")
 
-        # Cap defense — UI also disables; this is belt + braces against tab races.
-        if payload.decision == "request_changes" and row.hitl_2_iteration >= 3:
-            raise HTTPException(409, "request_changes cap reached")
-
-        new_iteration = (
-            row.hitl_2_iteration + 1
-            if payload.decision == "request_changes"
-            else row.hitl_2_iteration
-        )
         comments_json = [c.model_dump() for c in (payload.comments or [])]
-
         is_approve = payload.decision == "approve"
-        await session.execute(
-            update(Run).where(Run.run_id == run_id).values(
-                hitl_2_decision=payload.decision,
-                hitl_2_notes=payload.notes,
-                hitl_2_comments=comments_json,
-                hitl_2_iteration=new_iteration,
-                approved_at=datetime.now(UTC) if is_approve else None,
-                # Real approver identity (email) — only stamped on approve, the
-                # event the compliance log records. Falls back to "unknown" when
-                # the sidecar runs without an authenticated identity.
-                approved_by=(payload.editor_email or "unknown") if is_approve else None,
-                wp_publish_status=payload.wp_publish_status,
-                wp_author_id=payload.wp_author_id,
-                wp_category_ids=payload.wp_category_ids,
-                wp_tag_ids=payload.wp_tag_ids,
-                wp_featured_media_id=payload.wp_featured_media_id,
-                wp_slug=payload.wp_slug,
-                wp_excerpt=payload.wp_excerpt,
-                wp_publish_at=payload.wp_publish_at,
-            )
+        is_request_changes = payload.decision == "request_changes"
+
+        # Cap enforcement is atomic: for request_changes the increment rides a
+        # conditional UPDATE (hitl_2_iteration < 3), so two concurrent requests
+        # from iteration 2 land on 3, not 4 — exactly one passes, the other 409s.
+        # UI also disables at the cap; this is belt + braces against tab races.
+        common_values: dict = dict(
+            hitl_2_decision=payload.decision,
+            hitl_2_notes=payload.notes,
+            hitl_2_comments=comments_json,
+            wp_publish_status=payload.wp_publish_status,
+            wp_author_id=payload.wp_author_id,
+            wp_category_ids=payload.wp_category_ids,
+            wp_tag_ids=payload.wp_tag_ids,
+            wp_featured_media_id=payload.wp_featured_media_id,
+            wp_slug=payload.wp_slug,
+            wp_excerpt=payload.wp_excerpt,
+            wp_publish_at=payload.wp_publish_at,
         )
+        if is_request_changes:
+            _CAP = 3
+            result = await session.execute(
+                update(Run)
+                .where(Run.run_id == run_id, Run.hitl_2_iteration < _CAP)
+                .values(
+                    hitl_2_iteration=Run.hitl_2_iteration + 1,
+                    approved_at=None,
+                    approved_by=None,
+                    **common_values,
+                )
+            )
+            if result.rowcount == 0:
+                raise HTTPException(409, "request_changes cap reached")
+            # Re-read the committed value so the resume reflects the real count.
+            new_iteration = (
+                await session.execute(
+                    select(Run.hitl_2_iteration).where(Run.run_id == run_id)
+                )
+            ).scalar_one()
+        else:
+            # approve / reject leave the iteration counter unchanged.
+            new_iteration = row.hitl_2_iteration
+            await session.execute(
+                update(Run).where(Run.run_id == run_id).values(
+                    hitl_2_iteration=new_iteration,
+                    approved_at=datetime.now(UTC) if is_approve else None,
+                    # Real approver identity (email) — only stamped on approve,
+                    # the event the compliance log records. Falls back to
+                    # "unknown" when the sidecar runs without an authenticated
+                    # identity.
+                    approved_by=(payload.editor_email or "unknown") if is_approve else None,
+                    **common_values,
+                )
+            )
 
         # Persist any human inline edits onto the latest render BEFORE resuming,
         # so the publish step pushes the reviewer's edited content (mirrors
@@ -444,7 +488,10 @@ async def hitl_2(
     if payload.decision == "reject":
         state_update["status"] = "rejected"
 
-    await runner.resume(run_id, state_update)
+    try:
+        await runner.resume(run_id, state_update)
+    except RunAlreadyExecutingError as e:
+        raise HTTPException(409, "run already executing") from e
     return {"ok": True}
 
 
