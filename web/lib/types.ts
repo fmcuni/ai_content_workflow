@@ -284,6 +284,9 @@ export interface DryPublishResponse {
 
 export interface Hitl2Request {
   decision: "approve" | "request_changes" | "reject";
+  /** Authenticated approver identity (email) for the audit trail. The Workers
+   * backend overrides this from the session; the Python sidecar uses it. */
+  editor_email?: string;
   notes?: string | null;
   comments?: Hitl2Comment[] | null;
   edited_html_body?: string | null;
@@ -319,6 +322,8 @@ export type Hitl2SnapshotTrigger = "interval" | "navigate" | "unload" | "manual"
 
 export interface Hitl2SnapshotIn {
   trigger: Hitl2SnapshotTrigger;
+  /** Snapshot author identity (email). See Hitl2Request.editor_email. */
+  editor_email?: string;
   html_body: string;
   seo_title?: string | null;
   meta_description?: string | null;

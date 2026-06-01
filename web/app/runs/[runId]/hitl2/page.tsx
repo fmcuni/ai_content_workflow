@@ -28,6 +28,7 @@ import {
   snapshotKey,
 } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
+import { useSession } from "@/lib/auth-client";
 import {
   Dialog,
   DialogContent,
@@ -58,6 +59,16 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.getRun(runId) });
 
   const qc = useQueryClient();
+
+  // Authenticated approver/author identity (email) sent with HITL_2 decisions and
+  // snapshots for the audit trail. Mirrored into a ref so the autosave/beacon
+  // handlers (which run outside render) read the latest without re-subscribing.
+  const { data: session } = useSession();
+  const editorEmail = session?.user?.email ?? "";
+  const editorEmailRef = useRef(editorEmail);
+  useEffect(() => {
+    editorEmailRef.current = editorEmail;
+  }, [editorEmail]);
 
   const existingPost = useQuery({
     queryKey: ["existing-post", runId],
@@ -195,6 +206,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         decision,
         edited_html_body: html,
         comments: liveComments,
+        editor_email: editorEmail,
       });
     },
     onSuccess: () => {
@@ -268,7 +280,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       if (key === lastSavedKeyRef.current) return "unchanged"; // nothing changed
       try {
         setSaveState("saving");
-        await api.saveHitl2Snapshot(runId, { ...snap, trigger });
+        await api.saveHitl2Snapshot(runId, { ...snap, trigger, editor_email: editorEmailRef.current });
         lastSavedKeyRef.current = key;
         setLastSavedKey(key);
         setSavedAt(new Date());
@@ -306,7 +318,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       const snap = snapshotRef.current;
       if (isBlankBody(snap.html_body)) return;
       if (snapshotKey(snap) === lastSavedKeyRef.current) return;
-      api.beaconHitl2Snapshot(runId, { ...snap, trigger: "unload" });
+      api.beaconHitl2Snapshot(runId, { ...snap, trigger: "unload", editor_email: editorEmailRef.current });
     };
     window.addEventListener("pagehide", handler);
     return () => window.removeEventListener("pagehide", handler);

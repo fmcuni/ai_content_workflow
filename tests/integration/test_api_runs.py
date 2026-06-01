@@ -402,3 +402,93 @@ async def test_recover_orphaned_fails_in_flight_runs_only(postgres_url):
     assert await runner.recover_orphaned() == []
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hitl2_approve_persists_edits_and_approver(postgres_url, monkeypatch):
+    """Approving at HITL_2 must (a) persist the reviewer's inline edits onto the
+    latest render so publish pushes them, and (b) stamp approved_by with the
+    authenticated editor email (not a placeholder)."""
+    monkeypatch.setenv("POSTGRES_URL", postgres_url)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+
+    app = create_app()
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+
+    run_id = uuid4()
+    draft_id = uuid4()
+    async with sf() as session:
+        session.add(
+            Run(
+                run_id=run_id,
+                created_by="creator@bowtie.com.hk",
+                status="hitl_2",
+                article_url="https://www.bowtie.com.hk/blog/x",
+                topic="x",
+                keywords=["x"],
+                mode="auto",
+                acf_adv_id=1,
+                acf_widget_id=2,
+                persona="bowtie-editor",
+                today_date=date.today(),
+            )
+        )
+        await session.commit()
+        session.add(
+            Draft(
+                draft_id=draft_id,
+                run_id=run_id,
+                iteration=0,
+                diagnose="d",
+                markup_raw="<p>orig</p>",
+                citation_intents=[],
+            )
+        )
+        await session.commit()
+        session.add(
+            Render(
+                draft_id=draft_id,
+                seo_title="orig title",
+                meta_description="orig meta",
+                html_body="<p>orig</p>",
+            )
+        )
+        await session.commit()
+
+    class _StubExecutor:
+        async def resume(self, run_id, update):
+            return None
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        app.state.session_factory = sf
+        app.state.run_executor = _StubExecutor()
+
+        resp = await ac.post(
+            f"/runs/{run_id}/hitl-2",
+            json={
+                "decision": "approve",
+                "editor_email": "approver@bowtie.com.hk",
+                "edited_html_body": "<p>EDITED</p>",
+                "edited_seo_title": "EDITED title",
+                "edited_meta_description": "EDITED meta",
+                "wp_publish_status": "draft",
+            },
+        )
+        assert resp.status_code == 200
+
+        async with sf() as session:
+            run_row = (
+                await session.execute(select(Run).where(Run.run_id == run_id))
+            ).scalar_one()
+            assert run_row.approved_by == "approver@bowtie.com.hk"
+            assert run_row.approved_at is not None
+
+            render_row = (
+                await session.execute(select(Render).where(Render.draft_id == draft_id))
+            ).scalar_one()
+            assert render_row.html_body == "<p>EDITED</p>"
+            assert render_row.seo_title == "EDITED title"
+            assert render_row.meta_description == "EDITED meta"
+
+    await engine.dispose()

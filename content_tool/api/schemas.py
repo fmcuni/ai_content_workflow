@@ -57,6 +57,10 @@ class Hitl2Comment(BaseModel):
 
 class Hitl2Request(BaseModel):
     decision: Literal["approve", "request_changes", "reject"]
+    # Authenticated approver identity (email). In production the Workers backend
+    # derives this from the session and ignores the payload; the Python sidecar
+    # has no auth layer, so the frontend supplies it here for the audit trail.
+    editor_email: str | None = None
     notes: str | None = None
     comments: list[Hitl2Comment] | None = None
     edited_html_body: str | None = None      # if editor tweaked HTML
@@ -82,6 +86,8 @@ class Hitl2SnapshotIn(BaseModel):
     """
 
     trigger: Literal["interval", "navigate", "unload", "manual"] = "manual"
+    # Author of this snapshot (email). See Hitl2Request.editor_email.
+    editor_email: str | None = None
     html_body: str
     seo_title: str | None = None
     meta_description: str | None = None

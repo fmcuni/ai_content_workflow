@@ -14,6 +14,7 @@ import {
 import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
 import { restartGuard } from "./run_guards";
+import type { AuthVars } from "../auth/middleware";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
 // ---------------------------------------------------------------------------
@@ -285,7 +286,7 @@ function toDateGmt(iso: string): string {
 // Router
 // ---------------------------------------------------------------------------
 
-const runsRouter = new Hono<{ Bindings: Env }>();
+const runsRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 
 // ---------------------------------------------------------------------------
 // POST / — create a run
@@ -550,6 +551,9 @@ runsRouter.post("/:id/hitl-2", async (c) => {
   const body = await c.req.json<Hitl2Body>().catch(() => ({}) as Hitl2Body);
   const decision = body.decision ?? "approve";
   const comments = body.comments ?? [];
+  // Compliance record-of-truth: the authenticated session email (NOT the
+  // client-supplied payload). "unknown" only when AUTH_DISABLED bypasses the gate.
+  const editorEmail = c.get("userEmail") ?? "unknown";
 
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<RunHitl2StateRow[]>`
@@ -577,7 +581,7 @@ runsRouter.post("/:id/hitl-2", async (c) => {
         hitl_2_comments = ${toJsonb(sql, comments)},
         hitl_2_iteration = ${newIteration},
         approved_at = ${decision === "approve" ? sql`now()` : null},
-        approved_by = ${decision === "approve" ? createdByPlaceholder() : null},
+        approved_by = ${decision === "approve" ? editorEmail : null},
         wp_publish_status = ${body.wp_publish_status ?? null},
         wp_author_id = ${body.wp_author_id ?? null},
         wp_category_ids = ${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)},
@@ -588,6 +592,31 @@ runsRouter.post("/:id/hitl-2", async (c) => {
         wp_publish_at = ${body.wp_publish_at ?? null}
       WHERE run_id = ${runId}
     `;
+
+    // Persist human inline edits onto the latest render BEFORE sendEvent so the
+    // workflow's publish step pushes the reviewer's edited content (mirrors
+    // PUT /article). Only on approve — request_changes triggers an AI rewrite
+    // and reject is terminal. COALESCE preserves fields the caller omitted.
+    if (decision === "approve") {
+      const renderRows = await sql<{ render_id: string }[]>`
+        SELECT r.render_id
+        FROM content_tool.renders r
+        JOIN content_tool.drafts d ON d.draft_id = r.draft_id
+        WHERE d.run_id = ${runId}
+        ORDER BY d.iteration DESC
+        LIMIT 1
+      `;
+      const render = renderRows[0];
+      if (render !== undefined) {
+        await sql`
+          UPDATE content_tool.renders
+          SET html_body = COALESCE(${body.edited_html_body ?? null}, html_body),
+              seo_title = COALESCE(${body.edited_seo_title ?? null}, seo_title),
+              meta_description = COALESCE(${body.edited_meta_description ?? null}, meta_description)
+          WHERE render_id = ${render.render_id}
+        `;
+      }
+    }
     return { ok: true as const };
   });
 
@@ -622,11 +651,6 @@ runsRouter.post("/:id/hitl-2", async (c) => {
 
   return c.json({ ok: true });
 });
-
-/** Placeholder approver identity — Plan 4 binds the real editor identity. */
-function createdByPlaceholder(): string {
-  return "placeholder-editor";
-}
 
 // ---------------------------------------------------------------------------
 // GET /:id/events — SSE proxy to the RUN_STREAM Durable Object.
@@ -1237,6 +1261,7 @@ runsRouter.post("/:id/hitl2-snapshots", async (c) => {
   const body = await c.req
     .json<Hitl2SnapshotBody>()
     .catch(() => ({}) as Hitl2SnapshotBody);
+  const editorEmail = c.get("userEmail") ?? "unknown";
 
   const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<{ run_id: string }[]>`
@@ -1255,7 +1280,7 @@ runsRouter.post("/:id/hitl2-snapshots", async (c) => {
         wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt,
         wp_publish_at
       ) VALUES (
-        ${snapshotId}, ${runId}, 'placeholder-editor', ${body.trigger ?? "manual"},
+        ${snapshotId}, ${runId}, ${editorEmail}, ${body.trigger ?? "manual"},
         ${body.html_body ?? ""}, ${body.seo_title ?? null}, ${body.meta_description ?? null},
         ${body.notes ?? null}, ${comments === null ? null : toJsonb(sql, comments)},
         ${body.wp_publish_status ?? null}, ${body.wp_author_id ?? null},
