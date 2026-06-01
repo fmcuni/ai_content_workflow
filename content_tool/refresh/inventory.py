@@ -1,6 +1,7 @@
 """Article-table maintenance: upsert by URL, schedule advancement math."""
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,13 @@ async def upsert_article(
             "persona": pg_insert(Article).excluded.persona,
             "topic_category": pg_insert(Article).excluded.topic_category,
             "wp_post_id": pg_insert(Article).excluded.wp_post_id,
+            # COALESCE so a real incoming timestamp updates the staleness anchor,
+            # but the common last_persisted_at=None call never wipes an existing
+            # stamp (the publish path is what writes a real value — see publish.py).
+            "last_persisted_at": func.coalesce(
+                pg_insert(Article).excluded.last_persisted_at,
+                Article.last_persisted_at,
+            ),
             "updated_at": datetime.now(UTC),
         },
     ).returning(Article)
