@@ -38,6 +38,13 @@ function snapshotSummary(s: Hitl2Snapshot): string {
   return `${bodyChars} chars · ${commentCount} comment${commentCount === 1 ? "" : "s"}`;
 }
 
+// The editor who saved this version, bound server-side to the authenticated
+// session (not client-supplied). Older rows may predate actor capture → null.
+function snapshotAuthor(s: Hitl2Snapshot): string {
+  const who = s.created_by?.trim();
+  return who && who.length > 0 ? who : "unknown";
+}
+
 interface Props {
   runId: string;
   open: boolean;
@@ -111,6 +118,9 @@ export function Hitl2VersionHistory({
                     </div>
                     <p className="font-mono text-[11px] text-ink-faint mt-1 truncate">
                       {snapshotSummary(s)}
+                    </p>
+                    <p className="font-mono text-[11px] text-ink-faint truncate">
+                      by {snapshotAuthor(s)}
                     </p>
                   </div>
                   <Button

@@ -15,17 +15,27 @@ export const ROLE_RANK: Record<Role, number> = {
 };
 
 // Capability → minimum role required.
+//
+// Roles split content authoring from publishing:
+//   - viewer  — read + edit & save an existing run's content (outline, article
+//               body, AI apply-edits, autosave/version-history snapshots). A
+//               viewer CANNOT publish, approve/reject at a HITL gate, create a
+//               new run, regenerate, or restart.
+//   - editor  — everything a viewer can, plus create/regenerate/restart runs,
+//               decide HITL gates, and publish to WordPress.
+//   - admin   — everything an editor can, plus config (prompts/personas/source
+//               policy), deletes, and user management.
 export type Capability =
-  // viewer
+  // viewer — read + content editing on existing runs
   | "read"
-  // editor
-  | "create_run"
   | "edit_outline"
   | "edit_article"
-  | "regenerate"
   | "apply_edits"
-  | "promote_topics"
   | "save_snapshot"
+  // editor — run lifecycle + HITL decisions + publishing
+  | "create_run"
+  | "regenerate"
+  | "promote_topics"
   | "hitl1_approve"
   | "hitl2_decide"
   | "publish"
@@ -39,14 +49,15 @@ export type Capability =
 
 export const CAPABILITY_MIN_ROLE: Record<Capability, Role> = {
   read: "viewer",
+  // Content editing on an existing run is a viewer capability; publishing is not.
+  edit_outline: "viewer",
+  edit_article: "viewer",
+  apply_edits: "viewer",
+  save_snapshot: "viewer",
 
   create_run: "editor",
-  edit_outline: "editor",
-  edit_article: "editor",
   regenerate: "editor",
-  apply_edits: "editor",
   promote_topics: "editor",
-  save_snapshot: "editor",
   hitl1_approve: "editor",
   hitl2_decide: "editor",
   publish: "editor",
