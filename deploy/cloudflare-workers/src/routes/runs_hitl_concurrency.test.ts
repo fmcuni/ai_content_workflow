@@ -189,6 +189,11 @@ function makeEnv(authEmail: string | null): Record<string, unknown> {
     __authEmail: authEmail,
     PRODUCTION: { get: async () => instance, create: async () => undefined },
     FRONTEND_ORIGIN: "https://example.test",
+    // RBAC: these legacy concurrency/identity tests predate role gating and
+    // assert on the create/resume/hitl-2 flows, not on authorization. Bootstrap
+    // the session email to `admin` so the new requireRole gates always pass;
+    // the dedicated RBAC tests live in runs_rbac.test.ts.
+    BOOTSTRAP_ADMIN_EMAILS: authEmail ?? "",
   };
 }
 

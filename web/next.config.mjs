@@ -68,6 +68,11 @@ const nextConfig = {
       { source: "/api/source-policy/:path*", destination: `${apiBase}/source-policy/:path*` },
       { source: "/api/topic-batches", destination: `${apiBase}/topic-batches` },
       { source: "/api/topic-batches/:path*", destination: `${apiBase}/topic-batches/:path*` },
+      // Current-user role (RBAC) + admin user-management. Bare `/api/me` is an
+      // exact rule (no trailing slash); `/api/admin/:path*` covers the user list
+      // and the per-user role PUT.
+      { source: "/api/me", destination: `${apiBase}/me` },
+      { source: "/api/admin/:path*", destination: `${apiBase}/admin/:path*` },
     ];
   },
 };

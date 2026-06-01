@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { RoleButton } from "@/components/RoleGate";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { personasApi, topicBatchesApi } from "@/lib/api";
@@ -282,7 +283,9 @@ export function CandidateGrid({ batch }: CandidateGridProps) {
               {(promoteMut.error as Error).message}
             </p>
           )}
-          <Button
+          <RoleButton
+            need="promote_topics"
+            deniedHint="Author role required to commission topics."
             type="button"
             size="lg"
             disabled={promoteMut.isPending || selectedIds.length === 0}
@@ -295,7 +298,7 @@ export function CandidateGrid({ batch }: CandidateGridProps) {
                 : n_refresh > 0
                   ? `Commission ${selectedIds.length} → (${n_create} new · ${n_refresh} refresh)`
                   : `Commission ${selectedIds.length} →`}
-          </Button>
+          </RoleButton>
         </div>
       </div>
     </section>

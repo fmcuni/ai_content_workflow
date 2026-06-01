@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { RoleButton } from "@/components/RoleGate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalLink } from "@/components/ExternalLink";
 import { PaperStamp } from "@/components/PaperStamp";
@@ -28,6 +29,7 @@ import {
   snapshotKey,
 } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
+import { useRole } from "@/lib/use-role";
 import { useSession } from "@/lib/auth-client";
 import {
   Dialog,
@@ -59,6 +61,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.getRun(runId) });
 
   const qc = useQueryClient();
+
+  // Editing the draft (manual save, apply-edits, regenerate) is an author-level
+  // capability; the approve/reject/request-changes gate is reviewer-level below.
+  const { can } = useRole();
+  const canEdit = can("edit_article");
 
   // Authenticated approver/author identity (email) sent with HITL_2 decisions and
   // snapshots for the audit trail. Mirrored into a ref so the autosave/beacon
@@ -451,7 +458,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           <button
             type="button"
             onClick={handleManualSave}
-            disabled={!isDirty || saveState === "saving"}
+            disabled={!isDirty || saveState === "saving" || !canEdit}
+            title={!canEdit ? "Author role required to save edits." : undefined}
             className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-ink-faint"
           >
             {saveState === "saving" ? "↻ Saving…" : "⤓ Save"}
@@ -486,15 +494,19 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 Round {round + 1} of {MAX_ROUNDS}
               </span>
             )}
-            <Button
+            <RoleButton
+              need="hitl2_decide"
+              deniedHint="Reviewer role required to reject."
               variant="destructive"
               size="sm"
               disabled={!renderReady || submit.isPending || !atGate}
               onClick={() => submit.mutate("reject")}
             >
               {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
-            </Button>
-            <Button
+            </RoleButton>
+            <RoleButton
+              need="hitl2_decide"
+              deniedHint="Reviewer role required to request changes."
               variant="secondary"
               size="sm"
               disabled={!renderReady || submit.isPending || capReached || !hasFeedback || !atGate}
@@ -510,8 +522,10 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               {submit.isPending && submit.variables === "request_changes"
                 ? "↻ Sending…"
                 : "Request changes ↺"}
-            </Button>
-            <Button
+            </RoleButton>
+            <RoleButton
+              need="publish"
+              deniedHint="Reviewer role required to approve and publish."
               variant="primary"
               disabled={!renderReady || submit.isPending || !atGate}
               onClick={() => submit.mutate("approve")}
@@ -519,7 +533,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               {submit.isPending && submit.variables === "approve"
                 ? "↻ Pushing to WP…"
                 : "Approve & push to WP ↪"}
-            </Button>
+            </RoleButton>
           </>
         )
       }

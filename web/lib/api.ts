@@ -1,4 +1,5 @@
 import type {
+  AdminUser, MeResponse, UserRole,
   ApplyEditsRequest, ApplyEditsResponse,
   ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
@@ -138,6 +139,25 @@ export const api = {
     const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
     return navigator.sendBeacon(`${BASE}/${runId}/hitl2-snapshots`, blob);
   },
+};
+
+// Identity + role. `/me` is served by the Workers backend; the local Python dev
+// backend has no such route, so callers (useRole) treat a failure as dev mode.
+export const meApi = {
+  get: () => http<MeResponse>("/api/me"),
+};
+
+// Admin user-management. Admin-gated server-side (403 for non-admins); the UI
+// also hides/blocks these for non-admins as defense in depth.
+const ADMIN_USERS_BASE = "/api/admin/users";
+
+export const adminApi = {
+  listUsers: () => http<AdminUser[]>(ADMIN_USERS_BASE),
+  setUserRole: (id: string, role: UserRole) =>
+    http<AdminUser>(`${ADMIN_USERS_BASE}/${id}/role`, {
+      method: "PUT",
+      body: JSON.stringify({ role }),
+    }),
 };
 
 const ARTICLES_BASE = "/api/articles";

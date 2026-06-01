@@ -6,6 +6,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { SectionHead } from "@/components/SectionHead";
+import { RoleButton } from "@/components/RoleGate";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -224,13 +225,15 @@ export default function PromptEditorPage({
             >
               {reloadMut.isPending ? "Reloading…" : "Reload"}
             </Button>
-            <Button
+            <RoleButton
+              need="edit_prompts"
+              deniedHint="Admin role required to edit prompts."
               size="sm"
               onClick={() => saveMut.mutate()}
               disabled={saveBlocked || saveMut.isPending}
             >
               {saveMut.isPending ? "Saving…" : "Save"}
-            </Button>
+            </RoleButton>
           </div>
         }
       />
@@ -458,7 +461,9 @@ export default function PromptEditorPage({
             >
               Close
             </Button>
-            <Button
+            <RoleButton
+              need="edit_prompts"
+              deniedHint="Admin role required to revert prompts."
               size="sm"
               onClick={() => { if (openVersion) revertMut.mutate(openVersion); }}
               disabled={
@@ -473,7 +478,7 @@ export default function PromptEditorPage({
               }
             >
               {revertMut.isPending ? "Reverting…" : "Revert to this"}
-            </Button>
+            </RoleButton>
           </div>
         </DialogContent>
       </Dialog>
