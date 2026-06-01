@@ -98,7 +98,11 @@
 		"RESEND_FROM": "Bowtie Content Desk <onboarding@resend.dev>",
 		// Email-domain allowlist for self-serve sign-up. Comma-separated to add more
 		// (e.g. "bowtie.com.hk,bowtie.com.sg") without a code deploy.
-		"ALLOWED_EMAIL_DOMAINS": "bowtie.com.hk"
+		"ALLOWED_EMAIL_DOMAINS": "bowtie.com.hk",
+		// TEMPORARY: verification disabled while Resend sending is sorted out (the
+		// test sender can't reliably deliver). Remove this line (or set to "on")
+		// and redeploy once bowtie.com.hk is DNS-verified in Resend.
+		"EMAIL_VERIFICATION": "off"
 	},
 	"hyperdrive": [
 		{

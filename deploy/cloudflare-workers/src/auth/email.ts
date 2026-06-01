@@ -9,33 +9,50 @@ interface SendEmailInput {
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const DEFAULT_FROM = "Bowtie Content Desk <noreply@bowtie.com.hk>";
+// Hard cap on the Resend call so a slow/unreachable endpoint can NEVER hang the
+// sign-up request (which awaits this). Without it, an unresponsive api.resend.com
+// blocks the whole Worker request until the platform limit.
+const SEND_TIMEOUT_MS = 8_000;
 
 /**
  * Send a transactional email via Resend's HTTPS API (Workers can't open raw
- * SMTP sockets). Throws on non-2xx so better-auth surfaces the failure —
- * verification mail must never be silently dropped.
+ * SMTP sockets). Throws on non-2xx / timeout so the caller can decide what to do
+ * (verification mail must never be silently dropped), but the timeout guarantees
+ * it fails fast instead of hanging.
  */
 export async function sendEmail(env: Env, input: SendEmailInput): Promise<void> {
   if (!env.RESEND_API_KEY) {
     throw new Error("RESEND_API_KEY is not configured");
   }
-  const res = await fetch(RESEND_ENDPOINT, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      from: env.RESEND_FROM ?? DEFAULT_FROM,
-      to: [input.to],
-      subject: input.subject,
-      html: input.html,
-      ...(input.text ? { text: input.text } : {}),
-    }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Resend send failed (${res.status}): ${detail}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+  try {
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        from: env.RESEND_FROM ?? DEFAULT_FROM,
+        to: [input.to],
+        subject: input.subject,
+        html: input.html,
+        ...(input.text ? { text: input.text } : {}),
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Resend send failed (${res.status}): ${detail}`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Resend send timed out after ${SEND_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

@@ -56,6 +56,9 @@ export interface Env {
   RESEND_FROM?: string;
   // Var — comma-separated email-domain allowlist for sign-up (default bowtie.com.hk).
   ALLOWED_EMAIL_DOMAINS?: string;
+  // Var — set "off" to temporarily allow sign-in without email verification
+  // (and skip the on-signup send). Anything else (or unset) = verification ON.
+  EMAIL_VERIFICATION?: string;
   // Var — set "true" to bypass the auth gate for local dev (Python backend).
   AUTH_DISABLED?: string;
   // WordPress connection — read by /setup/status. Optional: set per environment
