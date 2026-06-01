@@ -136,7 +136,7 @@ async function buildSystemPrompt(
  * from Python `build_user_prompt`. JSON.stringify (no spacing) mirrors
  * `json.dumps(..., ensure_ascii=False)`; non-ASCII is preserved by default.
  */
-function buildUserPrompt(input: {
+export function buildUserPrompt(input: {
   run: WriterRunInput;
   gapAnalysis: object;
   outline: object;

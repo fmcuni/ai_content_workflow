@@ -337,6 +337,119 @@ export async function listArticles(
   return { items, total };
 }
 
+/** Re-read one article row + its latest evaluation + open-run count → ArticleOut. */
+async function reloadArticleOut(
+  sql: Sql,
+  articleId: string,
+  latestEval: RefreshEvaluationRow | null,
+): Promise<ArticleOut | null> {
+  const rows = await sql<ArticleRow[]>`
+    SELECT
+      article_id, article_url, wp_post_id, topic, persona, topic_category,
+      first_seen_at, last_persisted_at, next_scan_due_at, dismissed_until,
+      dismissed_by, dismissed_reason, updated_at
+    FROM content_tool.articles
+    WHERE article_id = ${articleId}
+    LIMIT 1
+  `;
+  const article = rows[0];
+  if (article === undefined) {
+    return null;
+  }
+  const openRuns = await countOpenRuns(sql, articleId);
+  return toArticleOut(article, latestEval, openRuns);
+}
+
+/**
+ * Dismiss an article until `until` (an ISO timestamp). Mirrors the Python
+ * `dismiss_article` route:
+ *   - sets dismissed_until / dismissed_by / dismissed_reason and snoozes the
+ *     next scan to `until`;
+ *   - marks the latest OPEN refresh_evaluation as `dismissed` (audit trail);
+ *   - returns the refreshed ArticleOut whose latest_evaluation is that just-
+ *     dismissed evaluation (or null if none was open).
+ * Returns `null` if the article does not exist (route → HTTP 404). The caller
+ * validates that `until` is in the future (route → 422).
+ */
+export async function dismissArticle(
+  sql: Sql,
+  articleId: string,
+  until: string,
+  dismissedBy: string,
+  reason: string | null,
+): Promise<ArticleOut | null> {
+  const exists = await sql<{ article_id: string }[]>`
+    SELECT article_id FROM content_tool.articles WHERE article_id = ${articleId} LIMIT 1
+  `;
+  if (exists[0] === undefined) {
+    return null;
+  }
+
+  await sql`
+    UPDATE content_tool.articles
+    SET dismissed_until = ${until},
+        dismissed_by = ${dismissedBy},
+        dismissed_reason = ${reason},
+        next_scan_due_at = ${until},
+        updated_at = now()
+    WHERE article_id = ${articleId}
+  `;
+
+  // Mark the latest OPEN evaluation as dismissed, then re-read it for the response.
+  const openRows = await sql<{ evaluation_id: string }[]>`
+    SELECT evaluation_id
+    FROM content_tool.refresh_evaluations
+    WHERE article_id = ${articleId} AND outcome = 'open'
+    ORDER BY evaluated_at DESC
+    LIMIT 1
+  `;
+  let latestEval: RefreshEvaluationRow | null = null;
+  const openEvalId = openRows[0]?.evaluation_id;
+  if (openEvalId !== undefined) {
+    const updated = await sql<RefreshEvaluationRow[]>`
+      UPDATE content_tool.refresh_evaluations
+      SET outcome = 'dismissed', outcome_set_at = now(), outcome_set_by = ${dismissedBy}
+      WHERE evaluation_id = ${openEvalId}
+      RETURNING
+        evaluation_id, article_id, evaluated_at, scanner_version, trigger_source,
+        age_days, fetched_html_hash, deterministic_findings, llm_findings,
+        llm_skipped_reason, staleness_score, recommended_action, outcome,
+        resulting_run_id, outcome_set_at, outcome_set_by,
+        tokens_in, tokens_out, est_cost_usd_cents, latency_ms
+    `;
+    latestEval = updated[0] ?? null;
+  }
+
+  return reloadArticleOut(sql, articleId, latestEval);
+}
+
+/**
+ * Clear an article's dismissal (mirrors the Python `clear_dismissal` route):
+ * nulls dismissed_until / dismissed_by / dismissed_reason. The response's
+ * latest_evaluation is null, exactly as the Python route returns
+ * `_to_out(a, None, ...)`. Returns `null` if the article does not exist.
+ */
+export async function clearDismissal(
+  sql: Sql,
+  articleId: string,
+): Promise<ArticleOut | null> {
+  const exists = await sql<{ article_id: string }[]>`
+    SELECT article_id FROM content_tool.articles WHERE article_id = ${articleId} LIMIT 1
+  `;
+  if (exists[0] === undefined) {
+    return null;
+  }
+  await sql`
+    UPDATE content_tool.articles
+    SET dismissed_until = NULL,
+        dismissed_by = NULL,
+        dismissed_reason = NULL,
+        updated_at = now()
+    WHERE article_id = ${articleId}
+  `;
+  return reloadArticleOut(sql, articleId, null);
+}
+
 /**
  * Fetch a single article by UUID, with up to 10 recent evaluations and
  * 10 recent run IDs (both ordered by DESC timestamp).

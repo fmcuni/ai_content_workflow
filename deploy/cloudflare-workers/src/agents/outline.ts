@@ -78,7 +78,7 @@ async function buildSystemPrompt(
 // Full-width colons are intentional — the prompts use CJK style throughout.
 // ---------------------------------------------------------------------------
 
-function buildUserPromptCreateMode(opts: {
+export function buildUserPromptCreateMode(opts: {
   topic: string;
   keywords: string[];
   targetAudience: string | null | undefined;
@@ -106,7 +106,7 @@ function buildUserPromptCreateMode(opts: {
 // Mirrors Python `build_user_prompt`.
 // ---------------------------------------------------------------------------
 
-function buildUserPromptRefresh(opts: {
+export function buildUserPromptRefresh(opts: {
   gapAnalysisPayload: object;
   existingMarkdown: string;
   chosenRoute: string;

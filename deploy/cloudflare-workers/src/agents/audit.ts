@@ -116,7 +116,7 @@ async function buildSystemPrompt(
     .replace("{today_date}", todayDate);
 }
 
-function buildUserPrompt(opts: {
+export function buildUserPrompt(opts: {
   htmlBody: string;
   gapUpdatePlan: object;
   citationIntents: object[];

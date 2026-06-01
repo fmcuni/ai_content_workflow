@@ -1,10 +1,22 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
-import { listArticles, getArticleById } from "../db/articles";
+import {
+  listArticles,
+  getArticleById,
+  dismissArticle,
+  clearDismissal,
+} from "../db/articles";
 import type { ArticleSortKey } from "../db/articles";
 
 const articlesRouter = new Hono<{ Bindings: Env }>();
+
+// POST /articles/:id/dismiss request body — mirrors the Python DismissRequest.
+interface DismissBody {
+  until?: string;
+  reason?: string | null;
+  dismissed_by?: string;
+}
 
 // GET / — list articles
 // Query params:
@@ -61,6 +73,57 @@ articlesRouter.get("/:articleId", async (c) => {
   }
 
   return c.json(detail);
+});
+
+// POST /:articleId/dismiss — snooze an article until a future timestamp.
+// 422 when `until` is missing/unparseable or not in the future, or when
+// `dismissed_by` is absent (mirrors the Python DismissRequest + future check);
+// 404 when the article does not exist.
+articlesRouter.post("/:articleId/dismiss", async (c) => {
+  const articleId = c.req.param("articleId");
+  const body = await c.req.json<DismissBody>().catch(() => null);
+  if (body === null) {
+    return c.json({ detail: "invalid JSON body" }, 422);
+  }
+
+  const dismissedBy = typeof body.dismissed_by === "string" ? body.dismissed_by : "";
+  if (dismissedBy.length === 0) {
+    return c.json({ detail: "dismissed_by is required" }, 422);
+  }
+
+  const until = typeof body.until === "string" ? body.until : "";
+  const untilMs = until ? Date.parse(until) : Number.NaN;
+  if (Number.isNaN(untilMs)) {
+    return c.json({ detail: "until must be a valid timestamp" }, 422);
+  }
+  if (untilMs <= Date.now()) {
+    return c.json({ detail: "until must be in the future" }, 422);
+  }
+
+  const reason = body.reason ?? null;
+  // Normalise to an ISO string so the DB stores a canonical timestamptz value.
+  const untilIso = new Date(untilMs).toISOString();
+
+  const article = await withDb(c.env, c.executionCtx, (sql) =>
+    dismissArticle(sql, articleId, untilIso, dismissedBy, reason),
+  );
+  if (article === null) {
+    return c.json({ detail: "article not found" }, 404);
+  }
+  return c.json(article);
+});
+
+// DELETE /:articleId/dismiss — clear an existing dismissal.
+// 404 when the article does not exist.
+articlesRouter.delete("/:articleId/dismiss", async (c) => {
+  const articleId = c.req.param("articleId");
+  const article = await withDb(c.env, c.executionCtx, (sql) =>
+    clearDismissal(sql, articleId),
+  );
+  if (article === null) {
+    return c.json({ detail: "article not found" }, 404);
+  }
+  return c.json(article);
 });
 
 export { articlesRouter };
