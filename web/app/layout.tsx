@@ -6,7 +6,19 @@ import { Folio } from "@/components/Folio";
 import { SetupGate } from "@/components/SetupGate";
 import { Providers } from "./providers";
 
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
+
+// Root metadata. Pages are client components and cannot export their own
+// `metadata`, so this `title.default` is what every browser tab shows —
+// without it the tabs render blank (no <title> at all).
+export const metadata: Metadata = {
+  title: {
+    default: "Bowtie Content Desk",
+    template: "%s · Bowtie Content Desk",
+  },
+  description: "Internal editorial pipeline for Bowtie marketing content.",
+};
 
 const fraunces = Fraunces({
   subsets: ["latin"],

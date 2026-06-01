@@ -241,7 +241,11 @@ export function TipTapEditor({
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      // StarterKit v3 bundles its own Link extension; disable it so our
+      // explicitly-configured LinkExtension below is the sole registration.
+      // (Two registrations triggered TipTap's "Duplicate extension names:
+      // ['link']" console warning.)
+      StarterKit.configure({ link: false }),
       LinkExtension.configure({
         openOnClick: false,
         autolink: true,

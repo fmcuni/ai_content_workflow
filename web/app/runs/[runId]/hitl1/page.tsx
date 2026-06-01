@@ -37,6 +37,13 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
 
   const isBusy = approve.isPending || overrideRoute.isPending;
 
+  // This page is reachable by direct URL / bookmark / back-button even after the
+  // run has moved past the outline gate (e.g. a published run). Only let the
+  // editor act when the run is genuinely paused at HITL_1; otherwise show a
+  // "resolved" notice so stale decision buttons can't be re-submitted.
+  const atGate = run.data?.status === "hitl_1";
+  const gateResolved = run.data != null && !atGate;
+
   const outline = edited ?? ol.data?.payload ?? null;
 
   return (
@@ -69,20 +76,37 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
       {/* Sticky action bar */}
       <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
         <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-between gap-4">
-          <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
-            {edited ? "EDITS PENDING" : "AWAITING DECISION"}
-          </p>
-          <div className="flex gap-2">
-            {!isCreate && (
-              <>
-                <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
-                <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
-              </>
-            )}
-            <Button variant="primary" disabled={isBusy} onClick={() => approve.mutate()}>
-              {approve.isPending ? "Submitting…" : edited ? "Approve with edits ↪" : "Approve ↪"}
-            </Button>
-          </div>
+          {gateResolved ? (
+            <>
+              <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
+                Gate resolved · run is now{" "}
+                <span className="text-ink">{run.data?.status}</span> — this outline review is read-only.
+              </p>
+              <Link
+                href={`/runs/${runId}`}
+                className="font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink"
+              >
+                Back to run →
+              </Link>
+            </>
+          ) : (
+            <>
+              <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
+                {edited ? "EDITS PENDING" : "AWAITING DECISION"}
+              </p>
+              <div className="flex gap-2">
+                {!isCreate && (
+                  <>
+                    <Button variant="secondary" size="sm" disabled={isBusy || !atGate} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
+                    <Button variant="secondary" size="sm" disabled={isBusy || !atGate} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
+                  </>
+                )}
+                <Button variant="primary" disabled={isBusy || !atGate} onClick={() => approve.mutate()}>
+                  {approve.isPending ? "Submitting…" : edited ? "Approve with edits ↪" : "Approve ↪"}
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

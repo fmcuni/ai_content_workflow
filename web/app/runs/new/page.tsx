@@ -95,6 +95,7 @@ function NewRunForm() {
   const evaluationId = params.get("evaluation_id");
 
   const [front, setFront] = useState<FrontKey>(() => parseFront(params.get("front")));
+  const activeFront = FRONTS.find((f) => f.key === front) ?? FRONTS[0];
   const [rows, setRows] = useState<LedgerRow[]>(() => [blankRow(), blankRow(), blankRow()]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRaw, setBulkRaw] = useState("");
@@ -248,7 +249,7 @@ function NewRunForm() {
       <SectionHead
         kicker="The Desk · New Briefs"
         hed="The Assignment Desk"
-        dek="Three fronts in the works. Today we file under Front I — refreshes of articles already in print."
+        dek={`Three fronts in the works. Today we file under Front ${activeFront.numeral} — ${activeFront.dek}`}
       />
 
       <nav

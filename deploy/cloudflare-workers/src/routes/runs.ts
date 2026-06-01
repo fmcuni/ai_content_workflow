@@ -3,7 +3,13 @@ import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
 import { pgJson, pgTimestampToIso, toJsonb } from "../db/serialize";
-import { buildMeta, detectSeoPlugin } from "../wordpress/client";
+import {
+  buildMeta,
+  detectSeoPlugin,
+  WordPressClient,
+  WordPressError,
+} from "../wordpress/client";
+import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
 // ---------------------------------------------------------------------------
@@ -842,6 +848,627 @@ runsRouter.get("/:id/audit", async (c) => {
     llm_findings: pgJson(row.llm_findings),
     deterministic_findings: pgJson(row.deterministic_findings),
   });
+});
+
+// ---------------------------------------------------------------------------
+// Post-hoc edit / republish / snapshot routes — mirror content_tool/api/routes/runs.py
+// These are plain DB/WP operations on finished runs; they never touch the
+// LangGraph workflow checkpoint (unlike /resume and /hitl-2).
+// ---------------------------------------------------------------------------
+
+// How many autosave / version-history snapshots to retain per run.
+const HITL2_SNAPSHOT_KEEP = 50;
+
+interface Hitl2SnapshotBody {
+  trigger?: "interval" | "navigate" | "unload" | "manual";
+  html_body?: string;
+  seo_title?: string | null;
+  meta_description?: string | null;
+  notes?: string | null;
+  comments?: Hitl2Comment[] | null;
+  wp_publish_status?: string | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_tag_ids?: number[] | null;
+  wp_featured_media_id?: number | null;
+  wp_slug?: string | null;
+  wp_excerpt?: string | null;
+  wp_publish_at?: string | null;
+}
+
+interface Hitl2SnapshotRow {
+  snapshot_id: string;
+  run_id: string;
+  created_at: string;
+  created_by: string | null;
+  trigger: string;
+  html_body: string;
+  seo_title: string | null;
+  meta_description: string | null;
+  notes: string | null;
+  comments: unknown;
+  wp_publish_status: string | null;
+  wp_author_id: number | null;
+  wp_category_ids: unknown;
+  wp_tag_ids: unknown;
+  wp_featured_media_id: number | null;
+  wp_slug: string | null;
+  wp_excerpt: string | null;
+  wp_publish_at: string | null;
+}
+
+interface OutlineEditBody {
+  outline?: unknown;
+}
+
+interface ArticleEditBody {
+  html_body?: string;
+  seo_title?: string;
+  meta_description?: string;
+  wp_publish_status?: string | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_tag_ids?: number[] | null;
+  wp_featured_media_id?: number | null;
+  wp_slug?: string | null;
+  wp_excerpt?: string | null;
+  wp_publish_at?: string | null;
+}
+
+interface RepublishRunRow {
+  start_mode: string;
+  wp_pushed_post_id: number | null;
+  wp_publish_status: string | null;
+  wp_author_id: number | null;
+  wp_category_ids: unknown;
+  wp_tag_ids: unknown;
+  wp_featured_media_id: number | null;
+  wp_slug: string | null;
+  wp_excerpt: string | null;
+}
+
+interface RepublishRenderRow {
+  seo_title: string;
+  meta_description: string;
+  html_body: string;
+  excerpt_suggestion: string | null;
+  schema_jsonld: unknown;
+}
+
+/** Coerce a jsonb array column into number[] (ids), dropping non-numbers. */
+function toNumberArray(value: unknown): number[] {
+  const arr = pgJson<unknown>(value);
+  if (!Array.isArray(arr)) {
+    return [];
+  }
+  return arr.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+}
+
+/** Serialize a hitl2_snapshots row into the API output shape (timestamps→ISO, jsonb→native). */
+function toSnapshotOut(row: Hitl2SnapshotRow): Record<string, unknown> {
+  return {
+    snapshot_id: row.snapshot_id,
+    run_id: row.run_id,
+    created_at: pgTimestampToIso(row.created_at),
+    created_by: row.created_by,
+    trigger: row.trigger,
+    html_body: row.html_body,
+    seo_title: row.seo_title,
+    meta_description: row.meta_description,
+    notes: row.notes,
+    comments: pgJson(row.comments),
+    wp_publish_status: row.wp_publish_status,
+    wp_author_id: row.wp_author_id,
+    wp_category_ids: pgJson(row.wp_category_ids),
+    wp_tag_ids: pgJson(row.wp_tag_ids),
+    wp_featured_media_id: row.wp_featured_media_id,
+    wp_slug: row.wp_slug,
+    wp_excerpt: row.wp_excerpt,
+    wp_publish_at: pgTimestampToIso(row.wp_publish_at),
+  };
+}
+
+/**
+ * Best-effort resolution of WP author / category display names. Any upstream
+ * failure (WP unreachable, not configured, 404) collapses to null so the UI
+ * falls back to the raw id. Mirrors `_resolve_wp_names` in the Python route.
+ */
+async function resolveWpNames(
+  env: Env,
+  authorId: number | null,
+  categoryId: number | null,
+): Promise<[string | null, string | null]> {
+  let client: WordPressClient;
+  try {
+    client = new WordPressClient(env);
+  } catch {
+    return [null, null];
+  }
+  const authorName =
+    authorId === null
+      ? null
+      : await client
+          .getUser(authorId)
+          .then((u) => u?.name ?? null)
+          .catch(() => null);
+  const categoryName =
+    categoryId === null
+      ? null
+      : await client
+          .getCategory(categoryId)
+          .then((cat) => cat?.name ?? null)
+          .catch(() => null);
+  return [authorName, categoryName];
+}
+
+// ---------------------------------------------------------------------------
+// GET /:id/existing-post — cached snapshot of the existing WP post (prefill)
+// ---------------------------------------------------------------------------
+runsRouter.get("/:id/existing-post", async (c) => {
+  const runId = c.req.param("id");
+  const fa = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<
+      {
+        wp_post_id: number | null;
+        wp_link: string | null;
+        wp_author_id: number | null;
+        wp_categories: unknown;
+        wp_slug: string | null;
+      }[]
+    >`
+      SELECT wp_post_id, wp_link, wp_author_id, wp_categories, wp_slug
+      FROM content_tool.fetched_articles
+      WHERE run_id = ${runId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  });
+
+  if (fa === null || fa.wp_post_id === null) {
+    return c.json({ detail: "No existing post" }, 404);
+  }
+
+  const cats = pgJson<Array<{ id?: number }> | null>(fa.wp_categories);
+  const firstCatId =
+    Array.isArray(cats) && cats[0] && typeof cats[0] === "object" && "id" in cats[0]
+      ? (cats[0].id ?? null)
+      : null;
+
+  const [authorName, categoryName] = await resolveWpNames(
+    c.env,
+    fa.wp_author_id,
+    firstCatId,
+  );
+
+  return c.json({
+    wp_post_id: fa.wp_post_id,
+    link: fa.wp_link,
+    wp_author_id: fa.wp_author_id,
+    wp_author_name: authorName,
+    wp_category_id: firstCatId,
+    wp_category_name: categoryName,
+    wp_slug: fa.wp_slug,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/existing-post/refresh — re-read the post from WP, update the cache
+// ---------------------------------------------------------------------------
+runsRouter.post("/:id/existing-post/refresh", async (c) => {
+  const runId = c.req.param("id");
+
+  const run = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ article_url: string | null }[]>`
+      SELECT article_url FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    return rows[0] ?? null;
+  });
+  if (run === null) {
+    return c.json({ detail: "Run not found" }, 404);
+  }
+  if (!run.article_url) {
+    return c.json({ detail: "Existing post not found on WordPress" }, 404);
+  }
+
+  let client: WordPressClient;
+  try {
+    client = new WordPressClient(c.env);
+  } catch {
+    return c.json({ detail: "WordPress client not configured" }, 503);
+  }
+
+  let post: Awaited<ReturnType<WordPressClient["fetchPostByUrl"]>>;
+  try {
+    post = await client.fetchPostByUrl(run.article_url);
+  } catch (e: unknown) {
+    if (e instanceof WordPressError) {
+      return c.json({ detail: "WordPress upstream error" }, 502);
+    }
+    throw e;
+  }
+  if (post === null) {
+    return c.json({ detail: "Existing post not found on WordPress" }, 404);
+  }
+
+  const found = post;
+  const updated = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const faRows = await sql<{ run_id: string }[]>`
+      SELECT run_id FROM content_tool.fetched_articles WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (faRows[0] === undefined) {
+      return false;
+    }
+    const categories = found.categories.map((cid) => ({ id: cid }));
+    await sql`
+      UPDATE content_tool.fetched_articles
+      SET wp_categories = ${toJsonb(sql, categories)},
+          wp_author_id = ${found.author},
+          wp_slug = ${found.slug},
+          wp_link = ${found.link}
+      WHERE run_id = ${runId}
+    `;
+    return true;
+  });
+  if (!updated) {
+    return c.json({ detail: "No fetched article for this run" }, 404);
+  }
+
+  const firstCatId = found.categories.length > 0 ? found.categories[0]! : null;
+  const [authorName, categoryName] = await resolveWpNames(
+    c.env,
+    found.author,
+    firstCatId,
+  );
+  return c.json({
+    wp_post_id: found.id,
+    link: found.link,
+    wp_author_id: found.author,
+    wp_author_name: authorName,
+    wp_category_id: firstCatId,
+    wp_category_name: categoryName,
+    wp_slug: found.slug,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/hitl2-snapshots — persist one autosave / version-history snapshot
+// ---------------------------------------------------------------------------
+runsRouter.post("/:id/hitl2-snapshots", async (c) => {
+  const runId = c.req.param("id");
+  const body = await c.req
+    .json<Hitl2SnapshotBody>()
+    .catch(() => ({}) as Hitl2SnapshotBody);
+
+  const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const runRows = await sql<{ run_id: string }[]>`
+      SELECT run_id FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (runRows[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+
+    const snapshotId = crypto.randomUUID();
+    const comments = body.comments ?? null;
+    const rows = await sql<Hitl2SnapshotRow[]>`
+      INSERT INTO content_tool.hitl2_snapshots (
+        snapshot_id, run_id, created_by, trigger, html_body, seo_title,
+        meta_description, notes, comments, wp_publish_status, wp_author_id,
+        wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt,
+        wp_publish_at
+      ) VALUES (
+        ${snapshotId}, ${runId}, 'placeholder-editor', ${body.trigger ?? "manual"},
+        ${body.html_body ?? ""}, ${body.seo_title ?? null}, ${body.meta_description ?? null},
+        ${body.notes ?? null}, ${comments === null ? null : toJsonb(sql, comments)},
+        ${body.wp_publish_status ?? null}, ${body.wp_author_id ?? null},
+        ${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)},
+        ${body.wp_tag_ids == null ? null : toJsonb(sql, body.wp_tag_ids)},
+        ${body.wp_featured_media_id ?? null}, ${body.wp_slug ?? null},
+        ${body.wp_excerpt ?? null}, ${body.wp_publish_at ?? null}
+      )
+      RETURNING
+        snapshot_id, run_id, created_at, created_by, trigger, html_body,
+        seo_title, meta_description, notes, comments, wp_publish_status,
+        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
+        wp_slug, wp_excerpt, wp_publish_at
+    `;
+
+    // Prune to the newest HITL2_SNAPSHOT_KEEP rows so history stays bounded.
+    await sql`
+      DELETE FROM content_tool.hitl2_snapshots
+      WHERE snapshot_id IN (
+        SELECT snapshot_id FROM content_tool.hitl2_snapshots
+        WHERE run_id = ${runId}
+        ORDER BY created_at DESC
+        OFFSET ${HITL2_SNAPSHOT_KEEP}
+      )
+    `;
+    return { snap: rows[0] ?? null };
+  });
+
+  if ("error" in result) {
+    return c.json({ detail: "run not found" }, 404);
+  }
+  if (result.snap === null) {
+    return c.json({ detail: "failed to save snapshot" }, 500);
+  }
+  return c.json(toSnapshotOut(result.snap));
+});
+
+// ---------------------------------------------------------------------------
+// GET /:id/hitl2-snapshots — list snapshots newest-first (version history)
+// ---------------------------------------------------------------------------
+runsRouter.get("/:id/hitl2-snapshots", async (c) => {
+  const runId = c.req.param("id");
+  const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
+    sql<Hitl2SnapshotRow[]>`
+      SELECT
+        snapshot_id, run_id, created_at, created_by, trigger, html_body,
+        seo_title, meta_description, notes, comments, wp_publish_status,
+        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
+        wp_slug, wp_excerpt, wp_publish_at
+      FROM content_tool.hitl2_snapshots
+      WHERE run_id = ${runId}
+      ORDER BY created_at DESC
+      LIMIT ${HITL2_SNAPSHOT_KEEP}
+    `,
+  );
+  return c.json(rows.map(toSnapshotOut));
+});
+
+// ---------------------------------------------------------------------------
+// PUT /:id/outline — persist a post-hoc outline edit (outlines.human_edits)
+// ---------------------------------------------------------------------------
+runsRouter.put("/:id/outline", async (c) => {
+  const runId = c.req.param("id");
+  const body = await c.req.json<OutlineEditBody>().catch(() => ({}) as OutlineEditBody);
+
+  const found = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ run_id: string }[]>`
+      SELECT run_id FROM content_tool.outlines WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (rows[0] === undefined) {
+      return false;
+    }
+    await sql`
+      UPDATE content_tool.outlines
+      SET edited_by_human = TRUE, human_edits = ${toJsonb(sql, body.outline ?? null)}
+      WHERE run_id = ${runId}
+    `;
+    return true;
+  });
+
+  if (!found) {
+    return c.json({ detail: "no outline for this run" }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /:id/article — persist body/SEO onto the latest render + WP meta on the run
+// ---------------------------------------------------------------------------
+runsRouter.put("/:id/article", async (c) => {
+  const runId = c.req.param("id");
+  const body = await c.req
+    .json<ArticleEditBody>()
+    .catch(() => ({}) as ArticleEditBody);
+
+  const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const renderRows = await sql<{ render_id: string }[]>`
+      SELECT r.render_id
+      FROM content_tool.renders r
+      JOIN content_tool.drafts d ON d.draft_id = r.draft_id
+      WHERE d.run_id = ${runId}
+      ORDER BY d.iteration DESC
+      LIMIT 1
+    `;
+    const render = renderRows[0];
+    if (render === undefined) {
+      // Distinguish "no draft" vs "no render" the way the Python route does:
+      const draftRows = await sql<{ draft_id: string }[]>`
+        SELECT draft_id FROM content_tool.drafts WHERE run_id = ${runId} LIMIT 1
+      `;
+      return draftRows[0] === undefined
+        ? ("no_draft" as const)
+        : ("no_render" as const);
+    }
+
+    await sql`
+      UPDATE content_tool.renders
+      SET html_body = ${body.html_body ?? ""},
+          seo_title = ${body.seo_title ?? ""},
+          meta_description = ${body.meta_description ?? ""}
+      WHERE render_id = ${render.render_id}
+    `;
+
+    // Only overwrite WP metadata fields the caller actually supplied (non-null);
+    // COALESCE preserves the existing value for omitted fields.
+    await sql`
+      UPDATE content_tool.runs
+      SET
+        wp_publish_status = COALESCE(${body.wp_publish_status ?? null}, wp_publish_status),
+        wp_author_id = COALESCE(${body.wp_author_id ?? null}, wp_author_id),
+        wp_category_ids = COALESCE(${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)}, wp_category_ids),
+        wp_tag_ids = COALESCE(${body.wp_tag_ids == null ? null : toJsonb(sql, body.wp_tag_ids)}, wp_tag_ids),
+        wp_featured_media_id = COALESCE(${body.wp_featured_media_id ?? null}, wp_featured_media_id),
+        wp_slug = COALESCE(${body.wp_slug ?? null}, wp_slug),
+        wp_excerpt = COALESCE(${body.wp_excerpt ?? null}, wp_excerpt),
+        wp_publish_at = COALESCE(${body.wp_publish_at ?? null}, wp_publish_at)
+      WHERE run_id = ${runId}
+    `;
+    return "ok" as const;
+  });
+
+  if (outcome === "no_draft") {
+    return c.json({ detail: "no draft for this run" }, 404);
+  }
+  if (outcome === "no_render") {
+    return c.json({ detail: "no render for this run" }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/republish — re-push the persisted render + WP metadata to WordPress
+// ---------------------------------------------------------------------------
+runsRouter.post("/:id/republish", async (c) => {
+  const runId = c.req.param("id");
+
+  const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const runRows = await sql<RepublishRunRow[]>`
+      SELECT
+        start_mode, wp_pushed_post_id, wp_publish_status, wp_author_id,
+        wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt
+      FROM content_tool.runs
+      WHERE run_id = ${runId}
+      LIMIT 1
+    `;
+    const run = runRows[0];
+    if (run === undefined) {
+      return { error: "not_found" as const };
+    }
+    const renderRows = await sql<RepublishRenderRow[]>`
+      SELECT r.seo_title, r.meta_description, r.html_body, r.excerpt_suggestion, r.schema_jsonld
+      FROM content_tool.renders r
+      JOIN content_tool.drafts d ON d.draft_id = r.draft_id
+      WHERE d.run_id = ${runId}
+      ORDER BY d.iteration DESC
+      LIMIT 1
+    `;
+    const render = renderRows[0];
+    if (render === undefined) {
+      return { error: "no_render" as const };
+    }
+
+    let fetchedPostId: number | null = null;
+    if (run.start_mode === "refresh" && run.wp_pushed_post_id === null) {
+      const faRows = await sql<{ wp_post_id: number | null }[]>`
+        SELECT wp_post_id FROM content_tool.fetched_articles WHERE run_id = ${runId} LIMIT 1
+      `;
+      fetchedPostId = faRows[0]?.wp_post_id ?? null;
+    }
+    return { run, render, fetchedPostId };
+  });
+
+  if ("error" in data) {
+    if (data.error === "not_found") {
+      return c.json({ detail: "run not found" }, 404);
+    }
+    return c.json({ detail: "run has no render to publish" }, 409);
+  }
+
+  const { run, render, fetchedPostId } = data;
+  const isRefresh = run.start_mode === "refresh";
+
+  let client: WordPressClient;
+  try {
+    client = new WordPressClient(c.env);
+  } catch {
+    return c.json({ detail: "WordPress client not configured" }, 503);
+  }
+
+  // SEO plugin detection is best-effort — a WP outage must not block the push.
+  let seoPlugin: SeoPlugin | null = null;
+  try {
+    seoPlugin = await detectSeoPlugin(c.env);
+  } catch {
+    seoPlugin = null;
+  }
+
+  const schemaJsonld =
+    render.schema_jsonld !== null && render.schema_jsonld !== undefined
+      ? pgJson<object[]>(render.schema_jsonld)
+      : null;
+
+  const postId = isRefresh
+    ? (run.wp_pushed_post_id ?? fetchedPostId)
+    : run.wp_pushed_post_id;
+  const status = isRefresh ? (run.wp_publish_status ?? "draft") : "draft";
+
+  const payload: PublishPayload = {
+    postId,
+    title: render.seo_title,
+    content: render.html_body,
+    excerpt: run.wp_excerpt || (render.excerpt_suggestion ?? ""),
+    status,
+    slug: run.wp_slug,
+    categories: toNumberArray(run.wp_category_ids),
+    tags: toNumberArray(run.wp_tag_ids),
+    author: run.wp_author_id,
+    featuredMedia: run.wp_featured_media_id,
+    meta: buildMeta(render.meta_description, schemaJsonld, seoPlugin),
+    ifUnmodifiedSince: null,
+    dateGmt: null,
+    template: WP_DEFAULT_PAGE_TEMPLATE,
+  };
+
+  let result: Awaited<ReturnType<WordPressClient["upsert"]>>;
+  try {
+    result = await client.upsert(payload);
+  } catch (e: unknown) {
+    if (e instanceof WordPressError) {
+      return c.json({ detail: `WordPress upstream error: ${e.message}` }, 502);
+    }
+    throw e;
+  }
+
+  // Backfill the WP post id + flip to published (mirror the workflow publish).
+  await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    if (isRefresh) {
+      await sql`
+        UPDATE content_tool.runs
+        SET wp_pushed_post_id = ${result.id}, wp_pushed_at = now(), status = 'published'
+        WHERE run_id = ${runId}
+      `;
+    } else {
+      await sql`
+        UPDATE content_tool.runs
+        SET wp_pushed_post_id = ${result.id}, wp_pushed_at = now(),
+            status = 'published', article_url = ${result.link}
+        WHERE run_id = ${runId}
+      `;
+    }
+  });
+
+  return c.json({
+    wp_post_id: result.id,
+    link: result.link ?? null,
+    status: result.status,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /:id — hard-delete a run and its derived rows
+//
+// Content artifacts cascade via ON DELETE CASCADE. The soft back-references
+// (topic_candidates.promoted_run_id, refresh_evaluations.resulting_run_id) and
+// compliance_log do NOT cascade, so they are cleared explicitly first.
+// ---------------------------------------------------------------------------
+runsRouter.delete("/:id", async (c) => {
+  const runId = c.req.param("id");
+  const deleted = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ run_id: string }[]>`
+      SELECT run_id FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (rows[0] === undefined) {
+      return false;
+    }
+    await sql`
+      UPDATE content_tool.topic_candidates SET promoted_run_id = NULL
+      WHERE promoted_run_id = ${runId}
+    `;
+    await sql`
+      UPDATE content_tool.refresh_evaluations SET resulting_run_id = NULL
+      WHERE resulting_run_id = ${runId}
+    `;
+    await sql`DELETE FROM content_tool.compliance_log WHERE run_id = ${runId}`;
+    await sql`DELETE FROM content_tool.runs WHERE run_id = ${runId}`;
+    return true;
+  });
+
+  if (!deleted) {
+    return c.json({ detail: "run not found" }, 404);
+  }
+  return c.json({ ok: true });
 });
 
 export { runsRouter };

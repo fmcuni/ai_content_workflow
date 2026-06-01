@@ -213,6 +213,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   }, [existingPost.data]);
 
   const renderReady = Boolean(render.data);
+  // Reachable by direct URL / bookmark even after the draft gate is resolved
+  // (e.g. an already-published run). Only allow the live Reject / Request-changes
+  // / Approve actions while the run is genuinely paused at HITL_2.
+  const atGate = run.data?.status === "hitl_2";
+  const gateResolved = run.data != null && !atGate;
   const round = run.data?.hitl_2_iteration ?? 0;
   const capReached = round >= MAX_ROUNDS;
   const hasFeedback =
@@ -768,45 +773,62 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       {/* Sticky action bar */}
       <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
         <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-end gap-3">
-          {round > 0 && (
-            <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
-              Round {round + 1} of {MAX_ROUNDS}
-            </span>
+          {gateResolved ? (
+            <>
+              <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
+                Gate resolved · run is now{" "}
+                <span className="text-ink">{run.data?.status}</span> — draft review is read-only.
+              </span>
+              <Link
+                href={`/runs/${runId}/edit`}
+                className="font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink"
+              >
+                Edit &amp; re-push →
+              </Link>
+            </>
+          ) : (
+            <>
+              {round > 0 && (
+                <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
+                  Round {round + 1} of {MAX_ROUNDS}
+                </span>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={!renderReady || submit.isPending || !atGate}
+                onClick={() => submit.mutate("reject")}
+              >
+                {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!renderReady || submit.isPending || capReached || !hasFeedback || !atGate}
+                title={
+                  capReached
+                    ? "Cap reached — approve or reject."
+                    : !hasFeedback
+                    ? "Add a comment or note first."
+                    : ""
+                }
+                onClick={() => submit.mutate("request_changes")}
+              >
+                {submit.isPending && submit.variables === "request_changes"
+                  ? "↻ Sending…"
+                  : "Request changes ↺"}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!renderReady || submit.isPending || !atGate}
+                onClick={() => submit.mutate("approve")}
+              >
+                {submit.isPending && submit.variables === "approve"
+                  ? "↻ Pushing to WP…"
+                  : "Approve & push to WP ↪"}
+              </Button>
+            </>
           )}
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={!renderReady || submit.isPending}
-            onClick={() => submit.mutate("reject")}
-          >
-            {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!renderReady || submit.isPending || capReached || !hasFeedback}
-            title={
-              capReached
-                ? "Cap reached — approve or reject."
-                : !hasFeedback
-                ? "Add a comment or note first."
-                : ""
-            }
-            onClick={() => submit.mutate("request_changes")}
-          >
-            {submit.isPending && submit.variables === "request_changes"
-              ? "↻ Sending…"
-              : "Request changes ↺"}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!renderReady || submit.isPending}
-            onClick={() => submit.mutate("approve")}
-          >
-            {submit.isPending && submit.variables === "approve"
-              ? "↻ Pushing to WP…"
-              : "Approve & push to WP ↪"}
-          </Button>
         </div>
       </div>
 
