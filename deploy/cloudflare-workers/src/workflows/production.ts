@@ -218,7 +218,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         });
         return "ok";
       });
-      await this.emit(runId, "graph.error", { message });
+      await this.emitStep(step, "emit-graph-error", runId, "graph.error", { message });
       throw err;
     }
 
@@ -264,7 +264,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     if (run.start_mode === "refresh") {
       run = await this.runRefreshStrategy(runId, run, step, keywords, todayDate);
     } else {
-      await this.setStatus(runId, "strategy");
+      await this.statusStep(step, "status-strategy", runId, "strategy");
       await step.do("outline", async () =>
         this.withSql(async (sql) => {
           const gemini = this.geminiClient(runId);
@@ -283,11 +283,12 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         }),
       );
     }
-    await this.emit(runId, "strategy.outline.done", {});
+    await this.emitStep(step, "emit-outline-done", runId, "strategy.outline.done", {});
 
     // --- 3. HITL_1 ---------------------------------------------------------
-    await this.setStatus(runId, "hitl_1");
-    await this.emit(runId, "hitl.interrupted", { next: ["production"] });
+    await this.gateStep(step, "gate-hitl1", runId, "hitl_1", "hitl.interrupted", {
+      next: ["production"],
+    });
     const d1 = await step.waitForEvent<Hitl1Payload>("await-hitl1", {
       type: "hitl_1",
       timeout: HITL_TIMEOUT,
@@ -297,7 +298,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     );
     if (cancelled) {
       // Terminal: the operator cancelled at the outline gate.
-      await this.emit(runId, "graph.completed", {});
+      await this.emitStep(step, "emit-completed-cancel", runId, "graph.completed", {});
       return;
     }
 
@@ -311,8 +312,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       await this.runProductionLoop(runId, run, step, hitl2Iteration, reviewerRefineNotes);
 
       // --- HITL_2 ----------------------------------------------------------
-      await this.setStatus(runId, "hitl_2");
-      await this.emit(runId, "hitl.interrupted", { next: ["publish_or_revise"] });
+      await this.gateStep(
+        step,
+        `gate-hitl2-${hitl2Iteration}`,
+        runId,
+        "hitl_2",
+        "hitl.interrupted",
+        { next: ["publish_or_revise"] },
+      );
       const d2 = await step.waitForEvent<Hitl2Payload>(`await-hitl2-${hitl2Iteration}`, {
         type: "hitl_2",
         timeout: HITL_TIMEOUT,
@@ -320,7 +327,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       const decision = d2.payload.decision;
 
       if (decision === "approve") {
-        await this.setStatus(runId, "publishing");
+        await this.statusStep(step, `status-publishing-${hitl2Iteration}`, runId, "publishing");
         await this.publish(runId, run, step);
         await step.do("compliance", async () =>
           this.withSql(async (sql) => {
@@ -328,20 +335,25 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
             return "ok";
           }),
         );
-        await this.emit(runId, "graph.completed", {});
+        await this.emitStep(step, "emit-completed-approve", runId, "graph.completed", {});
         return;
       }
 
       if (decision === "reject") {
-        await this.setStatus(runId, "rejected");
-        await this.emit(runId, "graph.completed", {});
+        await this.gateStep(step, "gate-rejected", runId, "rejected", "graph.completed", {});
         return;
       }
 
       // decision === "request_changes"
       if (hitl2Iteration >= MAX_HITL2_ROUNDS) {
-        await this.setStatus(runId, "changes_requested");
-        await this.emit(runId, "graph.completed", {});
+        await this.gateStep(
+          step,
+          "gate-changes-requested",
+          runId,
+          "changes_requested",
+          "graph.completed",
+          {},
+        );
         return;
       }
 
@@ -350,7 +362,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       // which has no interrupt). Build refine notes from reviewer feedback.
       reviewerRefineNotes = buildReviewerRefineNotes(d2.payload);
       hitl2Iteration += 1;
-      await this.setStatus(runId, "revising");
+      await this.statusStep(step, `status-revising-${hitl2Iteration}`, runId, "revising");
     }
   }
 
@@ -374,7 +386,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     }
 
     // --- fetch_article (no LLM; idempotent on fetched_articles.run_id) ---
-    await this.setStatus(runId, "fetching");
+    await this.statusStep(step, "status-fetching", runId, "fetching");
     const fetched = await step.do("fetch-article", async () =>
       this.withSql<{ markdown: string }>(async (sql) => {
         const result = await runFetchArticle(sql, this.env, { runId, articleUrl });
@@ -384,7 +396,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     );
 
     // --- gap_analysis (Gemini + googleSearch/urlContext; backfills chosen_route) ---
-    await this.setStatus(runId, "strategy");
+    await this.statusStep(step, "status-strategy-refresh", runId, "strategy");
     await step.do("gap-analysis", async () =>
       this.withSql(async (sql) => {
         const gemini = this.geminiClient(runId);
@@ -459,7 +471,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     hitl2Iteration: number,
     reviewerRefineNotes: RefineNote[] | null,
   ): Promise<void> {
-    await this.setStatus(runId, "production");
+    await this.statusStep(step, `status-production-${hitl2Iteration}`, runId, "production");
 
     let iteration = 0;
     // Tag every step name with the hitl-2 round so revision rounds get fresh,
@@ -501,7 +513,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           return result.draftId;
         }),
       );
-      await this.emit(runId, "production.writer.done", {}, iteration);
+      await this.emitStep(
+        step,
+        `emit-writer-done-${round}-${iteration}`,
+        runId,
+        "production.writer.done",
+        {},
+        iteration,
+      );
 
       // --- resolve_citations ---
       await step.do(`resolve_citations-${round}-${iteration}`, async () =>
@@ -522,7 +541,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           return "ok";
         }),
       );
-      await this.emit(runId, "production.resolve_citations.done", {}, iteration);
+      await this.emitStep(
+        step,
+        `emit-citations-done-${round}-${iteration}`,
+        runId,
+        "production.resolve_citations.done",
+        {},
+        iteration,
+      );
 
       // --- render_html ---
       await step.do(`render-${round}-${iteration}`, async () =>
@@ -551,7 +577,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           return "ok";
         }),
       );
-      await this.emit(runId, "production.render_html.done", {}, iteration);
+      await this.emitStep(
+        step,
+        `emit-render-done-${round}-${iteration}`,
+        runId,
+        "production.render_html.done",
+        {},
+        iteration,
+      );
 
       // --- audit ---
       const overallPass = await step.do(`audit-${round}-${iteration}`, async () =>
@@ -578,7 +611,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           return audit.overall_pass;
         }),
       );
-      await this.emit(runId, "production.audit.done", {}, iteration);
+      await this.emitStep(
+        step,
+        `emit-audit-done-${round}-${iteration}`,
+        runId,
+        "production.audit.done",
+        {},
+        iteration,
+      );
 
       // Break on a clean audit OR after exhausting the internal budget
       // (route_after_audit: END when overall_pass or iteration >= MAX-1).
@@ -934,6 +974,60 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         UPDATE content_tool.runs SET status = ${status} WHERE run_id = ${runId}::uuid
       `;
       return undefined;
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Durable side-effect wrappers. On a Cloudflare Workflows replay (after a
+  // hibernation wake at waitForEvent), the run() body re-executes from the top;
+  // only completed step.do() callbacks are memoized. A bare setStatus/emit
+  // therefore re-fires on every wake → duplicate status writes + duplicate SSE
+  // timeline events. Wrapping each in a named step makes it run exactly once
+  // (the emit's timestamp is also stamped once). Every `label` MUST be unique
+  // per workflow instance.
+  // -------------------------------------------------------------------------
+
+  private async statusStep(
+    step: WorkflowStep,
+    label: string,
+    runId: string,
+    status: string,
+  ): Promise<void> {
+    await step.do(label, async () => {
+      await this.setStatus(runId, status);
+      return "ok";
+    });
+  }
+
+  private async emitStep(
+    step: WorkflowStep,
+    label: string,
+    runId: string,
+    eventName: string,
+    payload: Record<string, unknown>,
+    iteration?: number,
+  ): Promise<void> {
+    await step.do(label, async () => {
+      await this.emit(runId, eventName, payload, iteration);
+      return "ok";
+    });
+  }
+
+  /** Set a status AND emit one event atomically in a single named step — used for
+   * the HITL interrupts and terminal states so neither side effect re-fires on a
+   * resume after hibernation. */
+  private async gateStep(
+    step: WorkflowStep,
+    label: string,
+    runId: string,
+    status: string,
+    eventName: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await step.do(label, async () => {
+      await this.setStatus(runId, status);
+      await this.emit(runId, eventName, payload);
+      return "ok";
     });
   }
 
