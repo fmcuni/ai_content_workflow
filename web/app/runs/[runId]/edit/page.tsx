@@ -2,26 +2,28 @@
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { toast } from "sonner";
 
-import { Sparkles } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SectionHead } from "@/components/SectionHead";
 import { OutlineEditor } from "@/components/OutlineEditor";
 import { TipTapEditor } from "@/components/TipTapEditor";
-import { WordPressMetaForm } from "@/components/WordPressMetaForm";
-import { CommentsSidebar } from "@/components/CommentsSidebar";
-import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
+import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
+import { EditorRail } from "@/components/run-editor/EditorRail";
+import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import { useArticleComments } from "@/lib/useArticleComments";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
+import {
+  applySnapshotToForm,
+  buildArticlePayload,
+  buildDryRequest,
+  buildSnapshotIn,
+} from "@/lib/run-editor/form";
+import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import {
   Dialog,
   DialogContent,
@@ -31,31 +33,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type {
-  ArticleEditRequest,
-  DryPublishRequest,
-  DryPublishResponse,
-  Hitl2Request,
-  Hitl2Snapshot,
-  Hitl2SnapshotIn,
-  Hitl2SnapshotTrigger,
-  Outline,
-} from "@/lib/types";
+import type { Hitl2Request, Hitl2Snapshot, Outline } from "@/lib/types";
 
 type EditTab = "article" | "outline" | "raw" | "payload";
-
-const WP_PUBLISH_STATUSES: ReadonlyArray<Hitl2Request["wp_publish_status"]> = [
-  "draft",
-  "future",
-  "publish",
-];
-
-/** Narrow a stored status string to the form's union; unknown values → undefined. */
-function asPublishStatus(
-  value: string | null | undefined,
-): Hitl2Request["wp_publish_status"] | undefined {
-  return WP_PUBLISH_STATUSES.find((s) => s === value);
-}
 
 export default function EditRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -77,7 +57,6 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const [outlineDirty, setOutlineDirty] = useState(false);
   const [html, setHtml] = useState("");
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
-  const [dryPayload, setDryPayload] = useState<DryPublishResponse | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -158,65 +137,14 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     }));
   }, [run.data, existingPost.data, existingPostSettled]);
 
-  function buildArticlePayload(): ArticleEditRequest {
-    return {
-      html_body: html,
-      seo_title: form.edited_seo_title ?? "",
-      meta_description: form.edited_meta_description ?? "",
-      wp_publish_status: form.wp_publish_status,
-      wp_author_id: form.wp_author_id ?? null,
-      wp_category_ids: form.wp_category_ids ?? null,
-      wp_tag_ids: form.wp_tag_ids ?? null,
-      wp_featured_media_id: form.wp_featured_media_id ?? null,
-      wp_slug: form.wp_slug ?? null,
-      wp_excerpt: form.wp_excerpt ?? null,
-      wp_publish_at: form.wp_publish_at ?? null,
-    };
-  }
-
-  function buildDryRequest(): DryPublishRequest {
-    return {
-      edited_html_body: html,
-      edited_seo_title: form.edited_seo_title ?? null,
-      edited_meta_description: form.edited_meta_description ?? null,
-      wp_publish_status: form.wp_publish_status,
-      wp_author_id: form.wp_author_id ?? null,
-      wp_category_ids: form.wp_category_ids ?? null,
-      wp_tag_ids: form.wp_tag_ids ?? null,
-      wp_featured_media_id: form.wp_featured_media_id ?? null,
-      wp_slug: form.wp_slug ?? null,
-      wp_excerpt: form.wp_excerpt ?? null,
-      wp_publish_at: form.wp_publish_at ?? null,
-    };
-  }
-
-  function buildSnapshot(trigger: Hitl2SnapshotTrigger): Hitl2SnapshotIn {
-    return {
-      trigger,
-      html_body: html,
-      seo_title: form.edited_seo_title ?? null,
-      meta_description: form.edited_meta_description ?? null,
-      notes: form.notes ?? null,
-      comments,
-      wp_publish_status: form.wp_publish_status,
-      wp_author_id: form.wp_author_id ?? null,
-      wp_category_ids: form.wp_category_ids ?? null,
-      wp_tag_ids: form.wp_tag_ids ?? null,
-      wp_featured_media_id: form.wp_featured_media_id ?? null,
-      wp_slug: form.wp_slug ?? null,
-      wp_excerpt: form.wp_excerpt ?? null,
-      wp_publish_at: form.wp_publish_at ?? null,
-    };
-  }
-
   async function persist() {
     if (outline && outlineDirty) await api.saveOutline(runId, outline);
-    await api.saveArticle(runId, buildArticlePayload());
+    await api.saveArticle(runId, buildArticlePayload(html, form));
     // Capture a version-history snapshot so each save is recoverable, mirroring
     // the HITL_2 gate's autosave history. Best-effort — a snapshot failure must
     // not fail the save itself.
     try {
-      await api.saveHitl2Snapshot(runId, buildSnapshot("manual"));
+      await api.saveHitl2Snapshot(runId, buildSnapshotIn(html, form, comments, "manual"));
       qc.invalidateQueries({ queryKey: ["hitl2-snapshots", runId] });
     } catch {
       // Swallow: the article + outline are already persisted above.
@@ -233,21 +161,19 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
 
   // WP payload preview for the "WP payload" tab — reflects the current unsaved
   // edits (does not persist). Mirrors the HITL_2 dry-publish preview.
-  const dryPublish = useMutation({
-    mutationFn: () => api.dryPublish(runId, buildDryRequest()),
-    onSuccess: (data) => setDryPayload(data),
-    onError: (e: Error) => toast.error(`Couldn't build payload — ${e.message}`),
-  });
+  const wpPayload = useWpPayloadPreview(runId, () => buildDryRequest(html, form));
 
   // Save → build the dry-publish preview → open the confirm dialog so the
   // operator verifies target_label before any write to WordPress.
   const prepublish = useMutation({
     mutationFn: async () => {
       await persist();
-      return api.dryPublish(runId, buildDryRequest());
+      return api.dryPublish(runId, buildDryRequest(html, form));
     },
+    // Feed the shared preview state so the WP-payload tab and this dialog read
+    // the same payload (single source of truth, as the pre-refactor page did).
     onSuccess: (data) => {
-      setDryPayload(data);
+      wpPayload.setPayload(data);
       setConfirmOpen(true);
     },
     onError: (e: Error) => toast.error(`Couldn't prepare re-push — ${e.message}`),
@@ -267,26 +193,13 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const restore = useMutation({
     mutationFn: async (snapshot: Hitl2Snapshot) => {
       // Preserve the current state before overwriting, then hydrate.
-      await api.saveHitl2Snapshot(runId, buildSnapshot("manual"));
+      await api.saveHitl2Snapshot(runId, buildSnapshotIn(html, form, comments, "manual"));
       return snapshot;
     },
     onSuccess: (snapshot) => {
       setHtml(snapshot.html_body);
       setComments(snapshot.comments ?? []);
-      setForm((f) => ({
-        ...f,
-        edited_seo_title: snapshot.seo_title ?? f.edited_seo_title,
-        edited_meta_description: snapshot.meta_description ?? f.edited_meta_description,
-        notes: snapshot.notes ?? f.notes,
-        wp_publish_status: asPublishStatus(snapshot.wp_publish_status) ?? f.wp_publish_status,
-        wp_author_id: snapshot.wp_author_id ?? null,
-        wp_category_ids: snapshot.wp_category_ids ?? null,
-        wp_tag_ids: snapshot.wp_tag_ids ?? null,
-        wp_featured_media_id: snapshot.wp_featured_media_id ?? null,
-        wp_slug: snapshot.wp_slug ?? null,
-        wp_excerpt: snapshot.wp_excerpt ?? null,
-        wp_publish_at: snapshot.wp_publish_at ?? null,
-      }));
+      setForm((f) => applySnapshotToForm(f, snapshot));
       qc.invalidateQueries({ queryKey: ["hitl2-snapshots", runId] });
       setHistoryOpen(false);
       toast.success("Restored version — review, then Save to keep it");
@@ -302,32 +215,32 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   function onTabChange(next: string) {
     setTab(next as EditTab);
     // Lazily build the WP payload the first time the operator opens that tab.
-    if (next === "payload" && !dryPayload && !dryPublish.isPending && renderReady) {
-      dryPublish.mutate();
-    }
+    if (next === "payload" && !wpPayload.payload) wpPayload.onTabOpen(renderReady);
   }
 
   return (
-    <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 pb-32">
-      <div className="mb-4">
-        <Link
-          href={`/runs/${runId}`}
-          className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-        >
-          ← Run · {shortId}
-        </Link>
-      </div>
-
-      <SectionHead
-        kicker={<>Edit · <span className="text-accent">{shortId}</span></>}
-        hed="Edit outline & article"
-        dek="Revise a finished run's outline and article, then save — or save and re-push the article to WordPress."
-      />
-
-      {run.data && <RunTaskDetails run={run.data} />}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
-        <section>
+    <RunEditorShell
+      runId={runId}
+      run={run.data}
+      kicker={<>Edit · <span className="text-accent">{shortId}</span></>}
+      hed="Edit outline & article"
+      dek="Revise a finished run's outline and article, then save — or save and re-push the article to WordPress."
+      actionBar={
+        <>
+          <Button variant="secondary" disabled={isBusy} onClick={() => save.mutate()}>
+            {save.isPending ? "Saving…" : "Save changes"}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={isBusy || renderMissing}
+            onClick={() => prepublish.mutate()}
+          >
+            {prepublish.isPending ? "Preparing…" : "Save & re-push to WordPress ↪"}
+          </Button>
+        </>
+      }
+    >
+      <section>
           <Tabs value={tab} onValueChange={onTabChange}>
             <div className="flex items-center justify-between border-b border-rule">
               <TabsList>
@@ -390,93 +303,43 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
             </TabsContent>
             <TabsContent value="payload" className="pt-6">
               <WpPayloadView
-                payload={dryPayload}
-                isPending={dryPublish.isPending}
-                isError={dryPublish.isError}
-                errorMessage={(dryPublish.error as Error | null)?.message}
-                onRefresh={() => dryPublish.mutate()}
+                payload={wpPayload.payload}
+                isPending={wpPayload.isPending}
+                isError={wpPayload.isError}
+                errorMessage={wpPayload.error?.message}
+                onRefresh={wpPayload.build}
                 canRefresh={renderReady}
               />
             </TabsContent>
           </Tabs>
 
           {/* Notes to AI — overall inline edit of the existing article */}
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="kicker">Notes to AI</p>
-              <button
-                type="button"
-                disabled={(form.notes ?? "").trim().length === 0 || applyNotes.isPending}
-                onClick={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
-                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-accent"
-                title="Let AI revise the whole article from these notes."
-              >
-                <Sparkles className="h-3 w-3" />
-                {applyNotes.isPending ? "Applying…" : "Apply to article"}
-              </button>
-            </div>
-            <textarea
-              value={form.notes ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              rows={3}
-              placeholder="Overall direction — e.g. 'lede should be punchier, lead with the surgery question.'"
-              className="w-full resize-y border border-rule bg-paper rounded px-3 py-2 text-[14px] text-ink focus:outline-none focus:border-accent"
-            />
-          </div>
+          <NotesToAi
+            value={form.notes ?? ""}
+            onChange={(v) => setForm((f) => ({ ...f, notes: v }))}
+            onApply={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
+            applying={applyNotes.isPending}
+          />
         </section>
 
-        <aside className="lg:sticky lg:top-[6.25rem] self-start lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto">
-          <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as "wp" | "comments")}>
-            <TabsList className="border-b border-rule">
-              <TabsTrigger value="wp">WP metadata</TabsTrigger>
-              <TabsTrigger value="comments">
-                Comments
-                {comments.length > 0 && <span className="ml-1 text-accent">({comments.length})</span>}
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="wp" className="pt-4">
-              <Card variant="editorial" className="px-5 py-5">
-                <WordPressMetaForm
-                  form={form}
-                  onChange={setForm}
-                  existingAuthorName={existingPost.data?.wp_author_name ?? null}
-                  existingCategoryName={existingPost.data?.wp_category_name ?? null}
-                />
-              </Card>
-            </TabsContent>
-            <TabsContent value="comments" className="pt-4">
-              <CommentsSidebar
-                comments={comments}
-                focusedId={focusedCommentId}
-                onChange={updateComment}
-                onDelete={deleteComment}
-                onFocus={focusComment}
-                onApply={(id) => {
-                  const c = comments.find((x) => x.id === id);
-                  if (c) applyComment.mutate({ comment: c, html });
-                }}
-                applyingId={applyingCommentId}
-              />
-            </TabsContent>
-          </Tabs>
-        </aside>
-      </div>
-
-      {/* Sticky action bar */}
-      <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
-        <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-end gap-3">
-          <Button variant="secondary" disabled={isBusy} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : "Save changes"}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={isBusy || renderMissing}
-            onClick={() => prepublish.mutate()}
-          >
-            {prepublish.isPending ? "Preparing…" : "Save & re-push to WordPress ↪"}
-          </Button>
-        </div>
-      </div>
+        <EditorRail
+          tab={rightTab}
+          onTabChange={setRightTab}
+          form={form}
+          onFormChange={setForm}
+          existingAuthorName={existingPost.data?.wp_author_name ?? null}
+          existingCategoryName={existingPost.data?.wp_category_name ?? null}
+          comments={comments}
+          focusedCommentId={focusedCommentId}
+          onCommentChange={updateComment}
+          onCommentDelete={deleteComment}
+          onCommentFocus={focusComment}
+          onCommentApply={(id) => {
+            const c = comments.find((x) => x.id === id);
+            if (c) applyComment.mutate({ comment: c, html });
+          }}
+          applyingCommentId={applyingCommentId}
+        />
 
       <Hitl2VersionHistory
         runId={runId}
@@ -495,13 +358,13 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
           <DialogHeader>
             <DialogTitle>Re-push to WordPress?</DialogTitle>
             <DialogDescription>
-              {dryPayload ? (
+              {wpPayload.payload ? (
                 <>
                   This overwrites the live post on{" "}
-                  <span className="font-mono text-ink">{dryPayload.target_label}</span>{" "}
-                  ({dryPayload.target_base_url}) via{" "}
+                  <span className="font-mono text-ink">{wpPayload.payload.target_label}</span>{" "}
+                  ({wpPayload.payload.target_base_url}) via{" "}
                   <span className="font-mono text-ink">
-                    {dryPayload.request_method} {dryPayload.request_url}
+                    {wpPayload.payload.request_method} {wpPayload.payload.request_url}
                   </span>
                   . Changes are already saved.
                 </>
@@ -520,6 +383,6 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </RunEditorShell>
   );
 }

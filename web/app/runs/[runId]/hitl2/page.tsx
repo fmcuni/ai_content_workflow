@@ -6,23 +6,28 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SectionHead } from "@/components/SectionHead";
 import { ExternalLink } from "@/components/ExternalLink";
 import { PaperStamp } from "@/components/PaperStamp";
 import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
-import { WordPressMetaForm } from "@/components/WordPressMetaForm";
-import { CommentsSidebar } from "@/components/CommentsSidebar";
-import { RunTaskDetails } from "@/components/RunTaskDetails";
+import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
+import { EditorRail } from "@/components/run-editor/EditorRail";
+import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
-import { Sparkles } from "lucide-react";
 import { useArticleComments } from "@/lib/useArticleComments";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
+import {
+  buildDryRequest,
+  buildSnapshotIn,
+  isBlankBody,
+  snapshotInFromSaved,
+  snapshotKey,
+} from "@/lib/run-editor/form";
+import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +38,6 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import type {
-  DryPublishResponse,
   ExistingPost,
   Hitl2Request,
   Hitl2Snapshot,
@@ -43,59 +47,6 @@ import type {
 
 const MAX_ROUNDS = 3;
 const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
-
-/** Stable comparison key for a snapshot, ignoring the (non-content) trigger. */
-function snapshotKey(s: Hitl2SnapshotIn): string {
-  return JSON.stringify([
-    s.html_body,
-    s.seo_title ?? null,
-    s.meta_description ?? null,
-    s.notes ?? null,
-    s.comments ?? [],
-    s.wp_publish_status ?? null,
-    s.wp_author_id ?? null,
-    s.wp_category_ids ?? null,
-    s.wp_tag_ids ?? null,
-    s.wp_featured_media_id ?? null,
-    s.wp_slug ?? null,
-    s.wp_excerpt ?? null,
-    s.wp_publish_at ?? null,
-  ]);
-}
-
-/**
- * True when the editor body carries no real content. TipTap emits an empty
- * string (or a bare `<p></p>`) while it is torn down on unmount; persisting that
- * would clobber good work and, once reloaded, leave the editor blank.
- */
-function isBlankBody(html: string | null | undefined): boolean {
-  if (!html) return true;
-  return html.replace(/<[^>]*>/g, "").replace(/ /g, "").trim().length === 0;
-}
-
-/**
- * Shape a saved snapshot into the same form `snapshotIn` produces after
- * `applySnapshot` loads it, so the hydration baseline key matches the live one
- * exactly (and a freshly-restored page reads as clean, not dirty).
- */
-function snapshotInFromSaved(s: Hitl2Snapshot): Hitl2SnapshotIn {
-  return {
-    trigger: "manual",
-    html_body: s.html_body,
-    seo_title: s.seo_title ?? null,
-    meta_description: s.meta_description ?? null,
-    notes: s.notes ?? null,
-    comments: s.comments ?? [],
-    wp_publish_status: s.wp_publish_status ?? "draft",
-    wp_author_id: s.wp_author_id ?? null,
-    wp_category_ids: s.wp_category_ids ?? null,
-    wp_tag_ids: s.wp_tag_ids ?? null,
-    wp_featured_media_id: s.wp_featured_media_id ?? null,
-    wp_slug: s.wp_slug ?? null,
-    wp_excerpt: s.wp_excerpt ?? null,
-    wp_publish_at: s.wp_publish_at ?? null,
-  };
-}
 
 export default function Hitl2Page({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -188,26 +139,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     },
   });
   const [galleyTab, setGalleyTab] = useState<"edit" | "diff" | "audit" | "raw" | "payload">("edit");
-  const [dryPayload, setDryPayload] = useState<DryPublishResponse | null>(null);
-
-  const dryPublish = useMutation({
-    mutationFn: () =>
-      api.dryPublish(runId, {
-        edited_html_body: html,
-        edited_seo_title: form.edited_seo_title ?? null,
-        edited_meta_description: form.edited_meta_description ?? null,
-        wp_publish_status: form.wp_publish_status,
-        wp_author_id: form.wp_author_id ?? null,
-        wp_category_ids: form.wp_category_ids ?? null,
-        wp_tag_ids: form.wp_tag_ids ?? null,
-        wp_featured_media_id: form.wp_featured_media_id ?? null,
-        wp_slug: form.wp_slug ?? null,
-        wp_excerpt: form.wp_excerpt ?? null,
-        wp_publish_at: form.wp_publish_at ?? null,
-      }),
-    onSuccess: (data) => setDryPayload(data),
-    onError: (e: Error) => toast.error(`Dry-publish failed — ${e.message}`),
-  });
+  const wpPayload = useWpPayloadPreview(runId, () => buildDryRequest(html, form));
 
   useEffect(() => {
     if (render.data) {
@@ -278,22 +210,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const snapshotIn = useMemo<Hitl2SnapshotIn>(
-    () => ({
-      trigger: "manual",
-      html_body: html,
-      seo_title: form.edited_seo_title ?? null,
-      meta_description: form.edited_meta_description ?? null,
-      notes: form.notes ?? null,
-      comments,
-      wp_publish_status: form.wp_publish_status,
-      wp_author_id: form.wp_author_id ?? null,
-      wp_category_ids: form.wp_category_ids ?? null,
-      wp_tag_ids: form.wp_tag_ids ?? null,
-      wp_featured_media_id: form.wp_featured_media_id ?? null,
-      wp_slug: form.wp_slug ?? null,
-      wp_excerpt: form.wp_excerpt ?? null,
-      wp_publish_at: form.wp_publish_at ?? null,
-    }),
+    () => buildSnapshotIn(html, form, comments, "manual"),
     [html, form, comments],
   );
   const currentKey = useMemo(() => snapshotKey(snapshotIn), [snapshotIn]);
@@ -476,14 +393,36 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       : "Autosave on";
 
   return (
-    <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 pb-32">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <Link
-          href={`/runs/${runId}`}
-          className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-        >
-          ← Run · {shortId}
-        </Link>
+    <RunEditorShell
+      runId={runId}
+      run={run.data}
+      kicker={
+        <>
+          Galley Proof · Stage 2 · <span className="text-accent">{shortId}</span>
+          {existingPost.data?.wp_post_id != null && (
+            <>
+              {" · "}
+              <ExternalLink
+                href={existingPost.data.link ?? "#"}
+                className="text-accent hover:underline"
+              >
+                WP #{existingPost.data.wp_post_id} ↗
+              </ExternalLink>
+              <button
+                type="button"
+                onClick={handleRereadClick}
+                disabled={refresh.isPending}
+                className="ml-2 font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
+              >
+                {refresh.isPending ? "↻ Reading…" : "↻ Re-read from WP"}
+              </button>
+            </>
+          )}
+        </>
+      }
+      hed="Editor's review"
+      dek="Final pass on the draft. Approve and push to WordPress as draft, request changes, or reject."
+      headerActions={
         <div className="flex items-center gap-3">
           <span
             className={`font-mono text-[11px] uppercase tracking-wider ${
@@ -513,50 +452,74 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             ⟲ Version history
           </button>
         </div>
-      </div>
-
-      <SectionHead
-        kicker={
+      }
+      actionBar={
+        gateResolved ? (
           <>
-            Galley Proof · Stage 2 · <span className="text-accent">{shortId}</span>
-            {existingPost.data?.wp_post_id != null && (
-              <>
-                {" · "}
-                <ExternalLink
-                  href={existingPost.data.link ?? "#"}
-                  className="text-accent hover:underline"
-                >
-                  WP #{existingPost.data.wp_post_id} ↗
-                </ExternalLink>
-                <button
-                  type="button"
-                  onClick={handleRereadClick}
-                  disabled={refresh.isPending}
-                  className="ml-2 font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
-                >
-                  {refresh.isPending ? "↻ Reading…" : "↻ Re-read from WP"}
-                </button>
-              </>
-            )}
+            <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
+              Gate resolved · run is now{" "}
+              <span className="text-ink">{run.data?.status}</span> — draft review is read-only.
+            </span>
+            <Link
+              href={`/runs/${runId}/edit`}
+              className="font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink"
+            >
+              Edit &amp; re-push →
+            </Link>
           </>
-        }
-        hed="Editor's review"
-        dek="Final pass on the draft. Approve and push to WordPress as draft, request changes, or reject."
-      />
-
-      {run.data && <RunTaskDetails run={run.data} />}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
-        {/* Galley column */}
-        <section>
+        ) : (
+          <>
+            {round > 0 && (
+              <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
+                Round {round + 1} of {MAX_ROUNDS}
+              </span>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={!renderReady || submit.isPending || !atGate}
+              onClick={() => submit.mutate("reject")}
+            >
+              {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!renderReady || submit.isPending || capReached || !hasFeedback || !atGate}
+              title={
+                capReached
+                  ? "Cap reached — approve or reject."
+                  : !hasFeedback
+                  ? "Add a comment or note first."
+                  : ""
+              }
+              onClick={() => submit.mutate("request_changes")}
+            >
+              {submit.isPending && submit.variables === "request_changes"
+                ? "↻ Sending…"
+                : "Request changes ↺"}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!renderReady || submit.isPending || !atGate}
+              onClick={() => submit.mutate("approve")}
+            >
+              {submit.isPending && submit.variables === "approve"
+                ? "↻ Pushing to WP…"
+                : "Approve & push to WP ↪"}
+            </Button>
+          </>
+        )
+      }
+    >
+      {/* Galley column */}
+      <section>
           <Tabs
             value={galleyTab}
             onValueChange={(v) => {
               const next = v as typeof galleyTab;
               setGalleyTab(next);
-              if (next === "payload" && renderReady && !dryPublish.isPending) {
-                dryPublish.mutate();
-              }
+              if (next === "payload") wpPayload.onTabOpen(renderReady);
             }}
           >
             <TabsList className="border-b border-rule">
@@ -639,143 +602,44 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             </TabsContent>
             <TabsContent value="payload" className="pt-6">
               <WpPayloadView
-                payload={dryPayload}
-                isPending={dryPublish.isPending}
-                isError={dryPublish.isError}
-                errorMessage={(dryPublish.error as Error | null)?.message}
-                onRefresh={() => dryPublish.mutate()}
+                payload={wpPayload.payload}
+                isPending={wpPayload.isPending}
+                isError={wpPayload.isError}
+                errorMessage={wpPayload.error?.message}
+                onRefresh={wpPayload.build}
                 canRefresh={renderReady}
               />
             </TabsContent>
           </Tabs>
 
           {/* Notes to AI — overall inline edit of the existing article */}
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="kicker">Notes to AI</p>
-              <button
-                type="button"
-                disabled={(form.notes ?? "").trim().length === 0 || applyNotes.isPending}
-                onClick={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
-                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-accent"
-                title="Let AI revise the whole article from these notes."
-              >
-                <Sparkles className="h-3 w-3" />
-                {applyNotes.isPending ? "Applying…" : "Apply to article"}
-              </button>
-            </div>
-            <textarea
-              value={form.notes ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              rows={3}
-              placeholder="Overall direction — e.g. 'lede should be punchier, lead with the surgery question.'"
-              className="w-full resize-y border border-rule bg-paper rounded px-3 py-2 text-[14px] text-ink focus:outline-none focus:border-accent"
-            />
-          </div>
+          <NotesToAi
+            value={form.notes ?? ""}
+            onChange={(v) => setForm((f) => ({ ...f, notes: v }))}
+            onApply={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
+            applying={applyNotes.isPending}
+          />
         </section>
 
         {/* Right rail — WP metadata ↔ Comments tab switcher */}
-        <aside className="lg:sticky lg:top-[6.25rem] self-start lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto">
-
-          <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as "wp" | "comments")}>
-            <TabsList className="border-b border-rule">
-              <TabsTrigger value="wp">WP metadata</TabsTrigger>
-              <TabsTrigger value="comments">
-                Comments
-                {comments.length > 0 && (
-                  <span className="ml-1 text-accent">({comments.length})</span>
-                )}
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="wp" className="pt-4">
-              <Card variant="editorial" className="px-5 py-5">
-                <WordPressMetaForm
-                  form={form}
-                  onChange={setForm}
-                  existingAuthorName={existingPost.data?.wp_author_name ?? null}
-                  existingCategoryName={existingPost.data?.wp_category_name ?? null}
-                />
-              </Card>
-            </TabsContent>
-            <TabsContent value="comments" className="pt-4">
-              <CommentsSidebar
-                comments={comments}
-                focusedId={focusedCommentId}
-                onChange={updateComment}
-                onDelete={deleteComment}
-                onFocus={focusComment}
-                onApply={(id) => {
-                  const c = comments.find((x) => x.id === id);
-                  if (c) applyComment.mutate({ comment: c, html });
-                }}
-                applyingId={applyingCommentId}
-              />
-            </TabsContent>
-          </Tabs>
-        </aside>
-      </div>
-
-      {/* Sticky action bar */}
-      <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
-        <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-end gap-3">
-          {gateResolved ? (
-            <>
-              <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
-                Gate resolved · run is now{" "}
-                <span className="text-ink">{run.data?.status}</span> — draft review is read-only.
-              </span>
-              <Link
-                href={`/runs/${runId}/edit`}
-                className="font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink"
-              >
-                Edit &amp; re-push →
-              </Link>
-            </>
-          ) : (
-            <>
-              {round > 0 && (
-                <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
-                  Round {round + 1} of {MAX_ROUNDS}
-                </span>
-              )}
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={!renderReady || submit.isPending || !atGate}
-                onClick={() => submit.mutate("reject")}
-              >
-                {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!renderReady || submit.isPending || capReached || !hasFeedback || !atGate}
-                title={
-                  capReached
-                    ? "Cap reached — approve or reject."
-                    : !hasFeedback
-                    ? "Add a comment or note first."
-                    : ""
-                }
-                onClick={() => submit.mutate("request_changes")}
-              >
-                {submit.isPending && submit.variables === "request_changes"
-                  ? "↻ Sending…"
-                  : "Request changes ↺"}
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!renderReady || submit.isPending || !atGate}
-                onClick={() => submit.mutate("approve")}
-              >
-                {submit.isPending && submit.variables === "approve"
-                  ? "↻ Pushing to WP…"
-                  : "Approve & push to WP ↪"}
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+        <EditorRail
+          tab={rightTab}
+          onTabChange={setRightTab}
+          form={form}
+          onFormChange={setForm}
+          existingAuthorName={existingPost.data?.wp_author_name ?? null}
+          existingCategoryName={existingPost.data?.wp_category_name ?? null}
+          comments={comments}
+          focusedCommentId={focusedCommentId}
+          onCommentChange={updateComment}
+          onCommentDelete={deleteComment}
+          onCommentFocus={focusComment}
+          onCommentApply={(id) => {
+            const c = comments.find((x) => x.id === id);
+            if (c) applyComment.mutate({ comment: c, html });
+          }}
+          applyingCommentId={applyingCommentId}
+        />
 
       <Hitl2VersionHistory
         runId={runId}
@@ -810,6 +674,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </RunEditorShell>
   );
 }

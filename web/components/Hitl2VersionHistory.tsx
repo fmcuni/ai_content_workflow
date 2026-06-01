@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { isBlankBody } from "@/lib/run-editor/form";
 import type { Hitl2Snapshot, Hitl2SnapshotTrigger } from "@/lib/types";
 
 const TRIGGER_LABEL: Record<Hitl2SnapshotTrigger, string> = {
@@ -29,11 +30,6 @@ function relativeTime(iso: string): string {
   const hrs = Math.round(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.round(hrs / 24)}d ago`;
-}
-
-/** Blank-body snapshots are teardown artifacts — never offer them for restore. */
-function isBlankBody(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/ /g, "").trim().length === 0;
 }
 
 function snapshotSummary(s: Hitl2Snapshot): string {
