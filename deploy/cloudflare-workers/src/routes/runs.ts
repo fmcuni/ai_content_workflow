@@ -3,6 +3,8 @@ import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
 import { pgJson, pgTimestampToIso, toJsonb } from "../db/serialize";
+import { runApplyEdits, type ApplyEditComment } from "../agents/apply_edits";
+import { DoGeminiClient } from "../gemini/do_client";
 import {
   buildMeta,
   detectSeoPlugin,
@@ -38,6 +40,10 @@ const DEFAULT_LIST_LIMIT = 50;
 
 // HITL_2 request_changes cap — must match the Python guard.
 const HITL_2_MAX_ITERATIONS = 3;
+
+// Gemini defaults for the synchronous apply-edits route (mirror refresh.ts).
+const DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_THINKING_LEVEL = "HIGH";
 
 const VALID_START_MODES = ["refresh", "create"] as const;
 type StartMode = (typeof VALID_START_MODES)[number];
@@ -1002,6 +1008,12 @@ interface ArticleEditBody {
   wp_publish_at?: string | null;
 }
 
+interface ApplyEditsBody {
+  html_body?: string;
+  comments?: Array<{ anchor_text?: string; body?: string }> | null;
+  notes?: string | null;
+}
+
 interface RepublishRunRow {
   start_mode: string;
   wp_pushed_post_id: number | null;
@@ -1392,6 +1404,56 @@ runsRouter.put("/:id/article", async (c) => {
     return c.json({ detail: "no render for this run" }, 404);
   }
   return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/apply-edits — stateless AI edit of the supplied HTML.
+//
+// The agent revises `html_body` per the anchored comments and/or overall notes
+// and returns the revised HTML for the editor to review. No draft / render is
+// created and nothing is published — that happens through Save / Approve. Works
+// on a paused HITL_2 run or a finished one alike, since it never touches state.
+// ---------------------------------------------------------------------------
+runsRouter.post("/:id/apply-edits", async (c) => {
+  const runId = c.req.param("id");
+  const body = await c.req
+    .json<ApplyEditsBody>()
+    .catch(() => ({}) as ApplyEditsBody);
+
+  const comments: ApplyEditComment[] = (body.comments ?? []).map((cc) => ({
+    anchor_text: cc.anchor_text ?? "",
+    body: cc.body ?? "",
+  }));
+  if ((body.html_body ?? "").trim().length === 0) {
+    return c.json({ detail: "html_body is required" }, 400);
+  }
+  const hasComment = comments.some((cc) => cc.body.trim().length > 0);
+  const hasNotes = (body.notes ?? "").trim().length > 0;
+  if (!hasComment && !hasNotes) {
+    return c.json({ detail: "no comments or notes provided" }, 400);
+  }
+
+  const gemini = new DoGeminiClient(c.env.GEMINI_PROXY, {
+    model: c.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL,
+    thinkingLevel: DEFAULT_THINKING_LEVEL,
+  });
+
+  try {
+    const htmlBody = await withDb(c.env, c.executionCtx, (sql: Sql) =>
+      runApplyEdits(sql, gemini, {
+        runId,
+        htmlBody: body.html_body ?? "",
+        comments,
+        notes: body.notes ?? null,
+      }),
+    );
+    return c.json({ html_body: htmlBody });
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("run not found")) {
+      return c.json({ detail: "run not found" }, 404);
+    }
+    throw e;
+  }
 });
 
 // ---------------------------------------------------------------------------

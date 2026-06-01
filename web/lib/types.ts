@@ -304,6 +304,22 @@ export interface RegenerateRequest {
   comments?: Hitl2Comment[] | null;
 }
 
+/**
+ * Inline AI edit of an article. The agent revises `html_body` per the anchored
+ * `comments` and/or overall `notes` and returns the revised HTML — no pipeline
+ * re-run, no graph resume. Per-comment apply sends a single comment; the overall
+ * "Notes to AI" apply sends `notes` only.
+ */
+export interface ApplyEditsRequest {
+  html_body: string;
+  comments?: Hitl2Comment[] | null;
+  notes?: string | null;
+}
+
+export interface ApplyEditsResponse {
+  html_body: string;
+}
+
 export type Hitl2SnapshotTrigger = "interval" | "navigate" | "unload" | "manual";
 
 export interface Hitl2SnapshotIn {

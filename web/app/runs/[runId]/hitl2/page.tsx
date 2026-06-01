@@ -19,6 +19,10 @@ import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
+import { Sparkles } from "lucide-react";
+import { useArticleComments } from "@/lib/useArticleComments";
+import { useApplyEdits } from "@/lib/useApplyEdits";
+import { stripCommentSpan } from "@/lib/comment-anchor";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +35,6 @@ import { api } from "@/lib/api";
 import type {
   DryPublishResponse,
   ExistingPost,
-  Hitl2Comment,
   Hitl2Request,
   Hitl2Snapshot,
   Hitl2SnapshotIn,
@@ -159,9 +162,31 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const [html, setHtml] = useState<string>("");
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
   const [originalHtml, setOriginalHtml] = useState("");
-  const [comments, setComments] = useState<Hitl2Comment[]>([]);
-  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
+  const {
+    comments,
+    setComments,
+    focusedCommentId,
+    setFocusedCommentId,
+    addComment,
+    updateComment,
+    deleteComment,
+    focusComment,
+  } = useArticleComments(setHtml, {
+    onAddComment: () => setRightTab("comments"),
+    onFocusComment: () => setRightTab("comments"),
+  });
+  const { applyComment, applyNotes, applyingCommentId } = useApplyEdits(runId, {
+    onCommentApplied: (commentId, newHtml) => {
+      setHtml(stripCommentSpan(newHtml, commentId));
+      setComments((cs) => cs.filter((c) => c.id !== commentId));
+      setFocusedCommentId((f) => (f === commentId ? null : f));
+    },
+    onNotesApplied: (newHtml) => {
+      setHtml(newHtml);
+      setForm((f) => ({ ...f, notes: "" }));
+    },
+  });
   const [galleyTab, setGalleyTab] = useState<"edit" | "diff" | "audit" | "raw" | "payload">("edit");
   const [dryPayload, setDryPayload] = useState<DryPublishResponse | null>(null);
 
@@ -246,25 +271,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const addComment = (id: string, anchorText: string) => {
-    setComments((cs) => [...cs, { id, anchor_text: anchorText, body: "" }]);
-    setFocusedCommentId(id);
-    setRightTab("comments");
-  };
-  const updateComment = (id: string, body: string) =>
-    setComments((cs) => cs.map((c) => (c.id === id ? { ...c, body } : c)));
-  const deleteComment = (id: string) => {
-    setComments((cs) => cs.filter((c) => c.id !== id));
-    // Strip the corresponding mark from the HTML payload so it doesn't ride along.
-    const regex = new RegExp(`<span data-comment-id="${id}">(.*?)</span>`, "gs");
-    setHtml((h) => h.replace(regex, "$1"));
-    if (focusedCommentId === id) setFocusedCommentId(null);
-  };
-  const focusComment = (id: string) => {
-    setFocusedCommentId(id);
-    setRightTab("comments");
-  };
 
   // --- Autosave + version history -----------------------------------------
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -406,7 +412,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       wp_excerpt: s.wp_excerpt ?? null,
       wp_publish_at: s.wp_publish_at ?? null,
     }));
-  }, []);
+  }, [setComments]);
 
   // On load, reopen the editor at the most recent saved snapshot (autosave or
   // manual) rather than the pristine render, and treat it as the clean baseline.
@@ -643,9 +649,21 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             </TabsContent>
           </Tabs>
 
-          {/* Notes to AI */}
+          {/* Notes to AI — overall inline edit of the existing article */}
           <div className="mt-6">
-            <p className="kicker mb-2">Notes to AI</p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="kicker">Notes to AI</p>
+              <button
+                type="button"
+                disabled={(form.notes ?? "").trim().length === 0 || applyNotes.isPending}
+                onClick={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
+                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-accent"
+                title="Let AI revise the whole article from these notes."
+              >
+                <Sparkles className="h-3 w-3" />
+                {applyNotes.isPending ? "Applying…" : "Apply to article"}
+              </button>
+            </div>
             <textarea
               value={form.notes ?? ""}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
@@ -686,6 +704,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 onChange={updateComment}
                 onDelete={deleteComment}
                 onFocus={focusComment}
+                onApply={(id) => {
+                  const c = comments.find((x) => x.id === id);
+                  if (c) applyComment.mutate({ comment: c, html });
+                }}
+                applyingId={applyingCommentId}
               />
             </TabsContent>
           </Tabs>

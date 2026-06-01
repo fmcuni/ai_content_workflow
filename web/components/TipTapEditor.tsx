@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
@@ -22,9 +22,16 @@ import {
   MessageSquarePlus,
   Table2,
   ChevronDown,
+  Copy,
+  Check,
+  Pencil,
+  Unlink,
+  ExternalLink as ExternalLinkIcon,
+  X,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { openExternal } from "@/lib/external-link";
 import { CommentAnchor } from "@/components/tiptap/CommentAnchor";
 import {
   DropdownMenu,
@@ -166,19 +173,7 @@ function TableMenu({ editor }: { editor: Editor }) {
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
-  const promptLink = () => {
-    const prev = (editor.getAttributes("link").href as string | undefined) ?? "";
-    const url = window.prompt("Link URL (leave blank to remove)", prev || "https://");
-    if (url === null) return;
-    const trimmed = url.trim();
-    if (trimmed === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: trimmed }).run();
-  };
-
+function Toolbar({ editor, onLinkClick }: { editor: Editor; onLinkClick: () => void }) {
   return (
     <div className="sticky top-[6.25rem] z-20 flex flex-wrap items-center gap-0.5 rounded-t border border-b-0 border-rule bg-paper px-1.5 py-1">
       <ToolbarButton label="Bold (⌘B)" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
@@ -210,7 +205,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       <Divider />
       <TableMenu editor={editor} />
       <Divider />
-      <ToolbarButton label="Link" active={editor.isActive("link")} onClick={promptLink}>
+      <ToolbarButton label="Link" active={editor.isActive("link")} onClick={onLinkClick}>
         <LinkIcon className="h-4 w-4" />
       </ToolbarButton>
       <Divider />
@@ -220,6 +215,172 @@ function Toolbar({ editor }: { editor: Editor }) {
       <ToolbarButton label="Redo (⇧⌘Z)" disabled={!editor.can().redo()} onClick={() => editor.chain().focus().redo().run()}>
         <Redo2 className="h-4 w-4" />
       </ToolbarButton>
+    </div>
+  );
+}
+
+interface LinkPanelState {
+  x: number;
+  y: number;
+  href: string;
+  editing: boolean;
+}
+
+interface LinkPanelProps {
+  state: LinkPanelState;
+  onSave: (url: string) => void;
+  onStartEdit: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}
+
+/**
+ * Floating link panel — replaces the old `window.prompt`. In read mode it shows
+ * the full URL with one-click copy, open, edit, and remove. In edit mode it
+ * swaps in an inline input so the operator can change the URL without a browser
+ * dialog. Mouse-down is suppressed on the buttons so the editor selection (which
+ * `setLink` / `unsetLink` act on) survives the click.
+ */
+function LinkPanel({ state, onSave, onStartEdit, onRemove, onClose }: LinkPanelProps) {
+  // Uncontrolled input (read via ref) so re-seeding on edit needs no effect /
+  // cascading render; `key` on the input remounts it with a fresh defaultValue
+  // when the panel switches to a different link.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(state.href);
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Clipboard can be unavailable (insecure context); ignore silently.
+    }
+  };
+
+  const iconBtn =
+    "inline-flex h-7 w-7 items-center justify-center rounded text-ink-soft hover:bg-paper-deep hover:text-ink";
+
+  return (
+    <div
+      style={{ position: "fixed", left: state.x, top: state.y, zIndex: 50 }}
+      className="flex items-center gap-1 rounded border border-ink bg-paper px-2 py-1.5 shadow-md max-w-[420px]"
+    >
+      {state.editing ? (
+        <>
+          <input
+            key={state.href}
+            ref={inputRef}
+            autoFocus
+            defaultValue={state.href || "https://"}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSave(inputRef.current?.value ?? "");
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+              }
+            }}
+            placeholder="https://example.com"
+            className="w-[260px] border-b border-rule bg-transparent px-1 py-0.5 text-[13px] text-ink focus:outline-none focus:border-accent"
+          />
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onSave(inputRef.current?.value ?? "")}
+            className={iconBtn}
+            title="Save link"
+            aria-label="Save link"
+          >
+            <Check className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onClose}
+            className={iconBtn}
+            title="Cancel"
+            aria-label="Cancel"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </>
+      ) : (
+        <>
+          <a
+            href={state.href}
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(state.href);
+            }}
+            title={state.href}
+            className="max-w-[220px] truncate text-[13px] text-accent underline underline-offset-2"
+          >
+            {state.href}
+          </a>
+          <span aria-hidden className="mx-0.5 h-4 w-px bg-rule" />
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={copy}
+            className={iconBtn}
+            title={copied ? "Copied" : "Copy URL"}
+            aria-label="Copy URL"
+          >
+            {copied ? <Check className="h-4 w-4 text-ok" /> : <Copy className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void openExternal(state.href)}
+            className={iconBtn}
+            title="Open in new tab"
+            aria-label="Open link"
+          >
+            <ExternalLinkIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onStartEdit}
+            className={iconBtn}
+            title="Edit URL"
+            aria-label="Edit link"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onRemove}
+            className={iconBtn}
+            title="Remove link"
+            aria-label="Remove link"
+          >
+            <Unlink className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onClose}
+            className={iconBtn}
+            title="Close"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -238,6 +399,13 @@ export function TipTapEditor({
   onCommentClick,
 }: TipTapEditorProps) {
   const [selectionPill, setSelectionPill] = useState<{ x: number; y: number } | null>(null);
+  const [linkPanel, setLinkPanel] = useState<LinkPanelState | null>(null);
+  // Read by the editor's selection/click callbacks (registered once) so they see
+  // the live "is the panel mid-edit?" flag without re-creating the editor.
+  const linkEditingRef = useRef(false);
+  useEffect(() => {
+    linkEditingRef.current = linkPanel?.editing ?? false;
+  }, [linkPanel]);
 
   const editor = useEditor({
     extensions: [
@@ -260,6 +428,12 @@ export function TipTapEditor({
     content: value,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     onSelectionUpdate: ({ editor }) => {
+      // Dismiss the link panel once the cursor leaves the link — unless we're
+      // mid-edit in the panel's input (which blurs the editor selection).
+      // setState(null) is a no-op re-render when already null (React bails).
+      if (!linkEditingRef.current && !editor.isActive("link")) {
+        setLinkPanel(null);
+      }
       const { from, to } = editor.state.selection;
       if (from === to || !onAddComment) {
         setSelectionPill(null);
@@ -280,6 +454,14 @@ export function TipTapEditor({
       },
       handleClickOn: (_view, _pos, _node, _nodePos, event) => {
         const target = event.target as HTMLElement;
+        // A link click opens the URL panel (full URL + copy/open/edit/remove)
+        // instead of navigating — openOnClick is disabled on the extension.
+        const anchor = target.closest("a") as HTMLAnchorElement | null;
+        if (anchor) {
+          const href = anchor.getAttribute("href") ?? "";
+          setLinkPanel({ x: event.clientX, y: event.clientY + 14, href, editing: false });
+          return true;
+        }
         const span = target.closest("[data-comment-id]");
         if (span && onCommentClick) {
           onCommentClick(span.getAttribute("data-comment-id")!);
@@ -320,6 +502,39 @@ export function TipTapEditor({
     setSelectionPill(null);
   }, [editor, onAddComment]);
 
+  // Toolbar link button: open the panel in read mode over an existing link, or
+  // in edit mode to create one on the current selection.
+  const openLinkPanel = useCallback(() => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    const onLink = editor.isActive("link");
+    if (!onLink && from === to) return; // nothing to link, nothing to inspect
+    const coords = editor.view.coordsAtPos(to);
+    const href = (editor.getAttributes("link").href as string | undefined) ?? "";
+    setLinkPanel({ x: coords.left, y: coords.bottom + 6, href, editing: !onLink });
+  }, [editor]);
+
+  const saveLink = useCallback(
+    (url: string) => {
+      if (!editor) return;
+      const trimmed = url.trim();
+      if (trimmed === "") {
+        editor.chain().focus().extendMarkRange("link").unsetLink().run();
+        setLinkPanel(null);
+        return;
+      }
+      editor.chain().focus().extendMarkRange("link").setLink({ href: trimmed }).run();
+      setLinkPanel((p) => (p ? { ...p, href: trimmed, editing: false } : p));
+    },
+    [editor],
+  );
+
+  const removeLink = useCallback(() => {
+    if (!editor) return;
+    editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    setLinkPanel(null);
+  }, [editor]);
+
   if (!editor) {
     return (
       <p className="font-mono text-[11px] uppercase tracking-wider text-ink-faint animate-pulse">
@@ -330,8 +545,17 @@ export function TipTapEditor({
 
   return (
     <div className="relative">
-      <Toolbar editor={editor} />
+      <Toolbar editor={editor} onLinkClick={openLinkPanel} />
       <EditorContent editor={editor} />
+      {linkPanel && (
+        <LinkPanel
+          state={linkPanel}
+          onSave={saveLink}
+          onStartEdit={() => setLinkPanel((p) => (p ? { ...p, editing: true } : p))}
+          onRemove={removeLink}
+          onClose={() => setLinkPanel(null)}
+        />
+      )}
       {selectionPill && onAddComment && (
         <button
           type="button"

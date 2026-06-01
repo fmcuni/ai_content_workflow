@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
 
+import { Sparkles } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,9 +14,14 @@ import { SectionHead } from "@/components/SectionHead";
 import { OutlineEditor } from "@/components/OutlineEditor";
 import { TipTapEditor } from "@/components/TipTapEditor";
 import { WordPressMetaForm } from "@/components/WordPressMetaForm";
+import { CommentsSidebar } from "@/components/CommentsSidebar";
+import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
+import { useArticleComments } from "@/lib/useArticleComments";
+import { useApplyEdits } from "@/lib/useApplyEdits";
+import { stripCommentSpan } from "@/lib/comment-anchor";
 import {
   Dialog,
   DialogContent,
@@ -74,8 +81,34 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
   const wpPrefilledRef = useRef(false);
   const renderSeededRef = useRef(false);
+
+  const {
+    comments,
+    setComments,
+    focusedCommentId,
+    setFocusedCommentId,
+    addComment,
+    updateComment,
+    deleteComment,
+    focusComment,
+  } = useArticleComments(setHtml, {
+    onAddComment: () => setRightTab("comments"),
+    onFocusComment: () => setRightTab("comments"),
+  });
+  const { applyComment, applyNotes, applyingCommentId } = useApplyEdits(runId, {
+    onCommentApplied: (commentId, newHtml) => {
+      setHtml(stripCommentSpan(newHtml, commentId));
+      setComments((cs) => cs.filter((c) => c.id !== commentId));
+      setFocusedCommentId((f) => (f === commentId ? null : f));
+    },
+    onNotesApplied: (newHtml) => {
+      setHtml(newHtml);
+      setForm((f) => ({ ...f, notes: "" }));
+    },
+  });
 
   // Seed the outline editor from the human-edited copy when present, else the
   // original AI payload.
@@ -164,7 +197,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       seo_title: form.edited_seo_title ?? null,
       meta_description: form.edited_meta_description ?? null,
       notes: form.notes ?? null,
-      comments: form.comments ?? null,
+      comments,
       wp_publish_status: form.wp_publish_status,
       wp_author_id: form.wp_author_id ?? null,
       wp_category_ids: form.wp_category_ids ?? null,
@@ -239,12 +272,12 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     },
     onSuccess: (snapshot) => {
       setHtml(snapshot.html_body);
+      setComments(snapshot.comments ?? []);
       setForm((f) => ({
         ...f,
         edited_seo_title: snapshot.seo_title ?? f.edited_seo_title,
         edited_meta_description: snapshot.meta_description ?? f.edited_meta_description,
         notes: snapshot.notes ?? f.notes,
-        comments: snapshot.comments ?? f.comments,
         wp_publish_status: asPublishStatus(snapshot.wp_publish_status) ?? f.wp_publish_status,
         wp_author_id: snapshot.wp_author_id ?? null,
         wp_category_ids: snapshot.wp_category_ids ?? null,
@@ -291,6 +324,8 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
         dek="Revise a finished run's outline and article, then save — or save and re-push the article to WordPress."
       />
 
+      {run.data && <RunTaskDetails run={run.data} />}
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
         <section>
           <Tabs value={tab} onValueChange={onTabChange}>
@@ -321,7 +356,12 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                 </p>
               )}
               {render.data && (
-                <TipTapEditor value={html} onChange={setHtml} />
+                <TipTapEditor
+                  value={html}
+                  onChange={setHtml}
+                  onAddComment={addComment}
+                  onCommentClick={focusComment}
+                />
               )}
             </TabsContent>
             <TabsContent value="outline" className="pt-6">
@@ -359,18 +399,66 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
               />
             </TabsContent>
           </Tabs>
+
+          {/* Notes to AI — overall inline edit of the existing article */}
+          <div className="mt-6">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="kicker">Notes to AI</p>
+              <button
+                type="button"
+                disabled={(form.notes ?? "").trim().length === 0 || applyNotes.isPending}
+                onClick={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
+                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-accent"
+                title="Let AI revise the whole article from these notes."
+              >
+                <Sparkles className="h-3 w-3" />
+                {applyNotes.isPending ? "Applying…" : "Apply to article"}
+              </button>
+            </div>
+            <textarea
+              value={form.notes ?? ""}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              rows={3}
+              placeholder="Overall direction — e.g. 'lede should be punchier, lead with the surgery question.'"
+              className="w-full resize-y border border-rule bg-paper rounded px-3 py-2 text-[14px] text-ink focus:outline-none focus:border-accent"
+            />
+          </div>
         </section>
 
         <aside className="lg:sticky lg:top-[6.25rem] self-start lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto">
-          <p className="kicker mb-3">WP metadata</p>
-          <Card variant="editorial" className="px-5 py-5">
-            <WordPressMetaForm
-              form={form}
-              onChange={setForm}
-              existingAuthorName={existingPost.data?.wp_author_name ?? null}
-              existingCategoryName={existingPost.data?.wp_category_name ?? null}
-            />
-          </Card>
+          <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as "wp" | "comments")}>
+            <TabsList className="border-b border-rule">
+              <TabsTrigger value="wp">WP metadata</TabsTrigger>
+              <TabsTrigger value="comments">
+                Comments
+                {comments.length > 0 && <span className="ml-1 text-accent">({comments.length})</span>}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="wp" className="pt-4">
+              <Card variant="editorial" className="px-5 py-5">
+                <WordPressMetaForm
+                  form={form}
+                  onChange={setForm}
+                  existingAuthorName={existingPost.data?.wp_author_name ?? null}
+                  existingCategoryName={existingPost.data?.wp_category_name ?? null}
+                />
+              </Card>
+            </TabsContent>
+            <TabsContent value="comments" className="pt-4">
+              <CommentsSidebar
+                comments={comments}
+                focusedId={focusedCommentId}
+                onChange={updateComment}
+                onDelete={deleteComment}
+                onFocus={focusComment}
+                onApply={(id) => {
+                  const c = comments.find((x) => x.id === id);
+                  if (c) applyComment.mutate({ comment: c, html });
+                }}
+                applyingId={applyingCommentId}
+              />
+            </TabsContent>
+          </Tabs>
         </aside>
       </div>
 
