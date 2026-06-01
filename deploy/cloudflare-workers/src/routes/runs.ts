@@ -10,6 +10,8 @@ import {
   WordPressError,
 } from "../wordpress/client";
 import type { PublishPayload, SeoPlugin } from "../wordpress/client";
+import { resolvePublishStatus } from "../wordpress/publish_status";
+import { restartGuard } from "./run_guards";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
 // ---------------------------------------------------------------------------
@@ -131,6 +133,12 @@ interface RunSummary {
   hitl_2_decision: string | null;
   hitl_2_notes: string | null;
   wp_publish_status: string | null;
+  wp_author_id: number | null;
+  wp_category_ids: unknown;
+  wp_tag_ids: unknown;
+  wp_featured_media_id: number | null;
+  wp_slug: string | null;
+  wp_excerpt: string | null;
   wp_pushed_post_id: number | null;
   wp_pushed_at: string | null;
   wp_push_error: unknown;
@@ -171,6 +179,12 @@ interface RunDetailRow extends RunListRow {
   hitl_2_decision: string | null;
   hitl_2_notes: string | null;
   wp_publish_status: string | null;
+  wp_author_id: number | null;
+  wp_category_ids: unknown;
+  wp_tag_ids: unknown;
+  wp_featured_media_id: number | null;
+  wp_slug: string | null;
+  wp_excerpt: string | null;
   wp_pushed_post_id: number | null;
   wp_pushed_at: string | null;
   wp_push_error: unknown;
@@ -231,6 +245,12 @@ function toRunSummary(row: RunDetailRow): RunSummary {
     hitl_2_decision: row.hitl_2_decision,
     hitl_2_notes: row.hitl_2_notes,
     wp_publish_status: row.wp_publish_status,
+    wp_author_id: row.wp_author_id,
+    wp_category_ids: pgJson(row.wp_category_ids),
+    wp_tag_ids: pgJson(row.wp_tag_ids),
+    wp_featured_media_id: row.wp_featured_media_id,
+    wp_slug: row.wp_slug,
+    wp_excerpt: row.wp_excerpt,
     wp_pushed_post_id: row.wp_pushed_post_id,
     wp_pushed_at: pgTimestampToIso(row.wp_pushed_at),
     wp_push_error: pgJson(row.wp_push_error),
@@ -389,6 +409,8 @@ runsRouter.get("/:id", async (c) => {
         acf_adv_id, acf_widget_id, edit_note, chosen_route, iteration_count,
         created_at, updated_at, created_by, approved_at, approved_by,
         hitl_2_decision, hitl_2_notes, hitl_2_iteration, wp_publish_status,
+        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
+        wp_slug, wp_excerpt,
         wp_pushed_post_id, wp_pushed_at, wp_push_error, start_mode,
         topic_candidate_id, target_audience, error
       FROM content_tool.runs
@@ -402,6 +424,71 @@ runsRouter.get("/:id", async (c) => {
     return c.json({ detail: "run not found" }, 404);
   }
   return c.json(toRunSummary(row));
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/restart — re-run a failed run
+//
+// Only `failed` runs are restartable; an in-flight or completed run must not
+// have its workflow replayed out from under it. We replay the SAME workflow
+// instance via `instance.restart()`, which keeps the instance id == runId so
+// the HITL resume routes (`get(runId).sendEvent`) keep addressing it. Cloudflare
+// Workflows resumes from the last checkpointed step, so a run that died in the
+// publish step re-runs only the tail — earlier durable steps are not repeated.
+// Mirrors the Python `restart_run` handler (content_tool/api/routes/runs.py).
+//
+// The status flip to `pending` is an ATOMIC claim (UPDATE … WHERE status =
+// 'failed') so two concurrent restart requests cannot both fire `restart()`,
+// and it is REVERTED back to `failed` if the workflow call throws — otherwise a
+// transient Workflows error would strand the run at `pending`, where the guard
+// would refuse any further restart.
+// ---------------------------------------------------------------------------
+runsRouter.post("/:id/restart", async (c) => {
+  const runId = c.req.param("id");
+
+  const claim = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const claimed = await sql<{ run_id: string }[]>`
+      UPDATE content_tool.runs
+      SET status = 'pending', error = NULL
+      WHERE run_id = ${runId} AND status = 'failed'
+      RETURNING run_id
+    `;
+    if (claimed.length > 0) return { ok: true as const };
+    // Lost the claim — the row is missing (404) or not in `failed` state (409;
+    // also covers an already-claimed concurrent restart, now `pending`).
+    const rows = await sql<{ status: string }[]>`
+      SELECT status FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    const verdict = restartGuard(rows[0]);
+    return "error" in verdict ? verdict : { error: "not_failed" as const };
+  });
+
+  if ("error" in claim) {
+    if (claim.error === "not_found") {
+      return c.json({ detail: "run not found" }, 404);
+    }
+    return c.json({ detail: "only failed runs can be restarted" }, 409);
+  }
+
+  const env = c.env as RunsEnv;
+  try {
+    const instance = await env.PRODUCTION.get(runId);
+    await instance.restart();
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Compensate: hand the run back to `failed` so the operator can retry.
+    await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+      await sql`
+        UPDATE content_tool.runs
+        SET status = 'failed',
+            error = ${toJsonb(sql, { type: "restart_error", message })}
+        WHERE run_id = ${runId}
+      `;
+    });
+    return c.json({ detail: `failed to restart workflow: ${message}` }, 502);
+  }
+
+  return c.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -617,7 +704,7 @@ runsRouter.post("/:id/dry-publish", async (c) => {
   const title = ov.edited_seo_title ?? render.seo_title;
   const content = ov.edited_html_body ?? render.html_body;
   const metaDesc = ov.edited_meta_description ?? render.meta_description;
-  const status = ov.wp_publish_status ?? run.wp_publish_status ?? "draft";
+  const status = resolvePublishStatus(ov.wp_publish_status ?? run.wp_publish_status);
   const categories = ov.wp_category_ids ?? pgJson<number[] | null>(run.wp_category_ids) ?? [];
   const tags = ov.wp_tag_ids ?? pgJson<number[] | null>(run.wp_tag_ids) ?? [];
   const excerpt = ov.wp_excerpt ?? run.wp_excerpt ?? render.excerpt_suggestion;
@@ -1382,7 +1469,9 @@ runsRouter.post("/:id/republish", async (c) => {
   const postId = isRefresh
     ? (run.wp_pushed_post_id ?? fetchedPostId)
     : run.wp_pushed_post_id;
-  const status = isRefresh ? (run.wp_publish_status ?? "draft") : "draft";
+  // Honor the operator's status choice for both modes (default draft); a
+  // "publish" selection must never be silently demoted on a re-push.
+  const status = resolvePublishStatus(run.wp_publish_status);
 
   const payload: PublishPayload = {
     postId,

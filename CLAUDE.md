@@ -93,7 +93,10 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
   ("Expand Topics") runs the `topic_expansion` subgraph (theme → topic-gen →
   dedup + hot-topic → HITL_T1 review → fan-out to runs); **Front III** ("Create
   New Articles") uses `start_mode="create"` — skip `fetch_article`/`gap_analysis`,
-  enter at `outline`, and publish to WordPress as **drafts**. **Promoted topics**
+  enter at `outline`, and publish to WordPress with the operator's selected
+  `wp_publish_status` (defaulting to **draft** when unset; both create and
+  refresh honor the choice — see `wordpress/publish_status` / `publish.py`).
+  **Promoted topics**
   (Front II → `POST /topic-batches/{id}/promote`) fan out per the selected promotion
   `mode`: `create` promotions follow the Front III path above, while `refresh`
   promotions use `start_mode="refresh"` with the candidate's `existing_url` and run

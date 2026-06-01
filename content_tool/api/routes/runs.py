@@ -208,6 +208,15 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
             "hitl_2_iteration": row.hitl_2_iteration,
             # WordPress publish outcome
             "wp_publish_status": row.wp_publish_status,
+            # WordPress metadata the operator selected — surfaced so the edit
+            # page can re-hydrate author / categories for create AND refresh
+            # runs (a create run has no upstream post to read them back from).
+            "wp_author_id": row.wp_author_id,
+            "wp_category_ids": row.wp_category_ids,
+            "wp_tag_ids": row.wp_tag_ids,
+            "wp_featured_media_id": row.wp_featured_media_id,
+            "wp_slug": row.wp_slug,
+            "wp_excerpt": row.wp_excerpt,
             "wp_pushed_post_id": row.wp_pushed_post_id,
             "wp_pushed_at": row.wp_pushed_at.isoformat() if row.wp_pushed_at else None,
             "wp_push_error": row.wp_push_error,

@@ -61,6 +61,59 @@ async def test_publish_node_updates_runs(db_session):
 
 
 @pytest.mark.asyncio
+async def test_publish_node_create_mode_honors_selected_status(db_session):
+    """A create-mode run must publish with the operator's selected status
+    (regression: create runs used to be force-drafted, silently demoting a
+    'publish' selection to a draft)."""
+    run_id = uuid4()
+    db_session.add(Run(
+        run_id=run_id, created_by="x", status="hitl_2",
+        article_url=None, topic="x", keywords=[], mode="auto",
+        acf_adv_id=1, acf_widget_id=2, persona="bowtie-editor",
+        today_date=date(2026, 5, 21), chosen_route=None, start_mode="create",
+        wp_publish_status="publish", wp_category_ids=[42], wp_author_id=5,
+        approved_at=datetime.utcnow(), approved_by="e@x.com",
+    ))
+    await db_session.commit()
+    # No FetchedArticle for create mode.
+    db_session.add(OutlineRow(run_id=run_id, payload={}))
+    draft = Draft(
+        run_id=run_id, iteration=0, diagnose="d", markup_raw="x", final_markup="x",
+        citation_intents=[],
+    )
+    db_session.add(draft)
+    await db_session.commit()
+    await db_session.refresh(draft)
+    db_session.add(Render(
+        draft_id=draft.draft_id, seo_title="t", meta_description="m",
+        html_body="<p>x</p>", excerpt_suggestion="e", slug_suggestion=None,
+    ))
+    await db_session.commit()
+
+    with respx.mock(assert_all_called=True) as r:
+        # Create mints a brand-new post → POST (no post id in the path).
+        route = r.post("https://wp.example.com/wp-json/wp/v2/posts").mock(
+            return_value=Response(201, json={
+                "id": 5150, "link": "https://wp.example.com/new-article",
+                "status": "publish", "modified_gmt": "2026-05-21T10:00:00",
+                "slug": "new-article",
+            })
+        )
+        client = WordPressClient("https://wp.example.com", username="u", app_password="p")  # noqa: S106
+        await publish_to_wordpress(
+            session=db_session, run_id=run_id, wp_client=client, seo_plugin=None,
+            if_unmodified_since=None,
+        )
+        body = json.loads(route.calls.last.request.content)
+        assert body["status"] == "publish"
+
+    updated = (await db_session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
+    assert updated.status == "published"
+    assert updated.wp_pushed_post_id == 5150
+    assert updated.article_url == "https://wp.example.com/new-article"
+
+
+@pytest.mark.asyncio
 async def test_publish_node_forwards_wp_publish_at_as_date_gmt(db_session):
     """run.wp_publish_at (UTC datetime) lands in WP REST body as date_gmt
     (ISO 8601 UTC, no trailing Z, e.g. '2026-06-01T03:00:00')."""

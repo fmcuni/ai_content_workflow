@@ -17,6 +17,8 @@ import { WordPressMetaForm } from "@/components/WordPressMetaForm";
 import { CommentsSidebar } from "@/components/CommentsSidebar";
 import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
+import { RawHtmlView } from "@/components/RawHtmlView";
+import { WpPayloadView } from "@/components/WpPayloadView";
 import {
   Dialog,
   DialogContent,
@@ -627,97 +629,17 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               )}
             </TabsContent>
             <TabsContent value="raw" className="pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="kicker">Raw HTML body</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(html);
-                    toast.success("Copied raw HTML");
-                  }}
-                  className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-                >
-                  ⧉ Copy
-                </button>
-              </div>
-              <pre className="border border-rule bg-paper rounded p-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words font-mono text-ink overflow-x-auto max-h-[70vh]">
-                {html || "(empty)"}
-              </pre>
+              <RawHtmlView html={html} />
             </TabsContent>
             <TabsContent value="payload" className="pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="kicker">WordPress REST payload</p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => dryPublish.mutate()}
-                    disabled={!renderReady || dryPublish.isPending}
-                    className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
-                  >
-                    {dryPublish.isPending ? "↻ Building…" : "↻ Refresh"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!dryPayload) return;
-                      navigator.clipboard.writeText(JSON.stringify(dryPayload, null, 2));
-                      toast.success("Copied payload");
-                    }}
-                    disabled={!dryPayload}
-                    className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
-                  >
-                    ⧉ Copy
-                  </button>
-                </div>
-              </div>
-              {dryPublish.isPending && (
-                <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider animate-pulse">
-                  Building payload…
-                </p>
-              )}
-              {dryPublish.isError && (
-                <p className="font-mono text-[12px] text-accent-deep">
-                  Failed to build payload — {(dryPublish.error as Error).message}
-                </p>
-              )}
-              {dryPayload && (
-                <div className="space-y-4">
-                  <div className="space-y-1 text-[13px]">
-                    <p>
-                      <span className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
-                        Target ·
-                      </span>{" "}
-                      <span className="font-mono">{dryPayload.target_label}</span>{" "}
-                      <span className="text-ink-faint">({dryPayload.target_base_url})</span>
-                    </p>
-                    <p>
-                      <span className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
-                        Request ·
-                      </span>{" "}
-                      <span className="font-mono">
-                        {dryPayload.request_method} {dryPayload.request_url}
-                      </span>
-                    </p>
-                  </div>
-                  <div>
-                    <p className="kicker mb-1">Headers</p>
-                    <pre className="border border-rule bg-paper rounded p-3 text-[12px] font-mono text-ink overflow-x-auto">
-                      {JSON.stringify(dryPayload.request_headers, null, 2)}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="kicker mb-1">Body</p>
-                    <pre className="border border-rule bg-paper rounded p-3 text-[12px] font-mono text-ink whitespace-pre-wrap break-words overflow-x-auto max-h-[60vh]">
-                      {JSON.stringify(dryPayload.request_body, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              )}
-              {!dryPayload && !dryPublish.isPending && !dryPublish.isError && (
-                <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">
-                  Switch to this tab to preview the payload.
-                </p>
-              )}
+              <WpPayloadView
+                payload={dryPayload}
+                isPending={dryPublish.isPending}
+                isError={dryPublish.isError}
+                errorMessage={(dryPublish.error as Error | null)?.message}
+                onRefresh={() => dryPublish.mutate()}
+                canRefresh={renderReady}
+              />
             </TabsContent>
           </Tabs>
 

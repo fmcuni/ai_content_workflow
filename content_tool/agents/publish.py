@@ -66,15 +66,15 @@ async def publish_to_wordpress(
         date_gmt = run.wp_publish_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
     if is_create_mode:
-        # Brand-new post on first publish (no post_id), force status="draft"
-        # (the operator promotes drafts to publish manually in WP after review).
-        # On a post-hoc re-push the run already minted a draft, so reuse its id
-        # to UPDATE that post instead of creating a duplicate.
+        # Brand-new post on first publish (no post_id). On a post-hoc re-push the
+        # run already minted a post, so reuse its id to UPDATE that post instead
+        # of creating a duplicate.
         post_id: int | None = run.wp_pushed_post_id
-        status = "draft"
     else:
         post_id = fa.wp_post_id if fa is not None else None
-        status = run.wp_publish_status or "draft"
+    # Honor the operator's status choice for both create and refresh runs
+    # (defaulting to draft) so a "publish" selection is never silently demoted.
+    status = run.wp_publish_status or "draft"
 
     payload = PublishPayload(
         post_id=post_id,

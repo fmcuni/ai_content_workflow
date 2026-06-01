@@ -47,6 +47,7 @@ import {
   type PublishPayload,
   type SeoPlugin,
 } from "../wordpress/client";
+import { resolvePublishStatus } from "../wordpress/publish_status";
 import { writeComplianceLog } from "../compliance/log";
 
 // ---------------------------------------------------------------------------
@@ -638,9 +639,10 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
 
   // -------------------------------------------------------------------------
   // Publish — WP upsert + run-row backfill. Mirrors publish_to_wordpress for
-  // both modes: create mints a brand-new draft (status forced "draft", article_url
-  // backfilled to the new link); refresh UPDATEs the existing post (id from
-  // fetched_articles, status = operator choice or "draft", article_url preserved).
+  // both modes: create mints a brand-new post (article_url backfilled to the new
+  // link); refresh UPDATEs the existing post (id from fetched_articles,
+  // article_url preserved). Both modes honor the operator's status choice
+  // (default "draft") — see resolvePublishStatus.
   // -------------------------------------------------------------------------
 
   private async publish(runId: string, run: RunLoadRow, step: WorkflowStep): Promise<void> {
@@ -670,9 +672,10 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           ? (run.wp_pushed_post_id ?? (await this.loadFetchedPostId(sql, runId)))
           : run.wp_pushed_post_id;
 
-        // Create mode forces a draft; refresh honours the operator's choice
-        // (defaulting to draft) so a published post is never silently demoted.
-        const status = isRefresh ? (hitl2.wp_publish_status ?? "draft") : "draft";
+        // Honor the operator's status choice for both create and refresh runs
+        // (defaulting to draft) so a "publish" selection is never silently
+        // demoted to a draft.
+        const status = resolvePublishStatus(hitl2.wp_publish_status);
 
         const payload: PublishPayload = {
           postId,

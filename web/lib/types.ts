@@ -24,6 +24,17 @@ export interface RunSummary {
   acf_adv_id?: number | null;
   acf_widget_id?: number | null;
   edit_note?: string | null;
+  // WordPress publish status + the operator's last-selected metadata. Surfaced
+  // so the edit page can re-hydrate author / categories for create AND refresh
+  // runs (a create run has no upstream post to read them back from).
+  wp_publish_status?: "draft" | "future" | "publish" | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_tag_ids?: number[] | null;
+  wp_featured_media_id?: number | null;
+  wp_slug?: string | null;
+  wp_excerpt?: string | null;
+  wp_pushed_post_id?: number | null;
   error?: { type: string; message: string } | null;
 }
 
