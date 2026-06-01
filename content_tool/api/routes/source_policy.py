@@ -1,0 +1,354 @@
+"""Editable source-policy API — the structured rules behind ``{source_policy_block}``.
+
+Mirrors ``routes/prompts.py`` for a singleton document: GET the live policy, PUT
+a structured edit (validated + optimistic-concurrency gated + version-stamped),
+preview the rendered prompt block without saving, browse history, and revert.
+
+The policy drives two things at runtime: the ``{source_policy_block}`` text
+injected into the writer prompts, and the citation-domain evaluation
+(``deny``/``prefer``/community exception). Both backends read the same DB row,
+so an edit here changes both behaviours without a redeploy.
+"""
+
+import json
+from typing import Any, cast
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from content_tool import source_policy_store
+from content_tool.api.editor_auth import require_editor
+from content_tool.db.models import SourcePolicyRecord, SourcePolicyVersion
+from content_tool.policy.source_policy import SourcePolicy
+from content_tool.source_policy_store import POLICY_ID
+
+router = APIRouter(prefix="/source-policy", tags=["source-policy"])
+
+_MAX_POLICY_BYTES = 64 * 1024
+_LIST_FIELDS = (
+    ("deny", "domains"),
+    ("prefer", "tlds"),
+    ("prefer", "domains"),
+    ("community_exception", "topic_categories"),
+    ("community_exception", "allowed_domains"),
+)
+
+
+def _get_session_factory(request: Request) -> async_sessionmaker[Any]:
+    return request.app.state.session_factory  # type: ignore[no-any-return]
+
+
+def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    """Reject anything that isn't a well-formed policy object.
+
+    Sections, when present, must be objects; their known list fields, when
+    present, must be arrays of strings. Empty lists are allowed — Bowtie domains
+    stay blocked regardless via the hard-coded rule in ``SourcePolicy``.
+    (Pydantic already guarantees the top level is an object.)
+    """
+    for section_key in ("deny", "prefer", "community_exception"):
+        if section_key in policy and not isinstance(policy[section_key], dict):
+            raise HTTPException(
+                400,
+                {"error": "invalid_policy", "message": f"'{section_key}' must be an object"},
+            )
+    for section_key, field_key in _LIST_FIELDS:
+        section = policy.get(section_key)
+        if not isinstance(section, dict):
+            continue
+        value = cast("dict[str, Any]", section).get(field_key)
+        if value is None:
+            continue
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in cast("list[Any]", value)
+        ):
+            raise HTTPException(
+                400,
+                {
+                    "error": "invalid_policy",
+                    "message": f"'{section_key}.{field_key}' must be an array of strings",
+                },
+            )
+    return policy
+
+
+def _snapshot_payload(snap: source_policy_store.PolicySnapshot) -> dict[str, Any]:
+    return {
+        "policy_id": snap.policy_id,
+        "policy": snap.raw,
+        "sha256": snap.sha256,
+        "bytes": snap.bytes,
+        "rendered": SourcePolicy(snap.raw).to_prompt_block(),
+    }
+
+
+@router.get("")
+async def get_source_policy(
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """The live source policy + its rendered prompt block + sha256 token."""
+    async with sf() as session:
+        snap = await source_policy_store.snapshot(session)
+    return _snapshot_payload(snap)
+
+
+class _PreviewRequest(BaseModel):
+    policy: dict[str, Any]
+
+
+@router.post("/preview")
+async def preview_source_policy(body: _PreviewRequest) -> dict[str, Any]:
+    """Render the prompt block from a candidate policy without saving it."""
+    policy = _validate_policy(body.policy)
+    cleaned = source_policy_store.clean(policy)
+    return {"policy": cleaned, "rendered": SourcePolicy(cleaned).to_prompt_block()}
+
+
+class _SaveRequest(BaseModel):
+    policy: dict[str, Any]
+    expected_sha256: str = Field(..., min_length=64, max_length=64)
+
+
+@router.put("")
+async def save_source_policy(
+    body: _SaveRequest,
+    editor: str = Depends(require_editor),
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Validate + persist a structured policy edit, stamping a version row.
+
+    HTTP 400 if the policy is malformed.
+    HTTP 409 if ``expected_sha256`` no longer matches the live row.
+    HTTP 413 if the canonical body exceeds the 64 KiB cap.
+
+    The UPDATE and the version INSERT commit in one transaction; the row is
+    locked ``FOR UPDATE`` to serialise concurrent saves. After commit the
+    in-process cache is invalidated so this worker serves the new policy.
+    """
+    cleaned = source_policy_store.clean(_validate_policy(body.policy))
+    new_body = source_policy_store.canonical_json(cleaned)
+    new_bytes = new_body.encode("utf-8")
+    new_sha = source_policy_store.sha256_hex(new_body)
+    version_id = uuid4()
+
+    if len(new_bytes) > _MAX_POLICY_BYTES:
+        raise HTTPException(413, f"policy exceeds {_MAX_POLICY_BYTES} bytes (got {len(new_bytes)})")
+
+    async with sf() as session:
+        row = (
+            await session.execute(
+                select(SourcePolicyRecord)
+                .where(SourcePolicyRecord.policy_id == POLICY_ID)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        # Optimistic concurrency: compare against the live row's sha, or the
+        # bundled-config fallback sha when the row is absent (migration applied
+        # without the seed). A mismatch means another editor saved meanwhile.
+        current_sha = (
+            row.sha256 if row is not None else source_policy_store.fallback_snapshot().sha256
+        )
+        if current_sha != body.expected_sha256:
+            raise HTTPException(
+                409,
+                {
+                    "error": "stale_sha",
+                    "message": "source policy was changed since you loaded it",
+                    "current_sha256": current_sha,
+                },
+            )
+        parent_sha = row.sha256 if row is not None else None
+
+        if row is None:
+            row = SourcePolicyRecord(policy_id=POLICY_ID)
+            session.add(row)
+        row.body = new_body
+        row.sha256 = new_sha
+        row.bytes = len(new_bytes)
+        row.updated_by = editor
+        version = SourcePolicyVersion(
+            version_id=version_id,
+            policy_id=POLICY_ID,
+            sha256=new_sha,
+            parent_sha256=parent_sha,
+            body=new_body,
+            bytes=len(new_bytes),
+            saved_by=editor,
+            kind="save",
+        )
+        session.add(version)
+        await session.commit()
+        await session.refresh(version, attribute_names=["saved_at"])
+        saved_at = version.saved_at
+
+    source_policy_store.invalidate()
+
+    return {
+        "policy_id": POLICY_ID,
+        "policy": cleaned,
+        "sha256": new_sha,
+        "bytes": len(new_bytes),
+        "rendered": SourcePolicy(cleaned).to_prompt_block(),
+        "version_id": str(version_id),
+        "saved_at": saved_at.isoformat(),
+        "saved_by": editor,
+    }
+
+
+@router.get("/history")
+async def source_policy_history(
+    limit: int = Query(50, ge=1, le=200),
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Newest-first list of saves + reverts (bodies omitted to stay small)."""
+    async with sf() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SourcePolicyVersion)
+                    .where(SourcePolicyVersion.policy_id == POLICY_ID)
+                    .order_by(SourcePolicyVersion.saved_at.desc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "policy_id": POLICY_ID,
+        "versions": [
+            {
+                "version_id": str(r.version_id),
+                "sha256": r.sha256,
+                "parent_sha256": r.parent_sha256,
+                "bytes": r.bytes,
+                "saved_by": r.saved_by,
+                "saved_at": r.saved_at.isoformat(),
+                "kind": r.kind,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/versions/{version_id}")
+async def source_policy_version(
+    version_id: UUID,
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """One version's full policy + metadata (used by the revert preview)."""
+    async with sf() as session:
+        row = (
+            await session.execute(
+                select(SourcePolicyVersion).where(
+                    SourcePolicyVersion.version_id == version_id,
+                    SourcePolicyVersion.policy_id == POLICY_ID,
+                )
+            )
+        ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, f"unknown version_id '{version_id}'")
+    raw = source_policy_store.clean(_loads(row.body))
+    return {
+        "version_id": str(row.version_id),
+        "policy_id": row.policy_id,
+        "sha256": row.sha256,
+        "parent_sha256": row.parent_sha256,
+        "policy": raw,
+        "rendered": SourcePolicy(raw).to_prompt_block(),
+        "bytes": row.bytes,
+        "saved_by": row.saved_by,
+        "saved_at": row.saved_at.isoformat(),
+        "kind": row.kind,
+    }
+
+
+class _RevertRequest(BaseModel):
+    target_version_id: UUID
+    expected_sha256: str = Field(..., min_length=64, max_length=64)
+
+
+@router.post("/revert")
+async def revert_source_policy(
+    body: _RevertRequest,
+    editor: str = Depends(require_editor),
+    sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
+) -> dict[str, Any]:
+    """Restore the live policy to the body of a past version (stamped as revert)."""
+    version_id = uuid4()
+
+    async with sf() as session:
+        row = (
+            await session.execute(
+                select(SourcePolicyRecord)
+                .where(SourcePolicyRecord.policy_id == POLICY_ID)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(404, "source policy not initialised")
+        current_sha = row.sha256
+        if current_sha != body.expected_sha256:
+            raise HTTPException(
+                409,
+                {
+                    "error": "stale_sha",
+                    "message": "source policy was changed since you loaded it",
+                    "current_sha256": current_sha,
+                },
+            )
+
+        target = (
+            await session.execute(
+                select(SourcePolicyVersion).where(
+                    SourcePolicyVersion.version_id == body.target_version_id,
+                    SourcePolicyVersion.policy_id == POLICY_ID,
+                )
+            )
+        ).scalar_one_or_none()
+        if target is None:
+            raise HTTPException(404, f"unknown version_id '{body.target_version_id}'")
+
+        new_body = target.body
+        new_bytes = new_body.encode("utf-8")
+        new_sha = source_policy_store.sha256_hex(new_body)
+        row.body = new_body
+        row.sha256 = new_sha
+        row.bytes = len(new_bytes)
+        row.updated_by = editor
+        version = SourcePolicyVersion(
+            version_id=version_id,
+            policy_id=POLICY_ID,
+            sha256=new_sha,
+            parent_sha256=current_sha,
+            body=new_body,
+            bytes=len(new_bytes),
+            saved_by=editor,
+            kind="revert",
+        )
+        session.add(version)
+        await session.commit()
+        await session.refresh(version, attribute_names=["saved_at"])
+        saved_at = version.saved_at
+
+    source_policy_store.invalidate()
+    cleaned = source_policy_store.clean(_loads(new_body))
+    return {
+        "policy_id": POLICY_ID,
+        "policy": cleaned,
+        "sha256": new_sha,
+        "bytes": len(new_bytes),
+        "rendered": SourcePolicy(cleaned).to_prompt_block(),
+        "version_id": str(version_id),
+        "saved_at": saved_at.isoformat(),
+        "saved_by": editor,
+        "reverted_from_version_id": str(body.target_version_id),
+    }
+
+
+def _loads(text: str) -> dict[str, Any]:
+    parsed = json.loads(text)
+    return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else {}

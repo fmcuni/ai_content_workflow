@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { SectionHead } from "@/components/SectionHead";
+import { SourcePolicyEditor } from "@/components/SourcePolicyEditor";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { promptsApi } from "@/lib/api";
 import type { PromptTemplateListItem } from "@/lib/types";
 
@@ -81,15 +83,31 @@ export default function PromptsListPage() {
         dek="Every system prompt and shared partial that ships to Gemini. Edits land on the next run — there is no hot reload mid-flight."
       />
 
-      {q.isLoading && <p className="text-ink-faint">Loading templates…</p>}
-      {q.isError && (
-        <p className="text-accent-deep text-[13px] mt-6">Failed to load templates.</p>
-      )}
+      <Tabs defaultValue="templates" className="mt-8">
+        <TabsList variant="line" className="border-b border-rule">
+          <TabsTrigger value="templates">Templates</TabsTrigger>
+          <TabsTrigger value="source-policy">Source Policy</TabsTrigger>
+        </TabsList>
 
-      <div className="mt-8 space-y-10">
-        <Section title="Agent prompts" hint="Full system prompts" items={agents} />
-        <Section title="Shared partials" hint="Included by `{{include:NAME}}`" items={partials} />
-      </div>
+        <TabsContent value="templates" className="pt-8">
+          {q.isLoading && <p className="text-ink-faint">Loading templates…</p>}
+          {q.isError && (
+            <p className="text-accent-deep text-[13px] mt-6">Failed to load templates.</p>
+          )}
+          <div className="space-y-10">
+            <Section title="Agent prompts" hint="Full system prompts" items={agents} />
+            <Section
+              title="Shared partials"
+              hint="Included by `{{include:NAME}}`"
+              items={partials}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="source-policy" className="pt-8">
+          <SourcePolicyEditor />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

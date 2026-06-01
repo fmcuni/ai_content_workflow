@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -6,11 +5,9 @@ import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from content_tool import source_policy_store
 from content_tool.agents.url_resolver import UrlResolver
 from content_tool.db.models import Citation, Draft
-from content_tool.policy.source_policy import SourcePolicy
-
-_DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[2] / "config" / "source_policy.yaml"
 
 
 def _build_sources_md(allowed: list[tuple[str, str]]) -> str:
@@ -28,13 +25,12 @@ async def run_resolve_citations(
     session: AsyncSession,
     draft_id: UUID,
     topic_category: str | None,
-    policy_path: Path = _DEFAULT_POLICY_PATH,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     draft = (
         await session.execute(select(Draft).where(Draft.draft_id == draft_id))
     ).scalar_one()
-    policy = SourcePolicy.load_from(policy_path)
+    policy = await source_policy_store.get_policy(session=session)
     resolver = UrlResolver(session=session, client=client)
 
     allowed_for_display: list[tuple[str, str]] = []

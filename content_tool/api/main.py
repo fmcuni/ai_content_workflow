@@ -9,7 +9,7 @@ from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
 )
 
-from content_tool import prompts_store
+from content_tool import prompts_store, source_policy_store
 from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
@@ -18,6 +18,7 @@ from content_tool.api.routes.prompts import router as prompts_router
 from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.routes.setup import router as setup_router
+from content_tool.api.routes.source_policy import router as source_policy_router
 from content_tool.api.routes.topic_batches import router as topic_batches_router
 from content_tool.api.routes.wp_options import router as wp_options_router
 from content_tool.api.sse import RunExecutor
@@ -101,6 +102,7 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
     app.state.engine = engine
     app.state.session_factory = sf
     prompts_store.configure(sf)
+    source_policy_store.configure(sf)
     app.state.run_executor = executor
     app.state.wp_client = wp_client
     app.state.wp_options_cache = wp_options_cache
@@ -166,6 +168,7 @@ def create_app() -> FastAPI:
     app.include_router(costs_router)
     app.include_router(personas_router)
     app.include_router(prompts_router)
+    app.include_router(source_policy_router)
     app.include_router(refresh_router)
     app.include_router(topic_batches_router)
     app.include_router(wp_options_router)

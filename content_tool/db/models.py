@@ -465,6 +465,62 @@ class PromptTemplate(Base):
     updated_by: Mapped[str | None] = mapped_column(String)
 
 
+class SourcePolicyRecord(Base):
+    """Live source-policy document — the runtime source of truth for the
+    ``{source_policy_block}`` prompt text AND citation-domain evaluation.
+
+    One singleton row (``policy_id='default'``). ``body`` holds the canonical
+    compact JSON of the ``{deny, prefer, community_exception}`` structure;
+    ``sha256`` is the hash of ``body`` and powers the editor's
+    optimistic-concurrency check. ``source_policy_versions`` keeps the
+    append-only history of every save/revert.
+    """
+
+    __tablename__ = "source_policy"
+    __table_args__ = ({"schema": "content_tool"},)
+
+    policy_id: Mapped[str] = mapped_column(String, primary_key=True)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    sha256: Mapped[str] = mapped_column(String, nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+    updated_by: Mapped[str | None] = mapped_column(String)
+
+
+class SourcePolicyVersion(Base):
+    """Immutable history row for every source-policy save or revert.
+
+    Mirrors :class:`PromptVersion`. ``parent_sha256`` chains rows so the lineage
+    is recoverable even if ``saved_at`` ties.
+    """
+
+    __tablename__ = "source_policy_versions"
+    __table_args__ = (
+        Index("source_policy_versions_policy_idx", "policy_id", "saved_at"),
+        {"schema": "content_tool"},
+    )
+
+    version_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    policy_id: Mapped[str] = mapped_column(String, nullable=False)
+    sha256: Mapped[str] = mapped_column(String, nullable=False)
+    parent_sha256: Mapped[str | None] = mapped_column(String)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    saved_by: Mapped[str] = mapped_column(String, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    kind: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'save'")
+    )
+
+
 from content_tool.db.persona_model import Persona  # noqa: E402
 from content_tool.db.topic_batch_model import (  # noqa: E402
     TopicBatch,

@@ -9,12 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_tool import prompts_store
+from content_tool import prompts_store, source_policy_store
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.writer import WriterOutput
 from content_tool.policy.personas import load_persona
-from content_tool.policy.source_policy import DEFAULT_POLICY_PATH, SourcePolicy
 
 _PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
 PROMPT_PATHS = {
@@ -86,11 +85,10 @@ async def build_system_prompt(
     *,
     session: AsyncSession,
     context_text: str | None = None,
-    policy_path: Path = DEFAULT_POLICY_PATH,
 ) -> str:
     template = await prompts_store.get_assembled(f"writer_{route}", session=session)
     persona = await load_persona(persona_name, session=session)
-    policy = SourcePolicy.load_from(policy_path)
+    policy = await source_policy_store.get_policy(session=session)
     return (
         template.replace("{persona_block}", persona.to_prompt_block(context_text))
         .replace("{today_date}", today.isoformat())

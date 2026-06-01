@@ -1,5 +1,6 @@
 import type { Sql } from "postgres";
-import { sourcePolicyInstance, type Decision } from "../config/source_policy";
+import { SourcePolicy, type Decision } from "../config/source_policy";
+import { getPolicy } from "../source_policy/store";
 import { resolveUrl } from "./url_resolver";
 
 // Cap on concurrent URL resolutions. Citation resolution runs inside a Workflow
@@ -70,6 +71,7 @@ async function resolveChunk(
   chunk: GroundingChunk,
   chunkIdx: number,
   topicCategory: string | null,
+  policy: SourcePolicy,
 ): Promise<CitationRecord | null> {
   const vertexUri = chunk.web?.uri;
   const title = chunk.web?.title ?? null;
@@ -81,7 +83,7 @@ async function resolveChunk(
   let policyDecision: Decision;
   let deniedReason: string | null;
   if (domain) {
-    const decision = sourcePolicyInstance.evaluate(domain, topicCategory);
+    const decision = policy.evaluate(domain, topicCategory);
     policyDecision = decision.decision;
     deniedReason = decision.reason;
   } else {
@@ -113,6 +115,7 @@ async function resolveAllChunks(
   sql: Sql,
   chunks: readonly GroundingChunk[],
   topicCategory: string | null,
+  policy: SourcePolicy,
 ): Promise<(CitationRecord | null)[]> {
   const results: (CitationRecord | null)[] = new Array(chunks.length).fill(null);
   let next = 0;
@@ -124,7 +127,7 @@ async function resolveAllChunks(
       if (idx >= chunks.length) return;
       const chunk = chunks[idx];
       if (chunk === undefined) continue;
-      results[idx] = await resolveChunk(sql, chunk, idx, topicCategory);
+      results[idx] = await resolveChunk(sql, chunk, idx, topicCategory, policy);
     }
   }
 
@@ -173,7 +176,8 @@ export async function resolveCitations(
 ): Promise<ResolveCitationsResult> {
   const { draftId, markupRaw, groundingChunks, topicCategory } = input;
 
-  const records = await resolveAllChunks(sql, groundingChunks, topicCategory);
+  const policy = await getPolicy(sql);
+  const records = await resolveAllChunks(sql, groundingChunks, topicCategory, policy);
 
   const displayed: { domain: string; finalUrl: string }[] = [];
   for (const record of records) {

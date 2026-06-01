@@ -49,6 +49,30 @@ export interface PromptVersionRow {
   kind: string; // default 'save'
 }
 
+// content_tool.source_policy — singleton editable source policy (one row,
+// policy_id='default'). `body` is the canonical compact JSON of the policy.
+export interface SourcePolicyRow {
+  policy_id: string; // PRIMARY KEY (always 'default')
+  body: string;
+  sha256: string;
+  bytes: number;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+// content_tool.source_policy_versions — append-only save/revert history.
+export interface SourcePolicyVersionRow {
+  version_id: string; // uuid, PRIMARY KEY
+  policy_id: string;
+  sha256: string;
+  parent_sha256: string | null;
+  body: string;
+  bytes: number;
+  saved_by: string;
+  saved_at: string;
+  kind: string; // default 'save'
+}
+
 export interface ArticleRow {
   article_id: string;
   article_url: string;

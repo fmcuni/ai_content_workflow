@@ -8,6 +8,8 @@ import type {
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
   RefreshEvaluation, RegenerateRequest, Render, RepublishResponse, RunSummary, ScanResponse,
   SetupConfigureResult, SetupRequest, SetupStatus, SetupVerifyResult,
+  SourcePolicyDoc, SourcePolicyPreviewResponse, SourcePolicyResponse, SourcePolicyRevertResponse,
+  SourcePolicySaveResponse, SourcePolicyVersionDetail, SourcePolicyVersionsResponse,
   TopicBatch, TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample,
   WpCategoryOption, WpUserOption,
 } from "./types";
@@ -21,7 +23,10 @@ const PROMPT_EDITOR_EMAIL = process.env.NEXT_PUBLIC_PROMPT_EDITOR_EMAIL;
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const extra: Record<string, string> = {};
-  if (PROMPT_EDITOR_EMAIL && path.startsWith("/api/prompts/")) {
+  if (
+    PROMPT_EDITOR_EMAIL &&
+    (path.startsWith("/api/prompts/") || path.startsWith("/api/source-policy"))
+  ) {
     extra["X-Editor-Email"] = PROMPT_EDITOR_EMAIL;
   }
   const r = await fetch(path, {
@@ -266,6 +271,31 @@ export const promptsApi = {
     body: { target_version_id: string; expected_sha256: string },
   ) =>
     http<PromptRevertResponse>(`${PROMPTS_BASE}/templates/${id}/revert`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};
+
+const SOURCE_POLICY_BASE = "/api/source-policy";
+
+export const sourcePolicyApi = {
+  get: () => http<SourcePolicyResponse>(SOURCE_POLICY_BASE),
+  preview: (policy: SourcePolicyDoc) =>
+    http<SourcePolicyPreviewResponse>(`${SOURCE_POLICY_BASE}/preview`, {
+      method: "POST",
+      body: JSON.stringify({ policy }),
+    }),
+  save: (body: { policy: SourcePolicyDoc; expected_sha256: string }) =>
+    http<SourcePolicySaveResponse>(SOURCE_POLICY_BASE, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  history: (limit = 50) =>
+    http<SourcePolicyVersionsResponse>(`${SOURCE_POLICY_BASE}/history?limit=${limit}`),
+  version: (versionId: string) =>
+    http<SourcePolicyVersionDetail>(`${SOURCE_POLICY_BASE}/versions/${versionId}`),
+  revert: (body: { target_version_id: string; expected_sha256: string }) =>
+    http<SourcePolicyRevertResponse>(`${SOURCE_POLICY_BASE}/revert`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
