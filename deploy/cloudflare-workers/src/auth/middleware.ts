@@ -10,6 +10,9 @@ export interface AuthVars {
    * Set on the cookie/session path; absent on the SSE ticket path (the ticket
    * carries only the user id) and when AUTH_DISABLED bypasses the gate. */
   userEmail?: string;
+  /** Effective RBAC role, resolved once per request and cached by
+   * src/auth/authz.ts `loadRole`. Absent until the first `requireRole`/`loadRole`. */
+  effectiveRole?: import("./authz").Role;
 }
 
 type AuthContext = Context<{ Bindings: Env; Variables: AuthVars }>;

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { RoleButton } from "@/components/RoleGate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OutlineEditor } from "@/components/OutlineEditor";
 import { TipTapEditor } from "@/components/TipTapEditor";
@@ -227,16 +228,24 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       dek="Revise a finished run's outline and article, then save — or save and re-push the article to WordPress."
       actionBar={
         <>
-          <Button variant="secondary" disabled={isBusy} onClick={() => save.mutate()}>
+          <RoleButton
+            need="edit_article"
+            deniedHint="Author role required to save changes."
+            variant="secondary"
+            disabled={isBusy}
+            onClick={() => save.mutate()}
+          >
             {save.isPending ? "Saving…" : "Save changes"}
-          </Button>
-          <Button
+          </RoleButton>
+          <RoleButton
+            need="publish"
+            deniedHint="Reviewer role required to re-push to WordPress."
             variant="primary"
             disabled={isBusy || renderMissing}
             onClick={() => prepublish.mutate()}
           >
             {prepublish.isPending ? "Preparing…" : "Save & re-push to WordPress ↪"}
-          </Button>
+          </RoleButton>
         </>
       }
     >

@@ -131,6 +131,9 @@ class OutlineRow(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     edited_by_human: Mapped[bool] = mapped_column(default=False)
     human_edits: Mapped[dict | None] = mapped_column(JSONB)
+    # Optimistic-concurrency counter — bumped on every persisted human edit so
+    # concurrent edits can be detected (409) instead of silently clobbering.
+    version: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
 
 
 class Draft(Base):
@@ -251,6 +254,9 @@ class Render(Base):
     schema_jsonld: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
     excerpt_suggestion: Mapped[str | None] = mapped_column(String)
     slug_suggestion: Mapped[str | None] = mapped_column(String)
+    # Optimistic-concurrency counter — bumped on every persisted human edit so
+    # concurrent reviewers' edits can be detected (409) instead of clobbering.
+    version: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
 
 
 class AuditRun(Base):

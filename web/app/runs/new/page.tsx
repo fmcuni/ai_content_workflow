@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import { RoleButton } from "@/components/RoleGate";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionHead } from "@/components/SectionHead";
@@ -449,7 +450,9 @@ function NewRunForm() {
                 {(submitMut.error as Error).message}
               </p>
             )}
-            <Button
+            <RoleButton
+              need="create_run"
+              deniedHint="Author role required to file new runs."
               onClick={() => submitMut.mutate()}
               disabled={
                 submitMut.isPending || filledRows.filter((r) => r.status !== "done").length === 0
@@ -461,7 +464,7 @@ function NewRunForm() {
                 : `File ${filledRows.filter((r) => r.status !== "done").length} run${
                     filledRows.filter((r) => r.status !== "done").length === 1 ? "" : "s"
                   } →`}
-            </Button>
+            </RoleButton>
           </div>
         </div>
 

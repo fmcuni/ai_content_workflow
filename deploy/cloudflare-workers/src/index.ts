@@ -12,8 +12,10 @@ import { runsRouter } from "./routes/runs";
 import { topicBatchesRouter } from "./routes/topic_batches";
 import { complianceRouter } from "./routes/compliance";
 import { refreshRouter } from "./routes/refresh";
+import { adminRouter } from "./routes/admin";
 import { getAuth } from "./auth/auth";
 import { requireAuth, type AuthVars } from "./auth/middleware";
+import { loadRole, requireRole } from "./auth/authz";
 import { mintTicket } from "./auth/ticket";
 
 export { ProductionWorkflow } from "./workflows/production";
@@ -62,6 +64,12 @@ export interface Env {
   EMAIL_VERIFICATION?: string;
   // Var — set "true" to bypass the auth gate for local dev (Python backend).
   AUTH_DISABLED?: string;
+  // Var — comma-separated email allowlist (case-insensitive) that is always
+  // granted the `admin` effective role, regardless of the stored DB role. This
+  // is the RBAC break-glass bootstrap: it guarantees a fresh DB (every user
+  // defaulting to `viewer`) is never locked out of role management. See
+  // src/auth/authz.ts `effectiveRole`.
+  BOOTSTRAP_ADMIN_EMAILS?: string;
   // WordPress connection — read by /setup/status. Optional: set per environment
   // via `wrangler secret put` (credentials) / vars (non-secret). May be unset.
   WP_BASE_URL?: string;
@@ -99,8 +107,59 @@ app.get("/api/auth-ticket", async (c) => {
   return c.json({ ticket });
 });
 
+// GET /me — the current session's email + EFFECTIVE role (bootstrap override
+// applied). The frontend uses this to gate UI affordances. Authenticated only
+// (no role requirement). 401 if there is no session identity at all.
+app.get("/me", async (c) => {
+  const role = await loadRole(c);
+  if (role === null) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  return c.json({ email: c.get("userEmail") ?? null, role });
+});
+
+// --- RBAC route gates -------------------------------------------------------
+// Method+path scoped guards registered BEFORE the corresponding app.route(...)
+// mounts. The `runs` router gates its own mutating routes internally; these
+// cover the routers that take only Bindings (no AuthVars in their generic), so
+// gating at the mount keeps their typing intact. Read-only routes are
+// intentionally NOT listed — the requireAuth gate above already enforces an
+// authenticated (viewer) session for them.
+
+// prompts: edit (PUT) + revert (POST) → admin (config change). preview (POST) is
+// a pure render of a candidate template, no persistence → editor.
+app.put("/prompts/templates/:id", requireRole("admin"));
+app.post("/prompts/templates/:id/revert", requireRole("admin"));
+app.post("/prompts/templates/:id/preview", requireRole("editor"));
+
+// personas: create / edit / archive / restore → admin (config change).
+app.post("/personas", requireRole("admin"));
+app.put("/personas/:slug", requireRole("admin"));
+app.post("/personas/:slug/archive", requireRole("admin"));
+app.post("/personas/:slug/restore", requireRole("admin"));
+
+// source-policy: edit (PUT) + revert (POST) → admin (config change).
+// preview (POST) → editor.
+app.put("/source-policy", requireRole("admin"));
+app.post("/source-policy/revert", requireRole("admin"));
+app.post("/source-policy/preview", requireRole("editor"));
+
+// topic-batches: create batch + promote topics → editor. skip a candidate +
+// close a batch are editorial mutations → editor. DELETE batch → admin.
+app.post("/topic-batches", requireRole("editor"));
+app.post("/topic-batches/:id/promote", requireRole("editor"));
+app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("editor"));
+app.post("/topic-batches/:id/close", requireRole("editor"));
+app.delete("/topic-batches/:id", requireRole("admin"));
+
+// refresh: kick a re-audit scan (existing post) → editor.
+app.post("/refresh/scan", requireRole("editor"));
+app.post("/refresh/scan/:articleId", requireRole("editor"));
+
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
-app.get("/db/ping", async (c) => {
+// Admin-only: the response enumerates content_tool table names + Postgres
+// version, so it stays behind requireRole("admin") (not just any viewer).
+app.get("/db/ping", requireRole("admin"), async (c) => {
   // Connect through Hyperdrive (no upstream TLS handshake on the hot path → no
   // free-plan subrequest blowup). fetch_types:false trims pg_catalog round-trips.
   const sql = postgres(c.env.HYPERDRIVE.connectionString, {
@@ -151,6 +210,10 @@ app.route("/runs", runsRouter);
 app.route("/topic-batches", topicBatchesRouter);
 app.route("/compliance", complianceRouter);
 app.route("/refresh", refreshRouter);
+// Admin user-management — every route gated by requireRole("admin"); see
+// src/routes/admin.ts. Registered after the gate above (it is not a public path).
+app.use("/admin/*", requireRole("admin"));
+app.route("/admin", adminRouter);
 
 // The default export carries BOTH the HTTP handler (Hono) and the Cron Trigger
 // `scheduled` handler. The cron fires the refresh-scan Workflow (CMS Stage 0);

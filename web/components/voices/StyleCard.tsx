@@ -9,9 +9,11 @@ import type { Persona } from "@/lib/types";
 interface StyleCardProps {
   persona: Persona;
   onEdit: () => void;
+  /** When false, the "Edit voice" affordance is hidden (non-admins). */
+  canManage?: boolean;
 }
 
-export function StyleCard({ persona, onEdit }: StyleCardProps) {
+export function StyleCard({ persona, onEdit, canManage = true }: StyleCardProps) {
   const usage = useQuery({
     queryKey: ["persona-usage", persona.slug],
     queryFn: () => personasApi.usage(persona.slug),
@@ -47,13 +49,15 @@ export function StyleCard({ persona, onEdit }: StyleCardProps) {
           >
             Glossary ({persona.glossary?.length ?? 0}) →
           </Link>
-          <button
-            type="button"
-            onClick={onEdit}
-            className="text-[12px] tracking-wider uppercase text-ink-soft hover:text-accent transition-colors"
-          >
-            Edit voice →
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="text-[12px] tracking-wider uppercase text-ink-soft hover:text-accent transition-colors"
+            >
+              Edit voice →
+            </button>
+          )}
         </div>
       </header>
 

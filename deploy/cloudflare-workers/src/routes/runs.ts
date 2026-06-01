@@ -15,6 +15,8 @@ import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
 import { restartGuard } from "./run_guards";
 import type { AuthVars } from "../auth/middleware";
+import { resolveActorIdentity } from "./identity";
+import { requireRole } from "../auth/authz";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,14 @@ const DEFAULT_LIST_LIMIT = 50;
 
 // HITL_2 request_changes cap — must match the Python guard.
 const HITL_2_MAX_ITERATIONS = 3;
+
+// Run-status sentinels the ProductionWorkflow sets WHILE PAUSED at each HITL gate
+// (src/workflows/production.ts gateStep). A decision is only valid when the run
+// is parked at the matching gate, so the resume/hitl-2 handlers claim the
+// transition with `AND status = <gate status>` — this both rejects stale-tab
+// posts and single-flights the sendEvent to the workflow instance.
+const HITL_1_GATE_STATUS = "hitl_1";
+const HITL_2_GATE_STATUS = "hitl_2";
 
 // Gemini defaults for the synchronous apply-edits route (mirror refresh.ts).
 const DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview";
@@ -87,6 +97,9 @@ interface Hitl2Body {
   decision?: "approve" | "request_changes" | "reject";
   notes?: string | null;
   comments?: Hitl2Comment[];
+  /** Ignored for audit fields when a session identity is present — `approved_by`
+   * is session-derived (see ./identity). Accepted only as a dev fallback. */
+  editor_email?: string | null;
   edited_html_body?: string | null;
   edited_seo_title?: string | null;
   edited_meta_description?: string | null;
@@ -200,6 +213,7 @@ interface RunDetailRow extends RunListRow {
 }
 
 interface RunHitl2StateRow {
+  status: string;
   hitl_2_iteration: number;
 }
 
@@ -291,7 +305,7 @@ const runsRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 // ---------------------------------------------------------------------------
 // POST / — create a run
 // ---------------------------------------------------------------------------
-runsRouter.post("/", async (c) => {
+runsRouter.post("/", requireRole("editor"), async (c) => {
   const body = await c.req
     .json<CreateRunBody>()
     .catch(() => ({}) as CreateRunBody);
@@ -316,7 +330,12 @@ runsRouter.post("/", async (c) => {
   const persona = body.persona ?? "bowtie-editor";
   const acfAdvId = body.acf_adv_id ?? 0;
   const acfWidgetId = body.acf_widget_id ?? 0;
-  const createdBy = body.editor_email ?? "";
+  // Audit identity: bind `created_by` to the authenticated session, ignoring any
+  // client-supplied `editor_email` when a session is present (see ./identity).
+  const createdBy = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email,
+  );
   const topicCategory = body.topic_category ?? null;
   const editNote = body.edit_note ?? null;
   const topicCandidateId = body.topic_candidate_id ?? null;
@@ -450,7 +469,7 @@ runsRouter.get("/:id", async (c) => {
 // transient Workflows error would strand the run at `pending`, where the guard
 // would refuse any further restart.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/restart", async (c) => {
+runsRouter.post("/:id/restart", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
   const claim = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -501,12 +520,36 @@ runsRouter.post("/:id/restart", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/resume — HITL_1 decision
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/resume", async (c) => {
+runsRouter.post("/:id/resume", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<ResumeBody>().catch(() => ({}) as ResumeBody);
   const decision = body.decision ?? "approve";
 
-  await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+  const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ status: string }[]>`
+      SELECT status FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (rows[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+
+    // Atomic gate claim (matches /hitl-2 + the version-guard style): the run must
+    // be PAUSED at the HITL_1 gate. The workflow sets status = 'hitl_1' right
+    // before `step.waitForEvent("await-hitl1")`, so this rejects a stale-tab
+    // decision and single-flights the sendEvent — only the request that flips the
+    // status away from the gate proceeds. `result.count === 0` → 409.
+    const claim = await sql`
+      UPDATE content_tool.runs
+      SET hitl_1_decision = ${decision}, hitl_1_notes = ${body.notes ?? null}
+      WHERE run_id = ${runId} AND status = ${HITL_1_GATE_STATUS}
+    `;
+    if (claim.count === 0) {
+      return { error: "not_at_gate" as const };
+    }
+
+    // Only apply the side-effect edits once the gate is ours, so a losing
+    // concurrent request cannot clobber the outline / route of a run that has
+    // already moved on.
     if (decision === "edit_outline" && body.edited_outline !== undefined) {
       await sql`
         UPDATE content_tool.outlines
@@ -521,12 +564,15 @@ runsRouter.post("/:id/resume", async (c) => {
         WHERE run_id = ${runId}
       `;
     }
-    await sql`
-      UPDATE content_tool.runs
-      SET hitl_1_decision = ${decision}, hitl_1_notes = ${body.notes ?? null}
-      WHERE run_id = ${runId}
-    `;
+    return { ok: true as const };
   });
+
+  if ("error" in guard) {
+    if (guard.error === "not_found") {
+      return c.json({ detail: "run not found" }, 404);
+    }
+    return c.json({ detail: "run is not awaiting a HITL_1 decision" }, 409);
+  }
 
   const env = c.env as RunsEnv;
   const instance = await env.PRODUCTION.get(runId);
@@ -546,35 +592,59 @@ runsRouter.post("/:id/resume", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/hitl-2 — HITL_2 decision
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl-2", async (c) => {
+runsRouter.post("/:id/hitl-2", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<Hitl2Body>().catch(() => ({}) as Hitl2Body);
   const decision = body.decision ?? "approve";
   const comments = body.comments ?? [];
-  // Compliance record-of-truth: the authenticated session email (NOT the
-  // client-supplied payload). "unknown" only when AUTH_DISABLED bypasses the gate.
-  const editorEmail = c.get("userEmail") ?? "unknown";
+  // Compliance record-of-truth: the authenticated session identity (NOT the
+  // client-supplied payload). Falls back to the payload only on the AUTH_DISABLED
+  // dev path where no session exists, then to "unknown" (see ./identity).
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email,
+  );
 
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<RunHitl2StateRow[]>`
-      SELECT hitl_2_iteration FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+      SELECT status, hitl_2_iteration FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
     `;
     const current = rows[0];
     if (current === undefined) {
       return { error: "not_found" as const };
     }
 
-    // Belt + braces against tab races — UI also disables this.
-    if (decision === "request_changes" && current.hitl_2_iteration >= HITL_2_MAX_ITERATIONS) {
-      return { error: "cap_reached" as const };
-    }
-
-    const newIteration =
+    // Atomic claim of the HITL_2 decision (optimistic-concurrency, matches the
+    // PUT /article + /outline version-guard style). Two guards are folded into
+    // the WHERE clause so the read-then-write TOCTOU windows close:
+    //
+    //  - status = 'awaiting_hitl_2': the run must actually be PAUSED at the
+    //    HITL_2 gate. The workflow sets this exact status right before
+    //    `step.waitForEvent("await-hitl2-*")`, so this both rejects a stale tab
+    //    that posts after the gate moved on AND single-flights the sendEvent —
+    //    only the request that flips the status away from the gate proceeds to
+    //    `instance.sendEvent`. (Defense in depth: Cloudflare Workflows already
+    //    delivers one waitForEvent per gate; this stops a second decision from
+    //    racing in before the first wakes the workflow.)
+    //  - hitl_2_iteration < MAX (request_changes only): two concurrent
+    //    `request_changes` cannot both pass the cap — the bound lives IN the
+    //    conditional UPDATE, not in a separate read-then-check.
+    //
+    // `result.count` is the affected-row count; 0 means a guard rejected the
+    // write. The pre-SELECT above lets us tell 404 (no row) from 409 (a guard
+    // matched no row) and pick the precise 409 reason.
+    //
+    // request_changes → increment, guarded by status + cap.
+    // approve / reject → leave the counter untouched (no cap applies).
+    const newIteration = sql`hitl_2_iteration${
+      decision === "request_changes" ? sql` + 1` : sql``
+    }`;
+    const capGuard =
       decision === "request_changes"
-        ? current.hitl_2_iteration + 1
-        : current.hitl_2_iteration;
+        ? sql`AND hitl_2_iteration < ${HITL_2_MAX_ITERATIONS}`
+        : sql``;
 
-    await sql`
+    const result = await sql`
       UPDATE content_tool.runs SET
         hitl_2_decision = ${decision},
         hitl_2_notes = ${body.notes ?? null},
@@ -591,7 +661,21 @@ runsRouter.post("/:id/hitl-2", async (c) => {
         wp_excerpt = ${body.wp_excerpt ?? null},
         wp_publish_at = ${body.wp_publish_at ?? null}
       WHERE run_id = ${runId}
+        AND status = ${HITL_2_GATE_STATUS} ${capGuard}
     `;
+    if (result.count === 0) {
+      // The row exists (checked above) but the conditional WHERE matched nothing.
+      // Disambiguate: a `request_changes` that is at the gate but over the cap is
+      // a cap rejection; anything else is the run not being paused at HITL_2.
+      if (
+        decision === "request_changes" &&
+        current.status === HITL_2_GATE_STATUS &&
+        current.hitl_2_iteration >= HITL_2_MAX_ITERATIONS
+      ) {
+        return { error: "cap_reached" as const };
+      }
+      return { error: "not_at_gate" as const };
+    }
 
     // Persist human inline edits onto the latest render BEFORE sendEvent so the
     // workflow's publish step pushes the reviewer's edited content (mirrors
@@ -624,7 +708,12 @@ runsRouter.post("/:id/hitl-2", async (c) => {
     if (guard.error === "not_found") {
       return c.json({ detail: "run not found" }, 404);
     }
-    return c.json({ detail: "request_changes cap reached" }, 409);
+    if (guard.error === "cap_reached") {
+      return c.json({ detail: "request_changes cap reached" }, 409);
+    }
+    // not_at_gate — the run is not paused at HITL_2 (already decided, or a
+    // concurrent request already claimed the gate).
+    return c.json({ detail: "run is not awaiting a HITL_2 decision" }, 409);
   }
 
   const env = c.env as RunsEnv;
@@ -672,7 +761,7 @@ runsRouter.options("/:id/events", (c) =>
 // ---------------------------------------------------------------------------
 // POST /:id/dry-publish — preview the WP REST payload WITHOUT calling WP
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/dry-publish", async (c) => {
+runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const ov = await c.req
     .json<DryPublishBody>()
@@ -831,9 +920,9 @@ runsRouter.get("/:id/outline", async (c) => {
   const runId = c.req.param("id");
   const row = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<
-      { payload: unknown; edited_by_human: boolean; human_edits: unknown }[]
+      { payload: unknown; edited_by_human: boolean; human_edits: unknown; version: number }[]
     >`
-      SELECT payload, edited_by_human, human_edits
+      SELECT payload, edited_by_human, human_edits, version
       FROM content_tool.outlines
       WHERE run_id = ${runId}
       LIMIT 1
@@ -847,6 +936,9 @@ runsRouter.get("/:id/outline", async (c) => {
     payload: pgJson(row.payload),
     edited_by_human: row.edited_by_human,
     human_edits: pgJson(row.human_edits),
+    // Optimistic-concurrency token — echo back as `expected_version` on
+    // PUT /outline so a stale edit is rejected instead of clobbering.
+    version: row.version,
   });
 });
 
@@ -900,11 +992,12 @@ runsRouter.get("/:id/render", async (c) => {
         schema_jsonld: unknown;
         excerpt_suggestion: string | null;
         slug_suggestion: string | null;
+        version: number;
       }[]
     >`
       SELECT
         r.seo_title, r.meta_description, r.html_body, r.faq_schema_jsonld,
-        r.schema_jsonld, r.excerpt_suggestion, r.slug_suggestion
+        r.schema_jsonld, r.excerpt_suggestion, r.slug_suggestion, r.version
       FROM content_tool.renders r
       JOIN content_tool.drafts d ON d.draft_id = r.draft_id
       WHERE d.run_id = ${runId}
@@ -924,6 +1017,9 @@ runsRouter.get("/:id/render", async (c) => {
     schema_jsonld: pgJson(row.schema_jsonld),
     excerpt_suggestion: row.excerpt_suggestion,
     slug_suggestion: row.slug_suggestion,
+    // Optimistic-concurrency token — echo back as `expected_version` on
+    // PUT /article so a stale edit is rejected instead of clobbering.
+    version: row.version,
   });
 });
 
@@ -1016,6 +1112,7 @@ interface Hitl2SnapshotRow {
 
 interface OutlineEditBody {
   outline?: unknown;
+  expected_version?: number | null;
 }
 
 interface ArticleEditBody {
@@ -1030,6 +1127,7 @@ interface ArticleEditBody {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  expected_version?: number | null;
 }
 
 interface ApplyEditsBody {
@@ -1040,6 +1138,7 @@ interface ApplyEditsBody {
 
 interface RepublishRunRow {
   start_mode: string;
+  created_by: string | null;
   wp_pushed_post_id: number | null;
   wp_publish_status: string | null;
   wp_author_id: number | null;
@@ -1177,7 +1276,7 @@ runsRouter.get("/:id/existing-post", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/existing-post/refresh — re-read the post from WP, update the cache
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/existing-post/refresh", async (c) => {
+runsRouter.post("/:id/existing-post/refresh", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
   const run = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -1256,12 +1355,18 @@ runsRouter.post("/:id/existing-post/refresh", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/hitl2-snapshots — persist one autosave / version-history snapshot
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl2-snapshots", async (c) => {
+runsRouter.post("/:id/hitl2-snapshots", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<Hitl2SnapshotBody>()
     .catch(() => ({}) as Hitl2SnapshotBody);
-  const editorEmail = c.get("userEmail") ?? "unknown";
+  // Audit identity: bind `created_by` to the authenticated session (email →
+  // userId → "unknown"), consistent with the create-run / hitl-2 sites. The
+  // snapshot body carries no `editor_email`, so the payload fallback is null.
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    null,
+  );
 
   const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<{ run_id: string }[]>`
@@ -1342,27 +1447,58 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/outline — persist a post-hoc outline edit (outlines.human_edits)
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/outline", async (c) => {
+runsRouter.put("/:id/outline", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<OutlineEditBody>().catch(() => ({}) as OutlineEditBody);
 
-  const found = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-    const rows = await sql<{ run_id: string }[]>`
-      SELECT run_id FROM content_tool.outlines WHERE run_id = ${runId} LIMIT 1
+  const expectedVersion = body.expected_version ?? null;
+
+  const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<{ version: number }[]>`
+      SELECT version FROM content_tool.outlines WHERE run_id = ${runId} LIMIT 1
     `;
-    if (rows[0] === undefined) {
-      return false;
+    const existing = rows[0];
+    if (existing === undefined) {
+      return { kind: "not_found" as const };
     }
-    await sql`
-      UPDATE content_tool.outlines
-      SET edited_by_human = TRUE, human_edits = ${toJsonb(sql, body.outline ?? null)}
-      WHERE run_id = ${runId}
-    `;
-    return true;
+    // Conditional UPDATE: only add the `AND version = $expected` guard when the
+    // caller supplied an expected_version. Either way bump version by one.
+    const result =
+      expectedVersion === null
+        ? await sql`
+            UPDATE content_tool.outlines
+            SET edited_by_human = TRUE,
+                human_edits = ${toJsonb(sql, body.outline ?? null)},
+                version = version + 1
+            WHERE run_id = ${runId}
+          `
+        : await sql`
+            UPDATE content_tool.outlines
+            SET edited_by_human = TRUE,
+                human_edits = ${toJsonb(sql, body.outline ?? null)},
+                version = version + 1
+            WHERE run_id = ${runId} AND version = ${expectedVersion}
+          `;
+    if (result.count === 0) {
+      // Conditional WHERE matched no row → another reviewer saved since the
+      // client loaded this outline. `existing.version` is the committed current.
+      return { kind: "stale" as const, currentVersion: existing.version };
+    }
+    return { kind: "ok" as const };
   });
 
-  if (!found) {
+  if (outcome.kind === "not_found") {
     return c.json({ detail: "no outline for this run" }, 404);
+  }
+  if (outcome.kind === "stale") {
+    return c.json(
+      {
+        error: "stale_version",
+        message: "outline was changed since you loaded it",
+        current_version: outcome.currentVersion,
+      },
+      409,
+    );
   }
   return c.json({ ok: true });
 });
@@ -1370,15 +1506,17 @@ runsRouter.put("/:id/outline", async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/article — persist body/SEO onto the latest render + WP meta on the run
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/article", async (c) => {
+runsRouter.put("/:id/article", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ArticleEditBody>()
     .catch(() => ({}) as ArticleEditBody);
 
+  const expectedVersion = body.expected_version ?? null;
+
   const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-    const renderRows = await sql<{ render_id: string }[]>`
-      SELECT r.render_id
+    const renderRows = await sql<{ render_id: string; version: number }[]>`
+      SELECT r.render_id, r.version
       FROM content_tool.renders r
       JOIN content_tool.drafts d ON d.draft_id = r.draft_id
       WHERE d.run_id = ${runId}
@@ -1392,17 +1530,35 @@ runsRouter.put("/:id/article", async (c) => {
         SELECT draft_id FROM content_tool.drafts WHERE run_id = ${runId} LIMIT 1
       `;
       return draftRows[0] === undefined
-        ? ("no_draft" as const)
-        : ("no_render" as const);
+        ? ({ kind: "no_draft" as const })
+        : ({ kind: "no_render" as const });
     }
 
-    await sql`
-      UPDATE content_tool.renders
-      SET html_body = ${body.html_body ?? ""},
-          seo_title = ${body.seo_title ?? ""},
-          meta_description = ${body.meta_description ?? ""}
-      WHERE render_id = ${render.render_id}
-    `;
+    // Conditional UPDATE: only add the `AND version = $expected` guard when the
+    // caller supplied an expected_version. Either way bump version by one.
+    const result =
+      expectedVersion === null
+        ? await sql`
+            UPDATE content_tool.renders
+            SET html_body = ${body.html_body ?? ""},
+                seo_title = ${body.seo_title ?? ""},
+                meta_description = ${body.meta_description ?? ""},
+                version = version + 1
+            WHERE render_id = ${render.render_id}
+          `
+        : await sql`
+            UPDATE content_tool.renders
+            SET html_body = ${body.html_body ?? ""},
+                seo_title = ${body.seo_title ?? ""},
+                meta_description = ${body.meta_description ?? ""},
+                version = version + 1
+            WHERE render_id = ${render.render_id} AND version = ${expectedVersion}
+          `;
+    if (result.count === 0) {
+      // Conditional WHERE matched no row → another reviewer saved since the
+      // client loaded this render. `render.version` is the committed current.
+      return { kind: "stale" as const, currentVersion: render.version };
+    }
 
     // Only overwrite WP metadata fields the caller actually supplied (non-null);
     // COALESCE preserves the existing value for omitted fields.
@@ -1419,14 +1575,24 @@ runsRouter.put("/:id/article", async (c) => {
         wp_publish_at = COALESCE(${body.wp_publish_at ?? null}, wp_publish_at)
       WHERE run_id = ${runId}
     `;
-    return "ok" as const;
+    return { kind: "ok" as const };
   });
 
-  if (outcome === "no_draft") {
+  if (outcome.kind === "no_draft") {
     return c.json({ detail: "no draft for this run" }, 404);
   }
-  if (outcome === "no_render") {
+  if (outcome.kind === "no_render") {
     return c.json({ detail: "no render for this run" }, 404);
+  }
+  if (outcome.kind === "stale") {
+    return c.json(
+      {
+        error: "stale_version",
+        message: "article was changed since you loaded it",
+        current_version: outcome.currentVersion,
+      },
+      409,
+    );
   }
   return c.json({ ok: true });
 });
@@ -1439,7 +1605,7 @@ runsRouter.put("/:id/article", async (c) => {
 // created and nothing is published — that happens through Save / Approve. Works
 // on a paused HITL_2 run or a finished one alike, since it never touches state.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/apply-edits", async (c) => {
+runsRouter.post("/:id/apply-edits", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ApplyEditsBody>()
@@ -1484,13 +1650,13 @@ runsRouter.post("/:id/apply-edits", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/republish — re-push the persisted render + WP metadata to WordPress
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/republish", async (c) => {
+runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<RepublishRunRow[]>`
       SELECT
-        start_mode, wp_pushed_post_id, wp_publish_status, wp_author_id,
+        start_mode, created_by, wp_pushed_post_id, wp_publish_status, wp_author_id,
         wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt
       FROM content_tool.runs
       WHERE run_id = ${runId}
@@ -1619,7 +1785,7 @@ runsRouter.post("/:id/republish", async (c) => {
 // (topic_candidates.promoted_run_id, refresh_evaluations.resulting_run_id) and
 // compliance_log do NOT cascade, so they are cleared explicitly first.
 // ---------------------------------------------------------------------------
-runsRouter.delete("/:id", async (c) => {
+runsRouter.delete("/:id", requireRole("admin"), async (c) => {
   const runId = c.req.param("id");
   const deleted = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<{ run_id: string }[]>`

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { isAuthRoute } from "@/lib/auth-routes";
 import { signOut, useSession } from "@/lib/auth-client";
+import { useRole } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -15,6 +16,9 @@ const NAV = [
   { href: "/voices", label: "Voices" },
   { href: "/prompts", label: "Prompts" },
 ];
+
+// Admin-only nav entries, appended when the operator can manage users.
+const ADMIN_NAV = [{ href: "/admin/users", label: "Users" }];
 
 function isoWeek(d: Date): number {
   const target = new Date(d.valueOf());
@@ -38,6 +42,8 @@ export function Masthead() {
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
+  const { can } = useRole();
+  const navItems = can("manage_users") ? [...NAV, ...ADMIN_NAV] : NAV;
   const [now, setNow] = useState<Date | null>(null);
 
   // Hydration-safe: render dateline client-side only.
@@ -73,7 +79,7 @@ export function Masthead() {
       </div>
       <div className="mx-auto max-w-[1180px] px-5 md:px-10 pb-3 flex items-center justify-between">
         <nav className="flex items-center gap-6 text-[13px]">
-          {NAV.map((n) => {
+          {navItems.map((n) => {
             const active = n.href === "/" ? pathname === "/" : pathname.startsWith(n.href);
             return (
               <Link

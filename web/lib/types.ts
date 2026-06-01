@@ -1,3 +1,21 @@
+// --- Identity + role (UI gating) ------------------------------------------
+// Mirrors the Workers backend GET /me and admin user-management contract.
+// See lib/roles.ts for the rank/capability model.
+
+export type UserRole = "viewer" | "editor" | "admin";
+
+export interface MeResponse {
+  email: string;
+  role: UserRole;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+}
+
 export type RunStatus =
   | "pending" | "fetching" | "strategy" | "hitl_1"
   | "production" | "hitl_2" | "persisted" | "published" | "failed"

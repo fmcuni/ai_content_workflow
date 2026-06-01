@@ -5,7 +5,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
+import { RoleButton } from "@/components/RoleGate";
 import { SectionHead } from "@/components/SectionHead";
 import { GapAnalysisView } from "@/components/GapAnalysisView";
 import { OutlineEditor } from "@/components/OutlineEditor";
@@ -97,13 +97,13 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
               <div className="flex gap-2">
                 {!isCreate && (
                   <>
-                    <Button variant="secondary" size="sm" disabled={isBusy || !atGate} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</Button>
-                    <Button variant="secondary" size="sm" disabled={isBusy || !atGate} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</Button>
+                    <RoleButton need="hitl1_approve" deniedHint="Reviewer role required to override the route." variant="secondary" size="sm" disabled={isBusy || !atGate} onClick={() => overrideRoute.mutate("small_refresh")}>Force small_refresh</RoleButton>
+                    <RoleButton need="hitl1_approve" deniedHint="Reviewer role required to override the route." variant="secondary" size="sm" disabled={isBusy || !atGate} onClick={() => overrideRoute.mutate("full_rewrite")}>Force full_rewrite</RoleButton>
                   </>
                 )}
-                <Button variant="primary" disabled={isBusy || !atGate} onClick={() => approve.mutate()}>
+                <RoleButton need="hitl1_approve" deniedHint="Reviewer role required to approve the outline." variant="primary" disabled={isBusy || !atGate} onClick={() => approve.mutate()}>
                   {approve.isPending ? "Submitting…" : edited ? "Approve with edits ↪" : "Approve ↪"}
-                </Button>
+                </RoleButton>
               </div>
             </>
           )}

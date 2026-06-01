@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api, topicBatchesApi } from "@/lib/api";
+import { useRole } from "@/lib/use-role";
 import type { BatchStatus, RunStatus, RunSummary, TopicBatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -304,6 +305,10 @@ function DeskClear() {
 export default function Home() {
   const queryClient = useQueryClient();
   const [pendingDelete, setPendingDelete] = useState<DeskItem | null>(null);
+  // Deleting runs / topic batches is admin-only (server-authoritative).
+  const { can } = useRole();
+  const canDelete = can("delete_run");
+  const onDelete = canDelete ? setPendingDelete : undefined;
 
   const runsQ = useQuery({
     queryKey: ["runs"],
@@ -348,12 +353,12 @@ export default function Home() {
       ) : (
         <div className="space-y-10">
           {desk.length > 0 ? (
-            <LaneSection title="On your desk" hint="Waiting on you" items={desk} accent onDelete={setPendingDelete} />
+            <LaneSection title="On your desk" hint="Waiting on you" items={desk} accent onDelete={onDelete} />
           ) : (
             <DeskClear />
           )}
-          <LaneSection title="In motion" hint="Running now" items={motion} onDelete={setPendingDelete} />
-          <LaneSection title="Filed" hint="Recently completed" items={filed} onDelete={setPendingDelete} />
+          <LaneSection title="In motion" hint="Running now" items={motion} onDelete={onDelete} />
+          <LaneSection title="Filed" hint="Recently completed" items={filed} onDelete={onDelete} />
         </div>
       );
   }

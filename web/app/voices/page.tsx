@@ -11,8 +11,12 @@ import { PressWorkflow } from "@/components/voices/PressWorkflow";
 import { PromptInspector } from "@/components/voices/PromptInspector";
 import { personasApi, promptsApi } from "@/lib/api";
 import type { GraphMode } from "@/lib/types";
+import { useRole } from "@/lib/use-role";
 
 export default function VoicesPage() {
+  // Creating/editing/archiving personas is admin-only (server-authoritative).
+  const { can } = useRole();
+  const canManage = can("manage_personas");
   const [showArchived, setShowArchived] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [graphMode, setGraphMode] = useState<GraphMode>("refresh");
@@ -56,6 +60,7 @@ export default function VoicesPage() {
             personas={personas.data}
             selectedSlug={activeSlug}
             onSelect={setSelectedSlug}
+            canManage={canManage}
             onNewVoice={() => setComposeMode({ kind: "create" })}
           />
         )}
@@ -77,6 +82,7 @@ export default function VoicesPage() {
           return (
             <StyleCard
               persona={selected}
+              canManage={canManage}
               onEdit={() => setComposeMode({ kind: "edit", slug: selected.slug })}
             />
           );
@@ -95,7 +101,7 @@ export default function VoicesPage() {
         )}
       </section>
 
-      {composeMode && personas.data && (
+      {composeMode && personas.data && canManage && (
         <ComposeDrawer
           mode={
             composeMode.kind === "create"

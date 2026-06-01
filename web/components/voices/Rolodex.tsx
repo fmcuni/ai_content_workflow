@@ -8,9 +8,17 @@ interface RolodexProps {
   selectedSlug: string | null;
   onSelect: (slug: string) => void;
   onNewVoice: () => void;
+  /** When false, the "New voice" tile is hidden (non-admins). */
+  canManage?: boolean;
 }
 
-export function Rolodex({ personas, selectedSlug, onSelect, onNewVoice }: RolodexProps) {
+export function Rolodex({
+  personas,
+  selectedSlug,
+  onSelect,
+  onNewVoice,
+  canManage = true,
+}: RolodexProps) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {personas.map((p) => {
@@ -43,19 +51,21 @@ export function Rolodex({ personas, selectedSlug, onSelect, onNewVoice }: Rolode
           </button>
         );
       })}
-      <button
-        type="button"
-        onClick={onNewVoice}
-        className="shrink-0 w-[200px] px-4 py-3 border border-dashed border-rule text-ink-faint hover:text-ink hover:border-ink-soft transition-colors text-left"
-      >
-        <p
-          className="font-display text-[20px] leading-tight"
-          style={{ fontVariationSettings: '"opsz" 36, "SOFT" 70' }}
+      {canManage && (
+        <button
+          type="button"
+          onClick={onNewVoice}
+          className="shrink-0 w-[200px] px-4 py-3 border border-dashed border-rule text-ink-faint hover:text-ink hover:border-ink-soft transition-colors text-left"
         >
-          ＋ New voice
-        </p>
-        <p className="mt-1 font-mono text-[10px] tracking-wider uppercase">draft a new voice</p>
-      </button>
+          <p
+            className="font-display text-[20px] leading-tight"
+            style={{ fontVariationSettings: '"opsz" 36, "SOFT" 70' }}
+          >
+            ＋ New voice
+          </p>
+          <p className="mt-1 font-mono text-[10px] tracking-wider uppercase">draft a new voice</p>
+        </button>
+      )}
     </div>
   );
 }

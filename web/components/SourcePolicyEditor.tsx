@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { RoleButton } from "@/components/RoleGate";
 import { Input } from "@/components/ui/input";
+import { useRole } from "@/lib/use-role";
 import { sourcePolicyApi } from "@/lib/api";
 import type { SourcePolicyDoc } from "@/lib/types";
 
@@ -120,6 +122,10 @@ export function SourcePolicyEditor() {
   const [sha, setSha] = useState<string | null>(null);
   const [rendered, setRendered] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Editing source policy is admin-only (server-authoritative).
+  const { can } = useRole();
+  const canEditPolicy = can("edit_source_policy");
 
   // Seed local state from the server once (and after a save/revert reload).
   useEffect(() => {
@@ -251,9 +257,14 @@ export function SourcePolicyEditor() {
         />
 
         <div className="flex items-center gap-3 mt-6">
-          <Button onClick={() => saveMut.mutate()} disabled={!isDirty || saveMut.isPending}>
+          <RoleButton
+            need="edit_source_policy"
+            deniedHint="Admin role required to edit the source policy."
+            onClick={() => saveMut.mutate()}
+            disabled={!isDirty || saveMut.isPending}
+          >
             {saveMut.isPending ? "Saving…" : "Save policy"}
-          </Button>
+          </RoleButton>
           {isDirty && (
             <Button
               variant="ghost"
@@ -295,7 +306,8 @@ export function SourcePolicyEditor() {
                 </span>
                 <button
                   type="button"
-                  disabled={revertMut.isPending}
+                  disabled={revertMut.isPending || !canEditPolicy}
+                  title={!canEditPolicy ? "Admin role required to revert the source policy." : undefined}
                   onClick={() => revertMut.mutate(v.version_id)}
                   className="font-sans text-[12px] font-medium text-accent hover:underline underline-offset-2 whitespace-nowrap disabled:opacity-50"
                 >
