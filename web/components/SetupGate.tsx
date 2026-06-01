@@ -1,10 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { SetupScreen } from "@/components/SetupScreen";
+import { isAuthRoute } from "@/lib/auth-routes";
 import { setupApi } from "@/lib/api";
 
 // The packaged desktop backend is a PyInstaller binary: cold boot (unpack +
@@ -26,9 +28,15 @@ const RECONNECT_POLL_MS = 3_000;
  * successful save flips this gate into the app without a reload.
  */
 export function SetupGate({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const onAuthRoute = isAuthRoute(pathname);
+
   const statusQuery = useQuery({
     queryKey: ["setup-status"],
     queryFn: () => setupApi.status(),
+    // Auth pages (login/signup/verify) render before a session exists, and
+    // /setup/status is now auth-gated — skip the check there.
+    enabled: !onAuthRoute,
     retry: BOOT_RETRY_COUNT,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, RETRY_DELAY_CAP_MS),
     // Self-heal: keep polling while unreachable so the gate recovers without a
@@ -36,6 +44,9 @@ export function SetupGate({ children }: { children: ReactNode }) {
     refetchInterval: (query) => (query.state.status === "error" ? RECONNECT_POLL_MS : false),
     staleTime: Infinity,
   });
+
+  // Auth routes render their own centered layout — bypass the gate entirely.
+  if (onAuthRoute) return <>{children}</>;
 
   if (statusQuery.isPending) {
     return (

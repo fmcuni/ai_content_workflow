@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { isAuthRoute } from "@/lib/auth-routes";
+import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -34,6 +36,8 @@ function dateline(d: Date): string {
 
 export function Masthead() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { data: session } = useSession();
   const [now, setNow] = useState<Date | null>(null);
 
   // Hydration-safe: render dateline client-side only.
@@ -43,6 +47,15 @@ export function Masthead() {
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
   }, []);
+
+  // No masthead chrome on the auth pages.
+  if (isAuthRoute(pathname)) return null;
+
+  async function onSignOut() {
+    await signOut();
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <header className="bg-paper/85 backdrop-blur-md sticky top-0 z-50">
@@ -82,9 +95,25 @@ export function Masthead() {
             );
           })}
         </nav>
-        <Link href="/runs/new">
-          <Button variant="primary" size="sm">+ New run</Button>
-        </Link>
+        <div className="flex items-center gap-4">
+          {session?.user ? (
+            <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-ink-faint">
+              <span className="truncate max-w-[180px]" title={session.user.email}>
+                {session.user.email}
+              </span>
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="uppercase tracking-wider hover:text-ink transition-colors"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : null}
+          <Link href="/runs/new">
+            <Button variant="primary" size="sm">+ New run</Button>
+          </Link>
+        </div>
       </div>
     </header>
   );

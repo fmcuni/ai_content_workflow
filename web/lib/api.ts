@@ -26,6 +26,8 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const r = await fetch(path, {
     ...init,
+    // Carry the better-auth session cookie (same-origin via the /api proxy).
+    credentials: "include",
     headers: {
       "content-type": "application/json",
       ...extra,
@@ -49,6 +51,7 @@ export const setupApi = {
   configure: async (body: SetupRequest): Promise<SetupConfigureResult> => {
     const r = await fetch("/api/setup", {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });

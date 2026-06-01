@@ -2,6 +2,7 @@
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { useEffect, useRef, useState } from "react";
 
+import { withSseTicket } from "./sse-ticket";
 import type { SseEvent } from "./types";
 
 // Next.js rewrites (`next.config.mjs` → `/api/...`) buffer the entire response
@@ -16,23 +17,35 @@ export function useRunEvents(runId: string | null) {
 
   useEffect(() => {
     if (!runId) return;
-    ctrl.current = new AbortController();
-    fetchEventSource(`${API_BASE}/runs/${runId}/events`, {
-      signal: ctrl.current.signal,
-      onmessage(ev) {
-        try {
-          const parsed: SseEvent = JSON.parse(ev.data);
-          setEvents((prev) => [...prev, parsed]);
-        } catch {
-          // ignore malformed events
-        }
-      },
-      onerror(err) {
-        console.warn("SSE error", err);
-        throw err; // back off and retry
-      },
-    });
-    return () => ctrl.current?.abort();
+    const ctl = new AbortController();
+    ctrl.current = ctl;
+    let cancelled = false;
+
+    void (async () => {
+      // Authenticate the cross-origin SSE with a short-lived ticket.
+      const url = await withSseTicket(`${API_BASE}/runs/${runId}/events`);
+      if (cancelled) return;
+      fetchEventSource(url, {
+        signal: ctl.signal,
+        onmessage(ev) {
+          try {
+            const parsed: SseEvent = JSON.parse(ev.data);
+            setEvents((prev) => [...prev, parsed]);
+          } catch {
+            // ignore malformed events
+          }
+        },
+        onerror(err) {
+          console.warn("SSE error", err);
+          throw err; // back off and retry
+        },
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      ctl.abort();
+    };
   }, [runId]);
 
   return events;

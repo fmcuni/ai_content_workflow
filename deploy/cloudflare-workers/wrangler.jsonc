@@ -82,13 +82,23 @@
 			]
 		}
 	],
-	// Non-secret. POSTGRES_URL and GEMINI_API_KEY are set via `wrangler secret put`.
+	// Non-secret. Secrets set via `wrangler secret put`:
+	//   POSTGRES_URL, GEMINI_API_KEY, AUTH_SECRET, RESEND_API_KEY.
 	"vars": {
 		"GEMINI_MODEL": "gemini-3.1-pro-preview",
 		// SSE CORS allow-origin: the deployed frontend Worker (browser-direct SSE to
 		// /runs/:id/events and /topic-batches/:id/events). REST goes via Next rewrites
-		// (server-side, no CORS). See src/http/cors.ts.
-		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev"
+		// (server-side, no CORS). Also better-auth baseURL/trustedOrigins. See
+		// src/http/cors.ts and src/auth/auth.ts.
+		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev",
+		// Auth (better-auth). From header for Resend verification/reset email.
+		// TEST PHASE: Resend's no-DNS sender (delivers only to the Resend account
+		// owner's own email). Switch to "noreply@bowtie.com.hk" once that domain is
+		// DNS-verified in Resend.
+		"RESEND_FROM": "Bowtie Content Desk <onboarding@resend.dev>",
+		// Email-domain allowlist for self-serve sign-up. Comma-separated to add more
+		// (e.g. "bowtie.com.hk,bowtie.com.sg") without a code deploy.
+		"ALLOWED_EMAIL_DOMAINS": "bowtie.com.hk"
 	},
 	"hyperdrive": [
 		{

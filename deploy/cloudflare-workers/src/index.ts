@@ -11,6 +11,9 @@ import { runsRouter } from "./routes/runs";
 import { topicBatchesRouter } from "./routes/topic_batches";
 import { complianceRouter } from "./routes/compliance";
 import { refreshRouter } from "./routes/refresh";
+import { getAuth } from "./auth/auth";
+import { requireAuth, type AuthVars } from "./auth/middleware";
+import { mintTicket } from "./auth/ticket";
 
 export { ProductionWorkflow } from "./workflows/production";
 export { TopicExpansionWorkflow } from "./workflows/topic_expansion";
@@ -44,6 +47,17 @@ export interface Env {
   // streams cross-origin (the OpenNext frontend Worker). Unset → reflect the
   // request Origin (local dev). See src/http/cors.ts.
   FRONTEND_ORIGIN?: string;
+  // --- Auth (better-auth) ---
+  // Secret — signs sessions + SSE tickets. `wrangler secret put AUTH_SECRET`.
+  AUTH_SECRET?: string;
+  // Secret — Resend API key for verification / password-reset emails.
+  RESEND_API_KEY?: string;
+  // Var — From header for Resend (e.g. "Bowtie Content Desk <noreply@bowtie.com.hk>").
+  RESEND_FROM?: string;
+  // Var — comma-separated email-domain allowlist for sign-up (default bowtie.com.hk).
+  ALLOWED_EMAIL_DOMAINS?: string;
+  // Var — set "true" to bypass the auth gate for local dev (Python backend).
+  AUTH_DISABLED?: string;
   // WordPress connection — read by /setup/status. Optional: set per environment
   // via `wrangler secret put` (credentials) / vars (non-secret). May be unset.
   WP_BASE_URL?: string;
@@ -52,9 +66,34 @@ export interface Env {
   WP_APP_PASSWORD?: string;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// --- Auth (better-auth) ----------------------------------------------------
+// Mounted at a PATH-PRESERVING /api/auth/* — the frontend rewrite keeps the
+// `/api` prefix (unlike the bare-path REST rewrites), so the session cookie is
+// same-origin on the web domain. Registered before requireAuth so it stays
+// public. See src/auth/auth.ts.
+app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+  const { auth, sql } = getAuth(c.env);
+  try {
+    return await auth.handler(c.req.raw);
+  } finally {
+    c.executionCtx.waitUntil(sql.end().catch(() => undefined));
+  }
+});
+
+// Gate everything below: REST via the session cookie, SSE via `?ticket`.
+// /health, /api/auth/* (and OPTIONS preflight) are exempted inside requireAuth.
+app.use("*", requireAuth);
+
+// Issue a short-lived SSE ticket to the authenticated user (cookie-protected by
+// requireAuth above). The browser passes it on the cross-origin SSE URL.
+app.get("/api/auth-ticket", async (c) => {
+  const ticket = await mintTicket(c.env, c.get("userId"));
+  return c.json({ ticket });
+});
 
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
 app.get("/db/ping", async (c) => {

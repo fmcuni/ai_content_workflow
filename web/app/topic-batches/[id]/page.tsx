@@ -8,6 +8,7 @@ import { SectionHead } from "@/components/SectionHead";
 import { BatchProgress } from "@/components/topics/BatchProgress";
 import { CandidateGrid } from "@/components/topics/CandidateGrid";
 import { topicBatchesApi } from "@/lib/api";
+import { withSseTicket } from "@/lib/sse-ticket";
 import type { BatchStatus, TopicBatch } from "@/lib/types";
 
 const TERMINAL: ReadonlySet<BatchStatus> = new Set<BatchStatus>(["done", "failed"]);
@@ -40,20 +41,32 @@ export default function TopicBatchDetail({
     const status = batch?.status;
     if (status && TERMINAL.has(status)) return;
     ctrl.current?.abort();
-    ctrl.current = new AbortController();
-    fetchEventSource(topicBatchesApi.eventsUrl(id), {
-      signal: ctrl.current.signal,
-      onmessage() {
-        qc.invalidateQueries({ queryKey: ["topic-batch", id] });
-      },
-      onerror(err) {
-        console.warn("batch SSE error", err);
-        throw err;
-      },
-    }).catch(() => {
-      /* aborted */
-    });
-    return () => ctrl.current?.abort();
+    const ctl = new AbortController();
+    ctrl.current = ctl;
+    let cancelled = false;
+
+    void (async () => {
+      // Authenticate the cross-origin SSE with a short-lived ticket.
+      const url = await withSseTicket(topicBatchesApi.eventsUrl(id));
+      if (cancelled) return;
+      fetchEventSource(url, {
+        signal: ctl.signal,
+        onmessage() {
+          qc.invalidateQueries({ queryKey: ["topic-batch", id] });
+        },
+        onerror(err) {
+          console.warn("batch SSE error", err);
+          throw err;
+        },
+      }).catch(() => {
+        /* aborted */
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      ctl.abort();
+    };
   }, [id, batch?.status, qc]);
 
   return (
