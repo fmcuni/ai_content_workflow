@@ -299,11 +299,6 @@ export interface Hitl2Request {
   wp_publish_at?: string | null;
 }
 
-export interface RegenerateRequest {
-  notes?: string | null;
-  comments?: Hitl2Comment[] | null;
-}
-
 /**
  * Inline AI edit of an article. The agent revises `html_body` per the anchored
  * `comments` and/or overall `notes` and returns the revised HTML — no pipeline

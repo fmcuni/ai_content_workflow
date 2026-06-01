@@ -204,16 +204,6 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
                 >
                   Edit outline & article →
                 </NavLinkButton>
-                {run.status !== "failed" && (
-                  <NavLinkButton
-                    href={`/runs/${runId}/regenerate`}
-                    variant="secondary"
-                    size="lg"
-                    className="w-full mt-3"
-                  >
-                    Regenerate with comments ↺
-                  </NavLinkButton>
-                )}
               </div>
             )}
             {run && !TERMINAL_STATUSES.has(run.status) && run.status !== "hitl_1" && run.status !== "hitl_2" && (
