@@ -336,13 +336,13 @@ class Article(Base):
     topic: Mapped[str | None] = mapped_column(String)
     persona: Mapped[str | None] = mapped_column(String)
     topic_category: Mapped[str | None] = mapped_column(String)
-    first_seen_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    first_seen_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
     last_persisted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     next_scan_due_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     dismissed_until: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     dismissed_by: Mapped[str | None] = mapped_column(String)
     dismissed_reason: Mapped[str | None] = mapped_column(String)
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
 
 
 class RefreshEvaluation(Base):
@@ -352,13 +352,13 @@ class RefreshEvaluation(Base):
         {"schema": "content_tool"},
     )
 
-    evaluation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    evaluation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)  # noqa: E501
     article_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("content_tool.articles.article_id", ondelete="CASCADE"),
         nullable=False,
     )
-    evaluated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    evaluated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))  # noqa: E501
     scanner_version: Mapped[str] = mapped_column(String, nullable=False)
     trigger_source: Mapped[str] = mapped_column(String, nullable=False)
     age_days: Mapped[int] = mapped_column(Integer, nullable=False)
