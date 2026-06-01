@@ -119,6 +119,26 @@ class RegenerateRequest(BaseModel):
     comments: list[Hitl2Comment] | None = None
 
 
+class ApplyEditsRequest(BaseModel):
+    """Inline AI-edit of an article using reviewer feedback.
+
+    Stateless: the agent revises the supplied ``html_body`` per the anchored
+    ``comments`` and/or overall ``notes`` and returns the revised HTML — no new
+    draft / render iteration, no graph resume. The operator reviews the result in
+    the editor, then Saves / Approves through the existing flows.
+    """
+
+    # Bounded so an oversized payload fails fast at the boundary instead of
+    # blowing the Gemini context window with an opaque upstream error.
+    html_body: str = Field(max_length=500_000)
+    comments: list[Hitl2Comment] | None = None
+    notes: str | None = Field(default=None, max_length=10_000)
+
+
+class ApplyEditsResponse(BaseModel):
+    html_body: str
+
+
 class OutlineEditRequest(BaseModel):
     """Post-hoc outline edit for a finished run (no graph resume).
 

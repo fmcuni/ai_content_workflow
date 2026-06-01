@@ -1,4 +1,5 @@
 import type {
+  ApplyEditsRequest, ApplyEditsResponse,
   ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
@@ -112,6 +113,11 @@ export const api = {
       `${BASE}/${runId}/regenerate`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  applyEdits: (runId: string, body: ApplyEditsRequest) =>
+    http<ApplyEditsResponse>(`${BASE}/${runId}/apply-edits`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   dryPublish: (runId: string, body?: DryPublishRequest) =>
     http<DryPublishResponse>(`${BASE}/${runId}/dry-publish`, {
       method: "POST",

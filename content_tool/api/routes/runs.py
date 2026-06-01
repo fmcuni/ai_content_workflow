@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from content_tool.api.schemas import (
+    ApplyEditsRequest,
+    ApplyEditsResponse,
     ArticleEditRequest,
     CreateRunRequest,
     CreateRunResponse,
@@ -799,6 +801,55 @@ async def regenerate_run(
         await session.commit()
 
     return {"ok": True, "iteration": new_iter, "draft_id": str(draft_id)}
+
+
+@router.post("/{run_id}/apply-edits")
+async def apply_edits_run(
+    run_id: UUID,
+    payload: ApplyEditsRequest,
+    request: Request,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> ApplyEditsResponse:
+    """Apply reviewer feedback to the supplied HTML in place and return it.
+
+    Stateless AI edit: the agent revises ``html_body`` per the anchored comments
+    and/or overall notes, returning the revised HTML for the editor to review. No
+    new draft / render is created and nothing is published — that happens through
+    the existing Save / Approve flows. Works on a paused HITL_2 run or a finished
+    one alike, since it never touches run state.
+    """
+    from pydantic import ValidationError
+
+    from content_tool.agents.apply_edits import run_apply_edits
+
+    gemini = getattr(request.app.state, "gemini_client", None)
+    if gemini is None:
+        raise HTTPException(503, "Gemini client not configured")
+
+    if not payload.html_body.strip():
+        raise HTTPException(400, "html_body is required")
+    comments = payload.comments or []
+    has_comment = any(c.body.strip() for c in comments)
+    has_notes = bool((payload.notes or "").strip())
+    if not has_comment and not has_notes:
+        raise HTTPException(400, "no comments or notes provided")
+
+    async with sf() as session:
+        run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one_or_none()
+        if not run:
+            raise HTTPException(404, "run not found")
+        try:
+            revised = await run_apply_edits(
+                session=session,
+                gemini=gemini,
+                run=run,
+                html_body=payload.html_body,
+                comments=comments,
+                notes=payload.notes,
+            )
+        except ValidationError as e:
+            raise HTTPException(502, "AI edit returned a malformed response") from e
+    return ApplyEditsResponse(html_body=revised)
 
 
 @router.get("/{run_id}/audit")
