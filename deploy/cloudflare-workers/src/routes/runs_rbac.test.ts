@@ -6,10 +6,15 @@
  * Three-role model (viewer < editor < admin), NO segregation of duties: an
  * editor may approve and publish their OWN run.
  *
+ * Roles split authoring from publishing: a viewer may edit & save an existing
+ * run's content (outline, article body, apply-edits, snapshots) but CANNOT
+ * create runs, decide HITL gates, or publish.
+ *
  * Coverage:
  *   - requireRole: below-bar → 403, at/above-bar → proceeds
  *   - DELETE /runs/:id (admin gate): editor 403, admin 200
  *   - create / HITL approve / publish require editor; viewer blocked
+ *   - content editing (article/outline/apply-edits/snapshots) admits a viewer
  *   - an editor may approve + publish a run they created (no self-approval bar)
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -300,5 +305,38 @@ describe("requireRole gate (POST /runs/:id/republish → editor)", () => {
     // its own 404. The point is neither the requireRole gate NOR any SoD bar
     // returns 403.
     expect(res.status).not.toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Content editing — viewer capability. A viewer may edit & save an existing
+// run's content; the requireRole("viewer") gate admits them (no 403). The fake
+// DB doesn't model every edit handler's writes, so the handler may reach its
+// own 404/500 — the point is the gate PASSED, never returning 403.
+// ---------------------------------------------------------------------------
+describe("content editing admits a viewer (not 403)", () => {
+  const editRoutes: { label: string; method: string; path: string; body: unknown }[] = [
+    { label: "PUT /:id/article", method: "PUT", path: "/r1/article", body: { html_body: "<p>x</p>" } },
+    { label: "PUT /:id/outline", method: "PUT", path: "/r1/outline", body: { outline: {} } },
+    { label: "POST /:id/apply-edits", method: "POST", path: "/r1/apply-edits", body: { html_body: "<p>x</p>", notes: "n" } },
+    { label: "POST /:id/hitl2-snapshots", method: "POST", path: "/r1/hitl2-snapshots", body: { html_body: "<p>x</p>", trigger: "manual" } },
+  ];
+
+  for (const route of editRoutes) {
+    it(`${route.label} — viewer is past the gate`, async () => {
+      state.userRole = "viewer";
+      state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "someone@b.com" };
+      const res = await req(appWith("viewer@b.com"), route.method, route.path, route.body);
+      expect(res.status).not.toBe(403);
+    });
+  }
+
+  it("still rejects an unauthenticated request (no session identity) with 401", async () => {
+    // No userEmail set on the context → loadRole returns null → 401.
+    state.userRole = "viewer";
+    const app = new Hono<{ Variables: AuthVars }>();
+    app.route("/", runsRouter);
+    const res = await req(app as AuthApp, "PUT", "/r1/article", { html_body: "<p>x</p>" });
+    expect(res.status).toBe(401);
   });
 });

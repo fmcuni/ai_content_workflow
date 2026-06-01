@@ -27,7 +27,7 @@ describe("roleMeetsRequirement", () => {
   });
 
   it("resolves capability names to their minimum role", () => {
-    // editor capabilities (create/edit + approve + publish)
+    // editor capabilities (run lifecycle + approve + publish)
     expect(roleMeetsRequirement("editor", "create_run")).toBe(true);
     expect(roleMeetsRequirement("viewer", "create_run")).toBe(false);
     expect(roleMeetsRequirement("editor", "publish")).toBe(true);
@@ -35,6 +35,20 @@ describe("roleMeetsRequirement", () => {
     // admin capability
     expect(roleMeetsRequirement("admin", "manage_users")).toBe(true);
     expect(roleMeetsRequirement("editor", "manage_users")).toBe(false);
+  });
+
+  it("lets a viewer edit & save an existing run's content (but not publish)", () => {
+    // Content editing is a viewer capability …
+    expect(roleMeetsRequirement("viewer", "edit_outline")).toBe(true);
+    expect(roleMeetsRequirement("viewer", "edit_article")).toBe(true);
+    expect(roleMeetsRequirement("viewer", "apply_edits")).toBe(true);
+    expect(roleMeetsRequirement("viewer", "save_snapshot")).toBe(true);
+    // … while publishing, HITL decisions, run creation, and regenerate are not.
+    expect(roleMeetsRequirement("viewer", "publish")).toBe(false);
+    expect(roleMeetsRequirement("viewer", "hitl2_decide")).toBe(false);
+    expect(roleMeetsRequirement("viewer", "hitl1_approve")).toBe(false);
+    expect(roleMeetsRequirement("viewer", "create_run")).toBe(false);
+    expect(roleMeetsRequirement("viewer", "regenerate")).toBe(false);
   });
 
   it("grants the read capability to every role", () => {

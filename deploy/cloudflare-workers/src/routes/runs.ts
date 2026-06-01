@@ -1355,7 +1355,7 @@ runsRouter.post("/:id/existing-post/refresh", requireRole("editor"), async (c) =
 // ---------------------------------------------------------------------------
 // POST /:id/hitl2-snapshots — persist one autosave / version-history snapshot
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl2-snapshots", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/hitl2-snapshots", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<Hitl2SnapshotBody>()
@@ -1447,7 +1447,7 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/outline — persist a post-hoc outline edit (outlines.human_edits)
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/outline", requireRole("editor"), async (c) => {
+runsRouter.put("/:id/outline", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<OutlineEditBody>().catch(() => ({}) as OutlineEditBody);
 
@@ -1506,7 +1506,7 @@ runsRouter.put("/:id/outline", requireRole("editor"), async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/article — persist body/SEO onto the latest render + WP meta on the run
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/article", requireRole("editor"), async (c) => {
+runsRouter.put("/:id/article", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ArticleEditBody>()
@@ -1605,7 +1605,7 @@ runsRouter.put("/:id/article", requireRole("editor"), async (c) => {
 // created and nothing is published — that happens through Save / Approve. Works
 // on a paused HITL_2 run or a finished one alike, since it never touches state.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/apply-edits", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/apply-edits", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ApplyEditsBody>()
