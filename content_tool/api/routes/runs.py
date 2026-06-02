@@ -44,10 +44,24 @@ from content_tool.wordpress.client import (
     SCHEMA_JSONLD_META_KEY,
     WP_DEFAULT_PAGE_TEMPLATE,
 )
+from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+
+
+async def _active_seo_plugin(state: object) -> SeoPlugin | None:
+    """Resolve the SEO plugin against the live WP target (Fix C).
+
+    Prefers the per-publish ``SeoPluginResolver`` wired up by ``init_runtime``.
+    Falls back to a statically seeded ``app.state.seo_plugin`` so tests that
+    build the app without ``init_runtime`` can still drive the publish payload.
+    """
+    resolver = getattr(state, "seo_plugin_resolver", None)
+    if resolver is not None:
+        return await resolver.resolve()
+    return getattr(state, "seo_plugin", None)
 
 
 def get_session_factory(request: Request):  # noqa: ANN201
@@ -779,7 +793,7 @@ async def republish(
     wp_client = getattr(request.app.state, "wp_client", None)
     if wp_client is None:
         raise HTTPException(503, "WordPress client not configured")
-    seo_plugin = request.app.state.seo_plugin
+    seo_plugin = await _active_seo_plugin(request.app.state)
 
     draft_q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
     async with sf() as session:
@@ -1012,7 +1026,7 @@ async def dry_publish(
     """
     target_base = request.app.state.wp_client.base_url
     target_label = request.app.state.wp_target
-    seo_plugin = request.app.state.seo_plugin
+    seo_plugin = await _active_seo_plugin(request.app.state)
 
     async with sf() as session:
         run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
@@ -1053,10 +1067,7 @@ async def dry_publish(
         else run.wp_featured_media_id
     )
 
-    meta_key = (
-        "_yoast_wpseo_metadesc" if seo_plugin == "yoast"
-        else ("rank_math_description" if seo_plugin == "rankmath" else None)
-    )
+    meta_key = seo_meta_key(seo_plugin)
     meta: dict[str, str] = {meta_key: meta_desc} if meta_key else {}
     # Mirror the actual publish payload: the structured-data graph rides along
     # as out-of-band post meta (consumed by the WP-side schema filter), never

@@ -29,35 +29,29 @@ from content_tool.gemini.client import RealGeminiClient
 from content_tool.observability.logging import configure_logging
 from content_tool.observability.tracing import configure_tracing
 from content_tool.wordpress.client import WordPressClient
-from content_tool.wordpress.seo_plugin import detect_seo_plugin
+from content_tool.wordpress.seo_plugin import SeoPlugin, SeoPluginResolver
 
 logger = logging.getLogger(__name__)
 
 
-async def _resolve_seo_plugin(settings: Settings) -> str | None:
+def _build_seo_resolver(settings: Settings) -> SeoPluginResolver:
+    """Build the per-publish SEO plugin resolver from settings.
+
+    An explicit ``WP_SEO_PLUGIN`` becomes a no-network override; otherwise the
+    resolver detects against the live WP target on demand (cached briefly).
+    """
     configured = settings.wp_seo_plugin.strip().lower()
-    if configured in ("yoast", "rankmath"):
-        return configured  # explicit override; skip network detection
-    if settings.wp_base_url:
-        try:
-            resolved = await detect_seo_plugin(
-                settings.wp_base_url,
-                username=settings.wp_username,
-                app_password=settings.wp_app_password,
-            )
-        except Exception:
-            logger.warning(
-                "SEO plugin detection failed; SEO meta will be skipped on publish",
-                exc_info=True,
-            )
-            return None
-        if resolved is not None:
-            return resolved
-    logger.warning(
-        "No SEO plugin resolved; meta description will NOT be sent on publish. "
-        "Set WP_SEO_PLUGIN=yoast to force it."
+    override: SeoPlugin | None = None
+    if configured == "yoast":
+        override = "yoast"
+    elif configured == "rankmath":
+        override = "rankmath"
+    return SeoPluginResolver(
+        settings.wp_base_url,
+        username=settings.wp_username,
+        app_password=settings.wp_app_password,
+        override=override,
     )
-    return None
 
 
 async def init_runtime(app: FastAPI, settings: Settings) -> None:
@@ -79,7 +73,7 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
         model=settings.gemini_model,
         thinking_level=settings.gemini_thinking_level,
     )
-    seo_plugin = await _resolve_seo_plugin(settings)
+    seo_resolver = _build_seo_resolver(settings)
     wp_client = WordPressClient(
         settings.wp_base_url,
         username=settings.wp_username,
@@ -92,7 +86,7 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
         session_factory=sf,
         gemini=gemini,
         wp_client=wp_client,
-        seo_plugin=seo_plugin,
+        seo_resolver=seo_resolver,
     )
     try:
         await executor.recover_orphaned()
@@ -107,7 +101,7 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
     app.state.wp_client = wp_client
     app.state.wp_options_cache = wp_options_cache
     app.state.gemini_client = gemini
-    app.state.seo_plugin = seo_plugin
+    app.state.seo_plugin_resolver = seo_resolver
     app.state.wp_target = settings.wp_target
     app.state.configured = True
 
