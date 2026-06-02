@@ -25,6 +25,70 @@ import type { GeminiClient, GeminiResult, GenerateOptions } from "./types";
 const TEMPERATURE = 1.0;
 const RESPONSE_MIME_TYPE_JSON = "application/json";
 
+// Gemini occasionally returns an empty / non-JSON HTTP body (safety block,
+// truncated stream, 5xx HTML, dropped connection). The @google/genai SDK then
+// throws the native `SyntaxError: Unexpected end of JSON input`, which used to
+// fail the whole run with that cryptic message. Retry transient cases, and on
+// exhaustion rewrap into an actionable GeminiError.
+export const GEMINI_MAX_ATTEMPTS = 3;
+const GEMINI_BACKOFF_MS = [500, 1500];
+
+export class GeminiError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "GeminiError";
+  }
+}
+
+/** Heuristic: is this error a transient upstream failure worth retrying? */
+export function isTransientGeminiError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  // Empty/truncated JSON body surfaces as a SyntaxError from the SDK's parse.
+  if (err.name === "SyntaxError") return true;
+  const m = err.message.toLowerCase();
+  return (
+    m.includes("unexpected end of json") ||
+    m.includes("fetch failed") ||
+    m.includes("network") ||
+    m.includes("terminated") ||
+    m.includes("connection") ||
+    m.includes("timeout") ||
+    m.includes("econn") ||
+    /\b(429|500|502|503|504)\b/.test(m)
+  );
+}
+
+/**
+ * Run a Gemini SDK call with bounded retries on transient failures. Deterministic
+ * errors (4xx, schema problems) propagate immediately. `backoffMs` is injectable
+ * so tests can run with zero delay.
+ */
+export async function withGeminiRetry<T>(
+  fn: () => Promise<T>,
+  backoffMs: number[] = GEMINI_BACKOFF_MS,
+): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    attempt++;
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      if (!isTransientGeminiError(err)) throw err;
+      if (attempt < GEMINI_MAX_ATTEMPTS) {
+        const ms = backoffMs[attempt - 1] ?? backoffMs[backoffMs.length - 1] ?? 0;
+        if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+        continue;
+      }
+      throw new GeminiError(
+        `Gemini returned an empty/non-JSON response after ${attempt} attempts ` +
+          `(likely a transient upstream error). Underlying: ` +
+          `${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+        { cause: err },
+      );
+    }
+  }
+}
+
 export interface GeminiClientConfig {
   apiKey: string;
   model: string;
@@ -50,25 +114,22 @@ export class RealGeminiClient implements GeminiClient {
 
     const startedAt = Date.now();
 
-    let text: string;
-    let usage: GenerateContentResponseUsageMetadata | undefined;
-    let candidate: Candidate | undefined;
-
-    if (onThought !== undefined) {
-      const streamed = await this.streamCall(agent, userPrompt, config, onThought);
-      text = streamed.text;
-      usage = streamed.usage;
-      candidate = streamed.candidate;
-    } else {
+    const { text, usage, candidate } = await withGeminiRetry(async () => {
+      if (onThought !== undefined) {
+        const streamed = await this.streamCall(agent, userPrompt, config, onThought);
+        return { text: streamed.text, usage: streamed.usage, candidate: streamed.candidate };
+      }
       const response = await this.client.models.generateContent({
         model: this.model,
         contents: userPrompt,
         config,
       });
-      text = response.text ?? "";
-      usage = response.usageMetadata;
-      candidate = response.candidates?.[0];
-    }
+      return {
+        text: response.text ?? "",
+        usage: response.usageMetadata,
+        candidate: response.candidates?.[0],
+      };
+    });
 
     const latencyMs = Date.now() - startedAt;
 
