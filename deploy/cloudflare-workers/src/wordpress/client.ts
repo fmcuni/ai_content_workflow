@@ -16,6 +16,9 @@ export type { FetchedPost, PublishPayload, PublishResult, SeoPlugin, WpCategory,
 
 const SCHEMA_JSONLD_META_KEY = "_bowtie_schema_jsonld";
 const TIMEOUT_MS = 15_000;
+const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_BACKOFF_BASE_MS = 500;
+const READBACK_FIELDS = "id,link,status,slug,modified_gmt";
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -36,12 +39,163 @@ export class WordPressConflictError extends WordPressError {
 }
 
 // ---------------------------------------------------------------------------
+// Resilience types
+// ---------------------------------------------------------------------------
+
+/** Tunable retry/backoff knobs; defaulted so `new WordPressClient(env)` works unchanged. */
+export interface WordPressClientOptions {
+  maxAttempts?: number;
+  backoffBaseMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** A post resolved by the slug read-back gate. */
+export interface ReadbackPost {
+  id: number;
+  link: string;
+  status: string;
+  slug: string;
+  modifiedGmt: string;
+}
+
+/** Discriminated result of `findPostBySlug`. */
+export type ReadbackResult =
+  | { kind: "found"; post: ReadbackPost }
+  | { kind: "not_found" }
+  | { kind: "unknown" };
+
+/**
+ * Outcome of a single publish HTTP attempt, classified on transport outcome +
+ * status + content-type — never on body content (infra strips WP error bodies).
+ */
+type PublishOutcome =
+  | { kind: "success"; result: PublishResult }
+  | { kind: "conflict"; message: string }
+  | { kind: "wp_reject"; message: string }
+  | { kind: "retriable"; message: string };
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Build the Basic Auth header value from username + app password. */
 function buildAuthHeader(username: string, appPassword: string): string {
   return `Basic ${btoa(`${username}:${appPassword}`)}`;
+}
+
+/** Build a diagnosable non-JSON description from status + headers + byte length. */
+function nonJsonDiagnosis(status: number, headers: Headers, bodyLength: number): string {
+  const ctype = headers.get("content-type") ?? "";
+  const xCache = headers.get("x-cache") ?? null;
+  return (
+    `WP REST returned non-JSON response (${status} ${ctype || "no content-type"}, ` +
+    `${bodyLength} bytes, x-cache=${JSON.stringify(xCache)}) — likely a ` +
+    `CloudFront/origin outage.`
+  );
+}
+
+/** True when the response advertises a JSON content-type and has a non-empty body. */
+function isJsonBody(headers: Headers, bodyLength: number): boolean {
+  const ctype = headers.get("content-type") ?? "";
+  return ctype.toLowerCase().startsWith("application/json") && bodyLength > 0;
+}
+
+/** Parse a string as JSON, narrowing failures to null instead of throwing. */
+function tryParseJson(rawText: string): unknown {
+  try {
+    return JSON.parse(rawText) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** Build the public PublishResult shape from a parsed WP post object. */
+function toPublishResult(data: Record<string, unknown>): PublishResult {
+  return {
+    id: data["id"] as number,
+    link: data["link"] as string,
+    status: data["status"] as string,
+    modifiedGmt: data["modified_gmt"] as string,
+    slug: data["slug"] as string,
+  };
+}
+
+/** Re-key a read-back post into the WP `modified_gmt` shape `toPublishResult` expects. */
+function toReadbackData(post: ReadbackPost): Record<string, unknown> {
+  return {
+    id: post.id,
+    link: post.link,
+    status: post.status,
+    modified_gmt: post.modifiedGmt,
+    slug: post.slug,
+  };
+}
+
+/**
+ * Build the immutable publish request body from the payload. The `template`
+ * key is omitted entirely when null (leave existing post template untouched);
+ * `""` forces the WP default theme template.
+ */
+function buildPublishBody(p: PublishPayload): Readonly<Record<string, unknown>> {
+  const base: Record<string, unknown> = {
+    title: p.title,
+    content: p.content,
+    status: p.status,
+    categories: p.categories,
+    tags: p.tags,
+    meta: p.meta,
+  };
+  return {
+    ...base,
+    ...(p.template !== null ? { template: p.template } : {}),
+    ...(p.excerpt !== null ? { excerpt: p.excerpt } : {}),
+    ...(p.slug !== null ? { slug: p.slug } : {}),
+    ...(p.author !== null ? { author: p.author } : {}),
+    ...(p.featuredMedia !== null ? { featured_media: p.featuredMedia } : {}),
+    ...(p.dateGmt !== null ? { date_gmt: stripTzSuffix(p.dateGmt) } : {}),
+  };
+}
+
+/**
+ * Classify a publish HTTP response per the spec's outcome table. Decisions use
+ * only transport outcome + status + content-type — never body content, because
+ * the infra layer strips WP's own JSON error bodies on failure.
+ *
+ * - SUCCESS:   2xx + JSON content-type + parseable JSON body
+ * - CONFLICT:  HTTP 412 (genuine optimistic-lock conflict) — no retry
+ * - WP_REJECT: 4xx (not 412) with a parseable JSON body (deterministic) — no retry
+ * - RETRIABLE: transport/5xx/412-excluded, OR any non-JSON / unparseable body
+ *              at any status (an infra block, which is transient)
+ */
+function classifyResponse(status: number, headers: Headers, rawText: string): PublishOutcome {
+  if (status === 412) {
+    return { kind: "conflict", message: rawText.slice(0, 500) || "412 conflict" };
+  }
+
+  // Any non-JSON / empty body ⇒ infra block ⇒ RETRIABLE, regardless of status.
+  if (!isJsonBody(headers, rawText.length)) {
+    return { kind: "retriable", message: nonJsonDiagnosis(status, headers, rawText.length) };
+  }
+
+  const parsed = tryParseJson(rawText);
+  if (parsed === null || typeof parsed !== "object") {
+    // Claimed application/json but truncated/unparseable ⇒ treat as infra block.
+    return { kind: "retriable", message: nonJsonDiagnosis(status, headers, rawText.length) };
+  }
+
+  const data = parsed as Record<string, unknown>;
+
+  if (status >= 200 && status < 300) {
+    return { kind: "success", result: toPublishResult(data) };
+  }
+
+  if (status >= 400 && status < 500) {
+    const wpMessage = typeof data["message"] === "string" ? data["message"] : rawText.slice(0, 500);
+    return { kind: "wp_reject", message: `${status}: ${wpMessage}` };
+  }
+
+  // 5xx or 3xx with a JSON body — still transient.
+  return { kind: "retriable", message: `${status}: ${rawText.slice(0, 500)}` };
 }
 
 /**
@@ -119,8 +273,11 @@ export class WordPressClient {
   private readonly baseUrl: string;
   private readonly username: string;
   private readonly appPassword: string;
+  private readonly maxAttempts: number;
+  private readonly backoffBaseMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(env: Env) {
+  constructor(env: Env, opts?: WordPressClientOptions) {
     if (!env.WP_BASE_URL) throw new Error("WP_BASE_URL is required");
     if (!env.WP_USERNAME) throw new Error("WP_USERNAME is required");
     if (!env.WP_APP_PASSWORD) throw new Error("WP_APP_PASSWORD is required");
@@ -128,6 +285,9 @@ export class WordPressClient {
     this.baseUrl = env.WP_BASE_URL.replace(/\/$/, "");
     this.username = env.WP_USERNAME;
     this.appPassword = env.WP_APP_PASSWORD;
+    this.maxAttempts = opts?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.backoffBaseMs = opts?.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
+    this.sleep = opts?.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   }
 
   // -------------------------------------------------------------------------
@@ -135,6 +295,77 @@ export class WordPressClient {
   // -------------------------------------------------------------------------
 
   async upsert(p: PublishPayload): Promise<PublishResult> {
+    const isCreate = p.postId === null;
+    let lastFailure = "no attempt was made";
+
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      const outcome = await this.attemptPublish(p);
+
+      if (outcome.kind === "success") return outcome.result;
+      if (outcome.kind === "conflict") throw new WordPressConflictError(outcome.message);
+      if (outcome.kind === "wp_reject") throw new WordPressError(outcome.message);
+
+      // outcome.kind === "retriable"
+      lastFailure = outcome.message;
+      const isFinalAttempt = attempt >= this.maxAttempts;
+
+      if (isCreate) {
+        // POST is NOT idempotent — gate every retry behind a slug read-back so a
+        // blocked-but-landed create never double-publishes.
+        const gated = await this.gateCreateRetry(p, outcome.message);
+        if (gated.kind === "found") return toPublishResult(toReadbackData(gated.post));
+        if (gated.kind === "stop") throw new WordPressError(gated.message);
+        // gated.kind === "retry" → fall through to next POST attempt
+      }
+
+      if (isFinalAttempt) {
+        throw new WordPressError(
+          `WP publish failed after ${this.maxAttempts} attempts: ${lastFailure}`,
+        );
+      }
+      await this.sleep(this.backoffBaseMs * 2 ** (attempt - 1));
+    }
+
+    // Unreachable: the loop either returns or throws. Defensive throw for the type checker.
+    throw new WordPressError(`WP publish failed: ${lastFailure}`);
+  }
+
+  /**
+   * Decide whether a create (POST) may be retried after a retriable outcome.
+   * - FOUND   → the create already landed (response was blocked); return it.
+   * - retry   → proven absent → safe to POST again.
+   * - stop    → cannot prove absence (no slug / inconclusive read-back) → fail loudly.
+   */
+  private async gateCreateRetry(
+    p: PublishPayload,
+    failure: string,
+  ): Promise<
+    { kind: "found"; post: ReadbackPost } | { kind: "retry" } | { kind: "stop"; message: string }
+  > {
+    if (p.slug === null || p.slug === "") {
+      return {
+        kind: "stop",
+        message:
+          `WP create failed and could not be retried: read-back was impossible ` +
+          `because no slug was supplied (cannot prove a duplicate was not created). ` +
+          `Last failure: ${failure}`,
+      };
+    }
+
+    const readback = await this.findPostBySlug(p.slug);
+    if (readback.kind === "found") return { kind: "found", post: readback.post };
+    if (readback.kind === "not_found") return { kind: "retry" };
+    // kind === "unknown"
+    return {
+      kind: "stop",
+      message:
+        `WP create failed and the slug read-back was inconclusive (read-back blocked); ` +
+        `not retrying to avoid a duplicate post. Last failure: ${failure}`,
+    };
+  }
+
+  /** Issue one publish request and classify its outcome (no retries here). */
+  private async attemptPublish(p: PublishPayload): Promise<PublishOutcome> {
     const headers: Record<string, string> = {
       Authorization: buildAuthHeader(this.username, this.appPassword),
       "Content-Type": "application/json",
@@ -143,28 +374,7 @@ export class WordPressClient {
       headers["If-Unmodified-Since"] = p.ifUnmodifiedSince;
     }
 
-    const body: Record<string, unknown> = {
-      title: p.title,
-      content: p.content,
-      status: p.status,
-      categories: p.categories,
-      tags: p.tags,
-      meta: p.meta,
-      // Always send template: "" forces WP default; null is guarded below.
-      template: p.template,
-    };
-
-    // Remove template key entirely when caller passes null (leave existing untouched).
-    if (p.template === null) {
-      delete body["template"];
-    }
-
-    if (p.excerpt !== null) body["excerpt"] = p.excerpt;
-    if (p.slug !== null) body["slug"] = p.slug;
-    if (p.author !== null) body["author"] = p.author;
-    if (p.featuredMedia !== null) body["featured_media"] = p.featuredMedia;
-    if (p.dateGmt !== null) body["date_gmt"] = stripTzSuffix(p.dateGmt);
-
+    const body = buildPublishBody(p);
     const url =
       p.postId !== null
         ? `${this.baseUrl}/wp-json/wp/v2/posts/${p.postId}`
@@ -182,40 +392,69 @@ export class WordPressClient {
         signal: controller.signal,
       });
     } catch (err: unknown) {
-      throw new WordPressError(
-        `transport_error: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // transport error / timeout / abort → RETRIABLE
+      return {
+        kind: "retriable",
+        message: `transport_error: ${err instanceof Error ? err.message : String(err)}`,
+      };
     } finally {
       clearTimeout(timer);
     }
 
-    if (resp.status === 412) {
-      throw new WordPressConflictError(await resp.text());
-    }
-    if (!resp.ok) {
-      const snippet = await resp.text();
-      throw new WordPressError(`${resp.status}: ${snippet.slice(0, 500)}`);
-    }
-
-    // CloudFront/WAF guard: 2xx with non-JSON body
     const rawText = await resp.text();
-    const ctype = resp.headers.get("content-type") ?? "";
-    if (!ctype.toLowerCase().startsWith("application/json") || rawText.length === 0) {
-      const xCache = resp.headers.get("x-cache") ?? null;
-      throw new WordPressError(
-        `WP REST returned non-JSON response (${resp.status} ${ctype || "no content-type"}, ` +
-          `${rawText.length} bytes, x-cache=${JSON.stringify(xCache)}) — likely a ` +
-          `CloudFront/origin outage.`,
-      );
+    return classifyResponse(resp.status, resp.headers, rawText);
+  }
+
+  // -------------------------------------------------------------------------
+  // findPostBySlug — read-back gate
+  // -------------------------------------------------------------------------
+
+  /**
+   * Authenticated slug read-back used to gate create retries.
+   * Queries GET /wp/v2/posts?slug=<slug>&status=any&_fields=... so non-published
+   * (e.g. draft) creates are visible. A non-JSON / transport-failed read-back
+   * maps to `{ kind: "unknown" }` and never throws out of the gate.
+   */
+  async findPostBySlug(slug: string): Promise<ReadbackResult> {
+    const params = new URLSearchParams({
+      slug,
+      status: "any",
+      _fields: READBACK_FIELDS,
+    });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await fetch(`${this.baseUrl}/wp-json/wp/v2/posts?${params.toString()}`, {
+        headers: { Authorization: buildAuthHeader(this.username, this.appPassword) },
+        signal: controller.signal,
+      });
+    } catch {
+      return { kind: "unknown" };
+    } finally {
+      clearTimeout(timer);
     }
 
-    const data = JSON.parse(rawText) as Record<string, unknown>;
+    const rawText = await resp.text();
+    if (!resp.ok || !isJsonBody(resp.headers, rawText.length)) {
+      return { kind: "unknown" };
+    }
+
+    const parsed = tryParseJson(rawText);
+    if (!Array.isArray(parsed)) return { kind: "unknown" };
+    if (parsed.length === 0) return { kind: "not_found" };
+
+    const first = parsed[0] as Record<string, unknown>;
     return {
-      id: data["id"] as number,
-      link: data["link"] as string,
-      status: data["status"] as string,
-      modifiedGmt: data["modified_gmt"] as string,
-      slug: data["slug"] as string,
+      kind: "found",
+      post: {
+        id: first["id"] as number,
+        link: first["link"] as string,
+        status: first["status"] as string,
+        slug: first["slug"] as string,
+        modifiedGmt: first["modified_gmt"] as string,
+      },
     };
   }
 
