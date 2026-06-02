@@ -40,6 +40,50 @@ export class GeminiError extends Error {
   }
 }
 
+function earlyStopMessage(agent: string, finishReason: string | null): string {
+  return (
+    `${agent}: Gemini stopped early (finishReason=${finishReason}) and returned ` +
+    `incomplete JSON — output was truncated or blocked, so no valid structured ` +
+    `response is available.`
+  );
+}
+
+/**
+ * Parse a structured-output reply, attributing failures to `agent`.
+ *
+ * Parse-first: a valid body always succeeds (no false positives). On failure,
+ * a `finishReason` other than `STOP`/`null` means Gemini stopped early —
+ * `MAX_TOKENS` truncation (long article) or a SAFETY/RECITATION block — so the
+ * body is incomplete/empty JSON. Surface that explicitly rather than the cryptic
+ * "not valid JSON" message, as a (non-transient) GeminiError so it is never
+ * retried — re-running the same prompt just truncates again.
+ */
+export function parseStructuredResponse(
+  agent: string,
+  text: string,
+  finishReason: string | null,
+): Record<string, unknown> {
+  const abnormal = finishReason !== null && finishReason !== "STOP";
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = parseGeminiJson(text);
+  } catch (err: unknown) {
+    if (abnormal) {
+      throw new GeminiError(earlyStopMessage(agent, finishReason), { cause: err });
+    }
+    throw new GeminiError(`${agent}: ${err instanceof Error ? err.message : String(err)}`, {
+      cause: err,
+    });
+  }
+  // parseGeminiJson returns {} for an empty/whitespace body; under an abnormal
+  // finish that empty body is a block/truncation (e.g. SAFETY returns no text),
+  // not a valid empty object — surface it as such.
+  if (abnormal && Object.keys(parsed).length === 0) {
+    throw new GeminiError(earlyStopMessage(agent, finishReason));
+  }
+  return parsed;
+}
+
 /** Heuristic: is this error a transient upstream failure worth retrying? */
 export function isTransientGeminiError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -132,12 +176,16 @@ export class RealGeminiClient implements GeminiClient {
     });
 
     const latencyMs = Date.now() - startedAt;
+    const finishReason = candidate?.finishReason ?? null;
 
     // Only parse JSON when the caller actually requested structured output.
     // A null schema means a plain-text reply is expected (e.g. the setup
     // credential check), so forcing JSON parsing there would reject a valid
     // response (commit 563c524). `parsed` stays `{}` in that case.
-    const parsed = responseSchema !== null ? parseGeminiJson(text) : {};
+    // parseStructuredResponse detects MAX_TOKENS truncation / SAFETY blocks and
+    // attributes failures to the agent instead of a cryptic parse error.
+    const parsed =
+      responseSchema !== null ? parseStructuredResponse(agent, text, finishReason) : {};
 
     return {
       parsed,
@@ -147,7 +195,7 @@ export class RealGeminiClient implements GeminiClient {
       thinkingTokens: usage?.thoughtsTokenCount ?? 0,
       latencyMs,
       groundingChunks: extractGroundingChunks(candidate),
-      finishReason: candidate?.finishReason ?? null,
+      finishReason,
     };
   }
 

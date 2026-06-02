@@ -168,6 +168,42 @@ def parse_gemini_json(text: str) -> dict[str, Any]:
     )
 
 
+def parse_structured_response(
+    agent: str, text: str, finish_reason: str | None
+) -> dict[str, Any]:
+    """Parse a structured-output reply, attributing failures to ``agent``.
+
+    Parse-first: a valid body always succeeds (no false positives). On failure,
+    a ``finish_reason`` other than ``STOP``/``None`` means Gemini stopped early —
+    ``MAX_TOKENS`` truncation (long article) or a SAFETY/RECITATION block — so the
+    body is incomplete/empty JSON. Surface that explicitly rather than the
+    misleading bare "not valid JSON" message, and as a (non-transient)
+    ``GeminiError`` so it is never retried — re-running with the same prompt just
+    truncates again.
+    """
+    abnormal = finish_reason not in (None, "STOP")
+    try:
+        parsed = parse_gemini_json(text)
+    except ValueError as err:
+        if abnormal:
+            raise GeminiError(_early_stop_message(agent, finish_reason)) from err
+        raise GeminiError(f"{agent}: {err}") from err
+    # parse_gemini_json returns {} for an empty/whitespace body; under an
+    # abnormal finish that empty body is a block/truncation (e.g. SAFETY returns
+    # no text), not a valid empty object — surface it as such.
+    if abnormal and not parsed:
+        raise GeminiError(_early_stop_message(agent, finish_reason))
+    return parsed
+
+
+def _early_stop_message(agent: str, finish_reason: str | None) -> str:
+    return (
+        f"{agent}: Gemini stopped early (finish_reason={finish_reason}) and returned "
+        f"incomplete JSON — output was truncated or blocked, so no valid structured "
+        f"response is available."
+    )
+
+
 class RealGeminiClient:
     def __init__(self, api_key: str, model: str, thinking_level: str) -> None:
         self._client = genai.Client(api_key=api_key)
@@ -233,12 +269,21 @@ class RealGeminiClient:
 
         text, usage, candidate = await with_gemini_retry(_call_once)
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        finish_reason = (
+            candidate.finish_reason.name if candidate and candidate.finish_reason else None
+        )
 
         # Only parse JSON when the caller actually requested structured output.
         # A None schema means a plain-text reply is expected (e.g. the setup
         # credential check), so forcing JSON parsing there would reject a valid
-        # response. ``parsed`` stays ``{}`` in that case.
-        parsed = parse_gemini_json(text) if response_schema is not None else {}
+        # response. ``parsed`` stays ``{}`` in that case. parse_structured_response
+        # detects MAX_TOKENS truncation / SAFETY blocks and attributes failures to
+        # the agent instead of raising a cryptic, un-attributed parse error.
+        parsed = (
+            parse_structured_response(agent, text, finish_reason)
+            if response_schema is not None
+            else {}
+        )
         grounding = None
         if candidate and candidate.grounding_metadata:
             grounding = [c.model_dump() for c in (candidate.grounding_metadata.grounding_chunks or [])]  # noqa: E501
@@ -251,7 +296,7 @@ class RealGeminiClient:
             thinking_tokens=usage.thoughts_token_count if usage and hasattr(usage, "thoughts_token_count") else 0,  # noqa: E501
             latency_ms=elapsed_ms,
             grounding_chunks=grounding,
-            finish_reason=candidate.finish_reason.name if candidate and candidate.finish_reason else None,  # noqa: E501
+            finish_reason=finish_reason,
         )
 
     async def _stream_call(
