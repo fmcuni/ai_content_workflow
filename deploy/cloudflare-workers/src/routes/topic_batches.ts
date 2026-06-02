@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
+import { getEventLogs, parseLogQuery } from "../db/event-log";
 import { pgJson, pgTimestampToIso, toJsonb } from "../db/serialize";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 
@@ -460,6 +461,24 @@ topicBatchesRouter.options("/:id/events", (c) =>
 );
 
 // ---------------------------------------------------------------------------
+// GET /:id/logs — verbose persisted per-step event log for this topic batch.
+// Same contract as /runs/:id/logs: ordered seq ASC, since_seq/limit/level.
+// ---------------------------------------------------------------------------
+topicBatchesRouter.get("/:id/logs", async (c) => {
+  const batchId = c.req.param("id");
+  const query = parseLogQuery(new URL(c.req.url).searchParams);
+  const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
+    getEventLogs(sql, batchId, query),
+  );
+  const origin = resolveCorsOrigin(c.req.header("origin") ?? null, c.env.FRONTEND_ORIGIN);
+  return c.json(rows, 200, { "access-control-allow-origin": origin, vary: "Origin" });
+});
+
+topicBatchesRouter.options("/:id/logs", (c) =>
+  corsPreflight(resolveCorsOrigin(c.req.header("origin") ?? null, c.env.FRONTEND_ORIGIN)),
+);
+
+// ---------------------------------------------------------------------------
 // PATCH /:id/candidates/:cid — partial update
 // ---------------------------------------------------------------------------
 topicBatchesRouter.patch("/:id/candidates/:cid", async (c) => {
@@ -854,6 +873,9 @@ topicBatchesRouter.delete("/:id", async (c) => {
         WHERE batch_id = ${batchId}
       )
     `;
+    // Verbose event log has no FK to topic_batches (stream_id is run_id OR
+    // batch_id), so clean it up explicitly before the batch row goes.
+    await sql`DELETE FROM content_tool.run_event_logs WHERE stream_id = ${batchId}`;
     await sql`
       DELETE FROM content_tool.topic_batches WHERE batch_id = ${batchId}
     `;

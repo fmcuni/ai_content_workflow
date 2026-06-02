@@ -118,6 +118,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     // --- 2. topic_gen ------------------------------------------------------
     await this.statusStep(step, "status-generating", batchId, "generating");
+    await this.emitStep(step, "emit-topic-gen-start", batchId, "topic_gen.start", {});
     const generated: GeneratedTopic[] = await step.do("topic-gen", async () =>
       this.withSql<GeneratedTopic[]>(async (sql) => {
         const gemini = this.geminiClient();
@@ -140,6 +141,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     // --- 3. fan_out: persist one candidate row per generated topic --------
     await this.statusStep(step, "status-analysing", batchId, "analysing");
+    await this.emitStep(step, "emit-fan-out-start", batchId, "fan_out.start", {});
     const candidateIds: string[] = await step.do("fan-out", async () =>
       this.withSql<string[]>(async (sql) => {
         const ids: string[] = [];
@@ -161,10 +163,14 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
         return ids;
       }),
     );
+    await this.emitStep(step, "emit-fan-out-done", batchId, "fan_out.done", {
+      count: candidateIds.length,
+    });
 
     // --- 4. analyse_candidate (dedup + hot) with bounded concurrency ------
     // Each candidate is its own durable step; chunks run concurrently up to
     // CONCURRENCY_CAP via Promise.all (mirrors the Python asyncio.Semaphore).
+    await this.emitStep(step, "emit-analyse-start", batchId, "analyse_candidate.start", {});
     for (let i = 0; i < candidateIds.length; i += CONCURRENCY_CAP) {
       const chunk = candidateIds.slice(i, i + CONCURRENCY_CAP);
       await Promise.all(
@@ -178,6 +184,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
     });
 
     // --- 5. aggregate ------------------------------------------------------
+    await this.emitStep(step, "emit-aggregate-start", batchId, "aggregate.start", {});
     const finalStatus = await step.do("aggregate", async () =>
       this.withSql<string>(async (sql) => {
         const rows = await sql<Array<{ total: number; errored: number }>>`

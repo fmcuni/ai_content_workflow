@@ -76,6 +76,10 @@ export interface Env {
   WP_TARGET?: string;
   WP_USERNAME?: string;
   WP_APP_PASSWORD?: string;
+  // Var — verbose per-step event log persistence toggle for raw *.thinking
+  // events. ON by default; "0" / "false" / "off" stream thinking live but skip
+  // persisting it to content_tool.run_event_logs. Read by the RunStream DO.
+  PERSIST_THINKING?: string;
 }
 
 const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();

@@ -15,6 +15,7 @@ from content_tool.gemini.client import GeminiClient
 from content_tool.gemini.streaming import set_thought_emitter
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
+from content_tool.observability.event_log import RunEventLogWriter, set_event_emitter
 from content_tool.wordpress.client import WordPressClient
 from content_tool.wordpress.seo_plugin import SeoPluginResolver
 
@@ -84,6 +85,9 @@ class RunExecutor:
         self._subscribers: dict[UUID, list[asyncio.Queue[str]]] = {}
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._history: dict[UUID, deque[str]] = {}
+        # Side-channel: persists every emitted event to run_event_logs. Failures
+        # here are logged and dropped inside the writer; they never break SSE.
+        self._event_log = RunEventLogWriter(session_factory)
 
     def subscribe(self, run_id: UUID) -> asyncio.Queue[str]:
         q: asyncio.Queue[str] = asyncio.Queue()
@@ -124,15 +128,15 @@ class RunExecutor:
             )
 
     async def _emit(self, run_id: UUID, event: str, payload: dict[str, Any]) -> None:
-        data = json.dumps(
-            {
-                "event": event,
-                "run_id": str(run_id),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "payload": payload,
-            },
-            ensure_ascii=False,
-        )
+        envelope = {
+            "event": event,
+            "run_id": str(run_id),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "payload": payload,
+        }
+        # Persist to run_event_logs (fire-and-forget; never raises).
+        self._event_log.enqueue(str(run_id), "run", envelope)
+        data = json.dumps(envelope, ensure_ascii=False)
         # Drop thinking chunks from the replay buffer — they are live-only
         # progress for currently-watching subscribers, accumulate fast (one
         # event per Gemini thought-summary chunk), and would otherwise evict
@@ -247,6 +251,8 @@ class RunExecutor:
             logger.exception("failed to delete checkpoint thread", extra={"run_id": str(run_id)})
         self._history.pop(run_id, None)
         self._subscribers.pop(run_id, None)
+        # Persist anything still queued before the run's rows are deleted.
+        await self._event_log.flush()
 
     async def _clear_derived_rows(self, run_id: UUID) -> None:
         """Drop rows the graph nodes wrote on prior attempts.
@@ -276,11 +282,18 @@ class RunExecutor:
                 run_id, f"{agent}.thinking", {"agent": agent, "chunk": chunk}
             )
 
+        async def _emit_event(event: str, payload: dict[str, Any]) -> None:
+            await self._emit(run_id, event, payload)
+
         # Bind on a ContextVar so any ``gemini.generate`` call inside the graph
         # (writer, audit, …) picks it up and streams; nodes running outside
         # this executor (CLI, refresh evaluator) see the default ``None`` and
-        # use the one-shot path.
+        # use the one-shot path. The event emitter is bound alongside so the
+        # ``logged_node`` wrappers emit ``*.start`` / ``*.error`` lifecycle
+        # markers through the same SSE + persistence choke point.
         set_thought_emitter(_emit_thought)
+        set_event_emitter(_emit_event)
+        self._event_log.start()
         try:
             # Re-detect the SEO plugin against the live WP target as the run
             # builds (on HITL_2 resume this is effectively publish time), rather
@@ -362,6 +375,10 @@ class RunExecutor:
             # ContextVar lives for the lifetime of this asyncio task; clearing
             # is belt-and-braces in case the executor coroutine is reused.
             set_thought_emitter(None)
+            set_event_emitter(None)
+            # Drain any events still queued so a finished/failed run's log is
+            # complete even if the periodic drain hasn't fired yet.
+            await self._event_log.flush()
 
 
 async def _build_initial_state(sf: async_sessionmaker[Any], run_id: UUID) -> dict[str, Any]:

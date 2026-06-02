@@ -271,6 +271,25 @@ export interface SseEvent {
   payload: Record<string, unknown>;
 }
 
+// A single persisted per-step event log row. One shape serves both runs and
+// topic batches via `stream_kind`. Returned by GET /runs/{id}/logs and
+// GET /topic-batches/{id}/logs, ordered by `seq` ASC.
+export type RunEventLogLevel = "info" | "thinking" | "gate" | "error";
+
+export interface RunEventLog {
+  log_id: string;
+  stream_id: string;
+  stream_kind: "run" | "batch";
+  seq: number;
+  event: string;
+  level: RunEventLogLevel;
+  step: string | null;
+  iteration: number | null;
+  duration_ms: number | null;
+  payload: Record<string, unknown>;
+  recorded_at: string;
+}
+
 export interface Hitl2Comment {
   id: string;
   anchor_text: string;

@@ -10,6 +10,7 @@ from content_tool.agents.gap_analysis import run_gap_analysis
 from content_tool.agents.outline import run_outline
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.state import ContentToolState
+from content_tool.observability.event_log import logged_node
 
 
 def build_strategy_graph(
@@ -61,9 +62,9 @@ def build_strategy_graph(
         return "fetch_article"
 
     g = StateGraph(ContentToolState)
-    g.add_node("fetch_article", n_fetch_article)
-    g.add_node("gap_analysis", n_gap_analysis)
-    g.add_node("outline", n_outline)
+    g.add_node("fetch_article", logged_node("strategy", "fetch_article", n_fetch_article))
+    g.add_node("gap_analysis", logged_node("strategy", "gap_analysis", n_gap_analysis))
+    g.add_node("outline", logged_node("strategy", "outline", n_outline))
     g.add_conditional_edges(
         START,
         route_entry,

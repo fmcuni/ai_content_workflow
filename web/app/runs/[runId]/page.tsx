@@ -11,6 +11,7 @@ import { SectionHead } from "@/components/SectionHead";
 import { RunStatusBadge } from "@/components/RunStatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { ThinkingStream } from "@/components/ThinkingStream";
+import { DebugLogPanel } from "@/components/DebugLogPanel";
 import { CostMeter } from "@/components/CostMeter";
 import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { useRunEvents } from "@/lib/sse";
@@ -137,6 +138,12 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
           <ThinkingStream events={events} live={run?.status === "production"} />
           <p className="kicker mb-3">Live progress</p>
           <EventTimeline events={events} />
+          <DebugLogPanel
+            streamId={runId}
+            streamKind="run"
+            liveEvents={events}
+            isActive={!run || !TERMINAL_STATUSES.has(run.status)}
+          />
         </section>
 
         {/* Editor's actions */}
