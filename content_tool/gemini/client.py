@@ -1,10 +1,80 @@
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
 from content_tool.gemini.streaming import ThoughtEmitter, get_thought_emitter
+
+# Gemini occasionally returns an empty / non-JSON HTTP body (safety block,
+# truncated stream, 5xx, dropped connection); the SDK then raises a JSON decode
+# error or transient API error that used to fail the whole run with a cryptic
+# message. Retry transient cases, and on exhaustion rewrap into a GeminiError.
+GEMINI_MAX_ATTEMPTS = 3
+_GEMINI_BACKOFF_S = (0.5, 1.5)
+
+
+class GeminiError(Exception):
+    """A Gemini generation call that failed after exhausting transient retries."""
+
+
+def is_transient_gemini_error(err: BaseException) -> bool:
+    """Heuristic: is this a transient upstream failure worth retrying?"""
+    if isinstance(err, json.JSONDecodeError):
+        return True
+    server_error = getattr(genai_errors, "ServerError", ())
+    if isinstance(err, server_error):
+        return True
+    code = getattr(err, "code", None) or getattr(err, "status_code", None)
+    if code in (429, 500, 502, 503, 504):
+        return True
+    msg = str(err).lower()
+    return any(
+        s in msg
+        for s in (
+            "unexpected end of json",
+            "expecting value",
+            "timeout",
+            "timed out",
+            "connection",
+            "temporarily",
+            "econnreset",
+            "fetch failed",
+        )
+    )
+
+
+async def with_gemini_retry[T](
+    fn: Callable[[], Awaitable[T]],
+    backoff_s: tuple[float, ...] = _GEMINI_BACKOFF_S,
+) -> T:
+    """Run a Gemini SDK call with bounded retries on transient failures.
+
+    Deterministic errors (4xx, schema problems) propagate immediately. ``backoff_s``
+    is injectable so tests can run with zero delay.
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return await fn()
+        except Exception as err:
+            if not is_transient_gemini_error(err):
+                raise
+            if attempt < GEMINI_MAX_ATTEMPTS:
+                delay = backoff_s[attempt - 1] if attempt - 1 < len(backoff_s) else backoff_s[-1]
+                if delay:
+                    await asyncio.sleep(delay)
+                continue
+            raise GeminiError(
+                f"Gemini returned an empty/non-JSON response after {attempt} attempts "
+                f"(likely a transient upstream error). Underlying: "
+                f"{type(err).__name__}: {err}"
+            ) from err
 
 
 @dataclass
@@ -141,22 +211,27 @@ class RealGeminiClient:
         )
 
         t0 = time.perf_counter()
-        if emitter is not None:
-            text, usage, candidate = await self._stream_call(
-                agent=agent,
-                user_prompt=user_prompt,
-                config=config,
-                emitter=emitter,
-            )
-        else:
+
+        async def _call_once() -> tuple[str, Any, Any]:
+            if emitter is not None:
+                return await self._stream_call(
+                    agent=agent,
+                    user_prompt=user_prompt,
+                    config=config,
+                    emitter=emitter,
+                )
             response = await self._client.aio.models.generate_content(
                 model=self._model,
                 contents=user_prompt,
                 config=config,
             )
-            text = response.text or ""
-            usage = response.usage_metadata
-            candidate = response.candidates[0] if response.candidates else None
+            return (
+                response.text or "",
+                response.usage_metadata,
+                response.candidates[0] if response.candidates else None,
+            )
+
+        text, usage, candidate = await with_gemini_retry(_call_once)
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
         # Only parse JSON when the caller actually requested structured output.
