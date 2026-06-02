@@ -43,6 +43,7 @@ from content_tool.models.topic_batch import (
     TopicHotInput,
     TopicHotOutput,
 )
+from content_tool.observability.event_log import logged_node
 
 _logger = logging.getLogger(__name__)
 
@@ -340,10 +341,10 @@ def build_topic_expansion_graph(
         return [Send("analyse_candidate", {"candidate_id": cid}) for cid in ids]
 
     g = StateGraph(TopicExpansionState)
-    g.add_node("topic_gen", n_topic_gen)
-    g.add_node("fan_out", n_fan_out)
-    g.add_node("analyse_candidate", n_analyse_candidate)
-    g.add_node("aggregate", n_aggregate)
+    g.add_node("topic_gen", logged_node("topic", "topic_gen", n_topic_gen))
+    g.add_node("fan_out", logged_node("topic", "fan_out", n_fan_out))
+    g.add_node("analyse_candidate", logged_node("topic", "analyse_candidate", n_analyse_candidate))
+    g.add_node("aggregate", logged_node("topic", "aggregate", n_aggregate))
 
     g.add_edge(START, "topic_gen")
     g.add_edge("topic_gen", "fan_out")

@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useRef } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
@@ -7,9 +7,10 @@ import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { SectionHead } from "@/components/SectionHead";
 import { BatchProgress } from "@/components/topics/BatchProgress";
 import { CandidateGrid } from "@/components/topics/CandidateGrid";
+import { DebugLogPanel } from "@/components/DebugLogPanel";
 import { topicBatchesApi } from "@/lib/api";
 import { withSseTicket } from "@/lib/sse-ticket";
-import type { BatchStatus, TopicBatch } from "@/lib/types";
+import type { BatchStatus, SseEvent, TopicBatch } from "@/lib/types";
 
 const TERMINAL: ReadonlySet<BatchStatus> = new Set<BatchStatus>(["done", "failed"]);
 const REVIEW: ReadonlySet<BatchStatus> = new Set<BatchStatus>([
@@ -36,6 +37,10 @@ export default function TopicBatchDetail({
     },
   });
 
+  // Accumulate live SSE events so the Debug log panel can merge them with the
+  // persisted log. The existing invalidation behavior below is preserved.
+  const [events, setEvents] = useState<SseEvent[]>([]);
+
   const ctrl = useRef<AbortController | null>(null);
   useEffect(() => {
     const status = batch?.status;
@@ -51,8 +56,24 @@ export default function TopicBatchDetail({
       if (cancelled) return;
       fetchEventSource(url, {
         signal: ctl.signal,
-        onmessage() {
+        onmessage(msg) {
           qc.invalidateQueries({ queryKey: ["topic-batch", id] });
+          if (!msg.data) return;
+          try {
+            const parsed = JSON.parse(msg.data) as Partial<SseEvent>;
+            setEvents((prev) => [
+              ...prev,
+              {
+                event: parsed.event ?? msg.event ?? "message",
+                run_id: parsed.run_id ?? id,
+                iteration: parsed.iteration,
+                timestamp: parsed.timestamp ?? new Date().toISOString(),
+                payload: parsed.payload ?? {},
+              },
+            ]);
+          } catch {
+            /* non-JSON heartbeat / comment frame — ignore */
+          }
         },
         onerror(err) {
           console.warn("batch SSE error", err);
@@ -112,6 +133,13 @@ export default function TopicBatchDetail({
         <BatchProgress batch={batch} />
       )}
       {batch && batch.status === "done" && <BatchDoneSummary batch={batch} />}
+
+      <DebugLogPanel
+        streamId={id}
+        streamKind="batch"
+        liveEvents={events}
+        isActive={!batch || !TERMINAL.has(batch.status)}
+      />
     </div>
   );
 }

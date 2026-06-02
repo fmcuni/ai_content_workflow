@@ -37,8 +37,10 @@ from content_tool.db.models import (
     RefreshEvaluation,
     Render,
     Run,
+    RunEventLog,
     TopicCandidate,
 )
+from content_tool.observability.event_log_query import VALID_LEVELS, query_event_logs
 from content_tool.refresh.inventory import upsert_article
 from content_tool.wordpress.client import (
     SCHEMA_JSONLD_META_KEY,
@@ -292,6 +294,9 @@ async def delete_run(
             .values(resulting_run_id=None)
         )
         await session.execute(delete(ComplianceLog).where(ComplianceLog.run_id == run_id))
+        # Verbose event log has no FK (stream_id may be a run or a batch), so
+        # clear it explicitly for this run before the Run row goes away.
+        await session.execute(delete(RunEventLog).where(RunEventLog.stream_id == run_id))
         await session.execute(delete(Run).where(Run.run_id == run_id))
         await session.commit()
     return {"ok": True}
@@ -303,6 +308,30 @@ async def events(
     runner=Depends(get_runner),  # noqa: ANN001, B008
 ) -> EventSourceResponse:
     return EventSourceResponse(sse_stream(runner, run_id))
+
+
+@router.get("/{run_id}/logs")
+async def run_logs(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+    since_seq: int | None = None,
+    limit: int = 2000,
+    level: str | None = None,
+) -> list[dict]:
+    """Return the persisted verbose event log for a run, ordered by seq ASC."""
+    if level is not None and level not in VALID_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid level {level!r}; expected one of {sorted(VALID_LEVELS)}",
+        )
+    async with sf() as session:
+        return await query_event_logs(
+            session,
+            stream_id=run_id,
+            since_seq=since_seq,
+            limit=limit,
+            level=level,
+        )
 
 
 @router.post("/{run_id}/resume")

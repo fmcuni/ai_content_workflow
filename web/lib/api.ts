@@ -8,7 +8,7 @@ import type {
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
-  RefreshEvaluation, Render, RepublishResponse, RunSummary, ScanResponse,
+  RefreshEvaluation, Render, RepublishResponse, RunEventLog, RunSummary, ScanResponse,
   SetupConfigureResult, SetupRequest, SetupStatus, SetupVerifyResult,
   SourcePolicyDoc, SourcePolicyPreviewResponse, SourcePolicyResponse, SourcePolicyRevertResponse,
   SourcePolicySaveResponse, SourcePolicyVersionDetail, SourcePolicyVersionsResponse,
@@ -43,6 +43,24 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return (await r.json()) as T;
+}
+
+// Persisted per-step event-log query params, shared by the run and
+// topic-batch log endpoints. `since_seq` enables incremental polling.
+export interface LogQueryParams {
+  since_seq?: number;
+  limit?: number;
+  level?: string;
+}
+
+function logQueryString(params?: LogQueryParams): string {
+  if (!params) return "";
+  const qs = new URLSearchParams();
+  if (params.since_seq !== undefined) qs.set("since_seq", String(params.since_seq));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.level !== undefined) qs.set("level", params.level);
+  const s = qs.toString();
+  return s ? `?${s}` : "";
 }
 
 // Desktop first-run setup. `configure` expects a 400 with a `checks` body when
@@ -107,6 +125,8 @@ export const api = {
     http(`${BASE}/${runId}/hitl-2`, { method: "POST", body: JSON.stringify(body) }),
   restartRun: (runId: string) =>
     http<{ ok: boolean }>(`${BASE}/${runId}/restart`, { method: "POST" }),
+  getRunLogs: (runId: string, params?: LogQueryParams) =>
+    http<RunEventLog[]>(`${BASE}/${runId}/logs${logQueryString(params)}`),
   deleteRun: (runId: string) =>
     http<{ ok: boolean }>(`${BASE}/${runId}`, { method: "DELETE" }),
   applyEdits: (runId: string, body: ApplyEditsRequest) =>
@@ -228,6 +248,8 @@ export const topicBatchesApi = {
     http<TopicBatch[]>(`${TOPIC_BATCHES_BASE}${status ? `?status=${status}` : ""}`),
   detail: (batchId: string) =>
     http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}`),
+  getLogs: (batchId: string, params?: LogQueryParams) =>
+    http<RunEventLog[]>(`${TOPIC_BATCHES_BASE}/${batchId}/logs${logQueryString(params)}`),
   eventsUrl: (batchId: string) => {
     // SSE goes direct to the FastAPI host (Next rewrites buffer streams).
     const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "";

@@ -265,6 +265,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       run = await this.runRefreshStrategy(runId, run, step, keywords, todayDate);
     } else {
       await this.statusStep(step, "status-strategy", runId, "strategy");
+      await this.emitStep(step, "emit-outline-start", runId, "strategy.outline.start", {});
       await step.do("outline", async () =>
         this.withSql(async (sql) => {
           const gemini = this.geminiClient(runId);
@@ -328,7 +329,21 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
 
       if (decision === "approve") {
         await this.statusStep(step, `status-publishing-${hitl2Iteration}`, runId, "publishing");
+        await this.emitStep(
+          step,
+          `emit-publish-start-${hitl2Iteration}`,
+          runId,
+          "publish.publish.start",
+          {},
+        );
         await this.publish(runId, run, step);
+        await this.emitStep(
+          step,
+          `emit-publish-done-${hitl2Iteration}`,
+          runId,
+          "publish.publish.done",
+          {},
+        );
         await step.do("compliance", async () =>
           this.withSql(async (sql) => {
             await writeComplianceLog(sql, runId, this.modelName());
@@ -387,6 +402,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     // --- fetch_article (no LLM; idempotent on fetched_articles.run_id) ---
     await this.statusStep(step, "status-fetching", runId, "fetching");
+    await this.emitStep(step, "emit-fetch-start", runId, "strategy.fetch_article.start", {});
     const fetched = await step.do("fetch-article", async () =>
       this.withSql<{ markdown: string }>(async (sql) => {
         const result = await runFetchArticle(sql, this.env, { runId, articleUrl });
@@ -394,9 +410,11 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         return { markdown: result.markdown };
       }),
     );
+    await this.emitStep(step, "emit-fetch-done", runId, "strategy.fetch_article.done", {});
 
     // --- gap_analysis (Gemini + googleSearch/urlContext; backfills chosen_route) ---
     await this.statusStep(step, "status-strategy-refresh", runId, "strategy");
+    await this.emitStep(step, "emit-gap-start", runId, "strategy.gap_analysis.start", {});
     await step.do("gap-analysis", async () =>
       this.withSql(async (sql) => {
         const gemini = this.geminiClient(runId);
@@ -416,8 +434,10 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         return "ok";
       }),
     );
+    await this.emitStep(step, "emit-gap-done", runId, "strategy.gap_analysis.done", {});
 
     // --- outline (refresh): gap payload + existing markdown + chosen_route ---
+    await this.emitStep(step, "emit-outline-start-refresh", runId, "strategy.outline.start", {});
     const chosenRoute = await step.do("outline", async () =>
       this.withSql<string>(async (sql) => {
         const gemini = this.geminiClient(runId);
@@ -489,6 +509,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       );
 
       // --- writer ---
+      await this.emitStep(
+        step,
+        `emit-writer-start-${round}-${iteration}`,
+        runId,
+        "production.writer.start",
+        {},
+        iteration,
+      );
       const draftId = await step.do(`writer-${round}-${iteration}`, async () =>
         this.withSql<string>(async (sql) => {
           const gemini = this.geminiClient(runId);
@@ -523,6 +551,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       );
 
       // --- resolve_citations ---
+      await this.emitStep(
+        step,
+        `emit-citations-start-${round}-${iteration}`,
+        runId,
+        "production.resolve_citations.start",
+        {},
+        iteration,
+      );
       await step.do(`resolve_citations-${round}-${iteration}`, async () =>
         this.withSql(async (sql) => {
           const draft = await this.loadDraftMarkup(sql, draftId);
@@ -551,6 +587,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       );
 
       // --- render_html ---
+      await this.emitStep(
+        step,
+        `emit-render-start-${round}-${iteration}`,
+        runId,
+        "production.render_html.start",
+        {},
+        iteration,
+      );
       await step.do(`render-${round}-${iteration}`, async () =>
         this.withSql(async (sql) => {
           const finalMarkup = await this.loadFinalMarkup(sql, draftId);
@@ -587,6 +631,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       );
 
       // --- audit ---
+      await this.emitStep(
+        step,
+        `emit-audit-start-${round}-${iteration}`,
+        runId,
+        "production.audit.start",
+        {},
+        iteration,
+      );
       const overallPass = await step.do(`audit-${round}-${iteration}`, async () =>
         this.withSql<boolean>(async (sql) => {
           const gemini = this.geminiClient(runId);

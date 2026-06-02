@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
+import { getEventLogs, parseLogQuery } from "../db/event-log";
 import { pgJson, pgTimestampToIso, toJsonb } from "../db/serialize";
 import { runApplyEdits, type ApplyEditComment } from "../agents/apply_edits";
 import { DoGeminiClient } from "../gemini/do_client";
@@ -755,6 +756,26 @@ runsRouter.get("/:id/events", async (c) => {
 });
 
 runsRouter.options("/:id/events", (c) =>
+  corsPreflight(resolveCorsOrigin(c.req.header("origin") ?? null, c.env.FRONTEND_ORIGIN)),
+);
+
+// ---------------------------------------------------------------------------
+// GET /:id/logs — verbose persisted per-step event log for this run.
+// Ordered by seq ASC. Query params: since_seq (seq>since_seq), limit (default
+// 2000, cap 10000), level (equality). CORS-pinned like /events so the debug
+// panel can poll it cross-origin.
+// ---------------------------------------------------------------------------
+runsRouter.get("/:id/logs", async (c) => {
+  const runId = c.req.param("id");
+  const query = parseLogQuery(new URL(c.req.url).searchParams);
+  const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
+    getEventLogs(sql, runId, query),
+  );
+  const origin = resolveCorsOrigin(c.req.header("origin") ?? null, c.env.FRONTEND_ORIGIN);
+  return c.json(rows, 200, { "access-control-allow-origin": origin, vary: "Origin" });
+});
+
+runsRouter.options("/:id/logs", (c) =>
   corsPreflight(resolveCorsOrigin(c.req.header("origin") ?? null, c.env.FRONTEND_ORIGIN)),
 );
 
@@ -1803,6 +1824,9 @@ runsRouter.delete("/:id", requireRole("admin"), async (c) => {
       WHERE resulting_run_id = ${runId}
     `;
     await sql`DELETE FROM content_tool.compliance_log WHERE run_id = ${runId}`;
+    // Verbose event log has no FK to runs (stream_id is run_id OR batch_id), so
+    // it must be cleaned up explicitly before the run row goes.
+    await sql`DELETE FROM content_tool.run_event_logs WHERE stream_id = ${runId}`;
     await sql`DELETE FROM content_tool.runs WHERE run_id = ${runId}`;
     return true;
   });

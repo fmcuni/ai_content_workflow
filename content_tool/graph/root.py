@@ -15,6 +15,7 @@ from content_tool.graph.production import build_production_graph
 from content_tool.graph.strategy import build_strategy_graph
 from content_tool.models.state import ContentToolState
 from content_tool.observability.cost import CostCalculator
+from content_tool.observability.event_log import logged_node
 from content_tool.wordpress.client import WordPressClient
 
 _logger = logging.getLogger(__name__)
@@ -104,7 +105,10 @@ def build_root_graph(
     # node name. We want HITL_1 to gate only the *initial* entry to production;
     # revision rounds (publish_or_revise → production_revise) must not re-pause.
     root.add_node("production_revise", production)
-    root.add_node("publish_or_revise", n_publish_or_revise)
+    root.add_node(
+        "publish_or_revise",
+        logged_node("publish", "publish_or_revise", n_publish_or_revise),
+    )
     root.add_edge(START, "strategy")
     root.add_edge("strategy", "production")
     root.add_edge("production", "publish_or_revise")

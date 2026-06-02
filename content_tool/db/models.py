@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (  # noqa: F401
@@ -524,6 +525,46 @@ class SourcePolicyVersion(Base):
     )
     kind: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'save'")
+    )
+
+
+class RunEventLog(Base):
+    """Append-only verbose per-step event log for the 3 interactive run types.
+
+    One table serves BOTH runs and topic batches: ``stream_id`` is the run_id OR
+    the batch_id, disambiguated by ``stream_kind``. No FK (two possible parent
+    tables) — cleanup is explicit in the run/batch delete routes. The
+    ``RunEventLogWriter`` writes via raw SQL; this model exists for ORM reads,
+    deletes, and schema parity.
+    """
+
+    __tablename__ = "run_event_logs"
+    __table_args__ = (
+        UniqueConstraint("stream_id", "seq", name="run_event_logs_stream_seq_key"),
+        Index("run_event_logs_stream_idx", "stream_id", "seq"),
+        {"schema": "content_tool"},
+    )
+
+    log_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    stream_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    stream_kind: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'run'")
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    event: Mapped[str] = mapped_column(String, nullable=False)
+    level: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'info'")
+    )
+    step: Mapped[str | None] = mapped_column(String)
+    iteration: Mapped[int | None] = mapped_column(Integer)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
     )
 
 

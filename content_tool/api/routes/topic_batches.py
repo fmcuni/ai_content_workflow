@@ -39,12 +39,14 @@ from content_tool.api.schemas import (
     TopicBatchOut,
     TopicCandidateOut,
 )
-from content_tool.db.models import TopicBatch, TopicCandidate
+from content_tool.db.models import RunEventLog, TopicBatch, TopicCandidate
 from content_tool.gemini.client import GeminiClient
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.topic_expansion import (
     build_topic_expansion_graph,  # pyright: ignore[reportUnknownVariableType]
 )
+from content_tool.observability.event_log import RunEventLogWriter, set_event_emitter
+from content_tool.observability.event_log_query import VALID_LEVELS, query_event_logs
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,9 @@ class TopicBatchExecutor:
         self._subscribers: dict[UUID, list[asyncio.Queue[str]]] = {}
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._history: dict[UUID, deque[str]] = {}
+        # Side-channel: persists every emitted event to run_event_logs. Failures
+        # are logged and dropped inside the writer; they never break SSE.
+        self._event_log = RunEventLogWriter(session_factory)
 
     def subscribe(self, batch_id: UUID) -> asyncio.Queue[str]:
         q: asyncio.Queue[str] = asyncio.Queue()
@@ -126,15 +131,15 @@ class TopicBatchExecutor:
             subs.remove(q)
 
     async def _emit(self, batch_id: UUID, event: str, payload: dict[str, Any]) -> None:
-        data = json.dumps(
-            {
-                "event": event,
-                "batch_id": str(batch_id),
-                "timestamp": datetime.now(UTC).isoformat(),
-                "payload": payload,
-            },
-            ensure_ascii=False,
-        )
+        envelope = {
+            "event": event,
+            "batch_id": str(batch_id),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": payload,
+        }
+        # Persist to run_event_logs (fire-and-forget; never raises).
+        self._event_log.enqueue(str(batch_id), "batch", envelope)
+        data = json.dumps(envelope, ensure_ascii=False)
         self._history.setdefault(
             batch_id, deque(maxlen=_BATCH_EVENT_BUFFER_SIZE)
         ).append(data)
@@ -171,8 +176,18 @@ class TopicBatchExecutor:
             )
         self._history.pop(batch_id, None)
         self._subscribers.pop(batch_id, None)
+        # Persist anything still queued before the batch's rows are deleted.
+        await self._event_log.flush()
 
     async def _run(self, batch_id: UUID, payload: TopicBatchIn) -> None:
+        async def _emit_event(event: str, ev_payload: dict[str, Any]) -> None:
+            await self._emit(batch_id, event, ev_payload)
+
+        # Bind the lifecycle emitter so the ``logged_node`` wrappers in the
+        # topic-expansion graph emit ``*.start`` / ``*.error`` markers through
+        # the same SSE + persistence choke point.
+        set_event_emitter(_emit_event)
+        self._event_log.start()
         try:
             async with make_checkpointer(self._postgres_url) as cp:
                 graph: Any = build_topic_expansion_graph(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
@@ -219,6 +234,10 @@ class TopicBatchExecutor:
                     await session.commit()
             except Exception:
                 logger.exception("failed to persist failed batch status")
+        finally:
+            set_event_emitter(None)
+            # Drain any remaining queued events so the batch's log is complete.
+            await self._event_log.flush()
 
 
 async def _batch_sse_stream(
@@ -391,6 +410,30 @@ async def topic_batch_events(
     executor: TopicBatchExecutor = Depends(get_batch_executor),  # noqa: B008
 ) -> EventSourceResponse:
     return EventSourceResponse(_batch_sse_stream(executor, batch_id))
+
+
+@router.get("/{batch_id}/logs")
+async def topic_batch_logs(
+    batch_id: UUID,
+    sf: async_sessionmaker[Any] = Depends(get_session_factory),  # noqa: B008
+    since_seq: int | None = None,
+    limit: int = 2000,
+    level: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return the persisted verbose event log for a batch, ordered by seq ASC."""
+    if level is not None and level not in VALID_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid level {level!r}; expected one of {sorted(VALID_LEVELS)}",
+        )
+    async with sf() as session:
+        return await query_event_logs(
+            session,
+            stream_id=batch_id,
+            since_seq=since_seq,
+            limit=limit,
+            level=level,
+        )
 
 
 @router.patch(
@@ -624,6 +667,9 @@ async def delete_topic_batch(
             .where(Run.topic_candidate_id.in_(candidate_ids))
             .values(topic_candidate_id=None)
         )
+        # Verbose event log has no FK (stream_id may be a run or a batch), so
+        # clear it explicitly for this batch before the batch row goes away.
+        await session.execute(delete(RunEventLog).where(RunEventLog.stream_id == batch_id))
         await session.execute(delete(TopicBatch).where(TopicBatch.batch_id == batch_id))
         await session.commit()
     return {"ok": True}

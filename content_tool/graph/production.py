@@ -11,6 +11,7 @@ from content_tool.agents.resolve_citations import run_resolve_citations
 from content_tool.agents.writer import run_writer
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.state import ContentToolState
+from content_tool.observability.event_log import logged_node
 
 MAX_ITERATIONS = 2
 
@@ -119,10 +120,13 @@ def build_production_graph(
         return {"iteration": state["iteration"] + 1}
 
     g = StateGraph(ContentToolState)
-    g.add_node("writer", n_writer)
-    g.add_node("resolve_citations", n_resolve_citations)
-    g.add_node("render_html", n_render_html)
-    g.add_node("audit", n_audit)
+    g.add_node("writer", logged_node("production", "writer", n_writer))
+    g.add_node(
+        "resolve_citations",
+        logged_node("production", "resolve_citations", n_resolve_citations),
+    )
+    g.add_node("render_html", logged_node("production", "render_html", n_render_html))
+    g.add_node("audit", logged_node("production", "audit", n_audit))
     g.add_node("bump", n_increment_iteration)
 
     g.add_edge(START, "writer")

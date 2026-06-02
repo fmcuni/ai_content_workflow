@@ -102,7 +102,11 @@
 		// TEMPORARY: verification disabled while Resend sending is sorted out (the
 		// test sender can't reliably deliver). Remove this line (or set to "on")
 		// and redeploy once bowtie.com.hk is DNS-verified in Resend.
-		"EMAIL_VERIFICATION": "off"
+		"EMAIL_VERIFICATION": "off",
+		// Verbose per-step event log: persist raw *.thinking events too. Default
+		// ON; set "0"/"false"/"off" to stream thinking live but skip persisting it
+		// to content_tool.run_event_logs. Read by the RunStream DO.
+		"PERSIST_THINKING": "on"
 	},
 	"hyperdrive": [
 		{
