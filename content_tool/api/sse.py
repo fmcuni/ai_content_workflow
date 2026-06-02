@@ -16,6 +16,7 @@ from content_tool.gemini.streaming import set_thought_emitter
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
 from content_tool.wordpress.client import WordPressClient
+from content_tool.wordpress.seo_plugin import SeoPluginResolver
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +74,13 @@ class RunExecutor:
         session_factory: async_sessionmaker[Any],
         gemini: GeminiClient,
         wp_client: WordPressClient | None = None,
-        seo_plugin: str | None = None,
+        seo_resolver: SeoPluginResolver | None = None,
     ) -> None:
         self._postgres_url = postgres_url
         self._sf = session_factory
         self._gemini = gemini
         self._wp_client = wp_client
-        self._seo_plugin = seo_plugin
+        self._seo_resolver = seo_resolver
         self._subscribers: dict[UUID, list[asyncio.Queue[str]]] = {}
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._history: dict[UUID, deque[str]] = {}
@@ -281,10 +282,16 @@ class RunExecutor:
         # use the one-shot path.
         set_thought_emitter(_emit_thought)
         try:
+            # Re-detect the SEO plugin against the live WP target as the run
+            # builds (on HITL_2 resume this is effectively publish time), rather
+            # than trusting a value cached once at process startup.
+            seo_plugin = (
+                await self._seo_resolver.resolve() if self._seo_resolver is not None else None
+            )
             async with make_checkpointer(self._postgres_url) as cp:
                 graph = build_root_graph(
                     session_factory=self._sf, gemini=self._gemini, checkpointer=cp,
-                    wp_client=self._wp_client, seo_plugin=self._seo_plugin,
+                    wp_client=self._wp_client, seo_plugin=seo_plugin,
                 )
                 config = {"configurable": {"thread_id": str(run_id)}}
 

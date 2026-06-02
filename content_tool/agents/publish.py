@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -15,14 +14,7 @@ from content_tool.wordpress.client import (
     WordPressConflictError,
     WordPressError,
 )
-
-
-def _seo_meta_key(plugin: Literal["yoast", "rankmath"] | None) -> str | None:
-    if plugin == "yoast":
-        return "_yoast_wpseo_metadesc"
-    if plugin == "rankmath":
-        return "rank_math_description"
-    return None
+from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
 
 
 async def publish_to_wordpress(
@@ -30,7 +22,7 @@ async def publish_to_wordpress(
     session: AsyncSession,
     run_id: UUID,
     wp_client: WordPressClient,
-    seo_plugin: Literal["yoast", "rankmath"] | None,
+    seo_plugin: SeoPlugin | None,
     if_unmodified_since: str | None,
 ) -> dict[str, object]:
     run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
@@ -52,7 +44,7 @@ async def publish_to_wordpress(
     )).scalar_one()
 
     meta: dict[str, str] = {}
-    key = _seo_meta_key(seo_plugin)
+    key = seo_meta_key(seo_plugin)
     if key:
         meta[key] = render.meta_description
     # Ship the structured-data graph out-of-band. The companion mu-plugin reads

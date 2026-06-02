@@ -430,10 +430,15 @@ export class WordPressClient {
  * Detect the installed SEO plugin by probing the WP REST schema.
  *
  * Sends OPTIONS /wp-json/wp/v2/posts and inspects
- * `schema.properties.meta.properties` keys:
- * - any key starting with `_yoast_wpseo_` → "yoast"
- * - any key starting with `rank_math_`    → "rankmath"
- * - otherwise                             → null
+ * `schema.properties.meta.properties` keys. We require the EXACT description
+ * key to be registered (writable over REST), not merely the plugin namespace:
+ * - `_yoast_wpseo_metadesc` present → "yoast"
+ * - `rank_math_description` present → "rankmath"
+ * - otherwise                       → null
+ *
+ * Yoast registers several `_yoast_wpseo_*` keys for REST but `_yoast_wpseo_metadesc`
+ * itself is frequently a protected key that is NOT writable — claiming "yoast"
+ * off the prefix and then sending that key 400s the whole publish request.
  */
 export async function detectSeoPlugin(env: Env): Promise<SeoPlugin | null> {
   if (!env.WP_BASE_URL) throw new Error("WP_BASE_URL is required");
@@ -475,8 +480,8 @@ export async function detectSeoPlugin(env: Env): Promise<SeoPlugin | null> {
       | undefined) ?? {};
 
   const keys = Object.keys(metaProps);
-  if (keys.some((k) => k.startsWith("_yoast_wpseo_"))) return "yoast";
-  if (keys.some((k) => k.startsWith("rank_math_"))) return "rankmath";
+  if (keys.includes("_yoast_wpseo_metadesc")) return "yoast";
+  if (keys.includes("rank_math_description")) return "rankmath";
   return null;
 }
 
