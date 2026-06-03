@@ -473,6 +473,23 @@ runsRouter.get("/:id", async (c) => {
 runsRouter.post("/:id/restart", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
+  // Optional `{ from: { name, count? } }` body: restart FROM a specific step
+  // instead of from the beginning. Cloudflare reuses the cached results of every
+  // earlier step, so this REVIVES a run (e.g. one that died at a HITL gate when
+  // its waitForEvent timed out) without re-running the upstream Gemini steps.
+  // Restarting from the `gate-hitl*` step also re-writes the run's DB status back
+  // to its gate value. No body → restart from the beginning (full re-run).
+  let fromStep: { name: string; count?: number } | undefined;
+  const body: unknown = await c.req.json().catch(() => null);
+  if (body && typeof body === "object" && "from" in body) {
+    const from = (body as { from?: unknown }).from;
+    if (from && typeof from === "object" && typeof (from as { name?: unknown }).name === "string") {
+      const name = (from as { name: string }).name;
+      const rawCount = (from as { count?: unknown }).count;
+      fromStep = typeof rawCount === "number" ? { name, count: rawCount } : { name };
+    }
+  }
+
   const claim = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const claimed = await sql<{ run_id: string }[]>`
       UPDATE content_tool.runs
@@ -500,7 +517,7 @@ runsRouter.post("/:id/restart", requireRole("editor"), async (c) => {
   const env = c.env as RunsEnv;
   try {
     const instance = await env.PRODUCTION.get(runId);
-    await instance.restart();
+    await instance.restart(fromStep ? { from: fromStep } : undefined);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     // Compensate: hand the run back to `failed` so the operator can retry.
