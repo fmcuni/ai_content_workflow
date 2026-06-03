@@ -95,6 +95,11 @@ class TopicCandidate(Base):
     existing_url: Mapped[str | None] = mapped_column(Text)
     hot_topic: Mapped[str | None] = mapped_column(Text)
     hot_topic_note: Mapped[str | None] = mapped_column(Text)
+    # Dedup stage-1 diagnostics (see content_tool.agents.topic_existing_search
+    # Stage1Diagnostics). Explains why ``existing`` was decided — especially
+    # empty-candidate "no" verdicts. NULL while analysis is in flight or if the
+    # dedup call errored before stage-1 produced diagnostics.
+    existing_search_debug: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     persona_slug: Mapped[str | None] = mapped_column(Text)
     acf_adv_id: Mapped[int | None] = mapped_column(Integer)
     acf_widget_id: Mapped[int | None] = mapped_column(Integer)

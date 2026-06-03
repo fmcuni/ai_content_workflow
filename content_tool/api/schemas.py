@@ -399,6 +399,7 @@ class TopicCandidateOut(BaseModel):
     existing_url: str | None = None
     hot_topic: HotTopicVerdict | None = None
     hot_topic_note: str | None = None
+    existing_search_debug: dict[str, object] | None = None
     persona_slug: str | None = None
     acf_adv_id: int | None = None
     acf_widget_id: int | None = None

@@ -12,14 +12,32 @@ No retry/backoff here — that is the topic-expansion subgraph's concern.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from content_tool import prompts_store
 from content_tool.agents.topic_existing_search import (
     ExistingArticle,
+    Stage1Diagnostics,
     UrlResolveFn,
     run_existing_article_search,
 )
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.topic_batch import TopicDedupInput, TopicDedupOutput
+
+# Appended to ``existing_note`` when stage-1 could not confirm the candidate
+# list because resolves failed (so a real article may have been missed). Kept
+# byte-identical to the TypeScript ``DEGRADED_NOTE_SUFFIX``.
+_DEGRADED_NOTE_SUFFIX = (
+    "（系統提示：檢索時連結解析失敗，未能確認是否已有文章，請人手覆檢。）"
+)
+
+
+@dataclass(frozen=True)
+class TopicDedupResult:
+    """The stage-2 verdict plus the stage-1 diagnostics that produced it."""
+
+    output: TopicDedupOutput
+    stage1: Stage1Diagnostics
 
 
 async def build_system_prompt() -> str:
@@ -65,20 +83,50 @@ def _constrain_to_candidates(
     return output.model_copy(update={"existing": existing, "existing_url": ""})
 
 
+def _apply_degraded_guard(
+    output: TopicDedupOutput,
+    candidates: list[ExistingArticle],
+    diagnostics: Stage1Diagnostics,
+) -> TopicDedupOutput:
+    """Never report a confident "no" when stage-1 could not actually confirm.
+
+    If the candidate list is empty *because* every resolve failed (chunks were
+    returned but none resolved — the transient-failure signature, e.g. the
+    Workers subrequest cap), a "no" is not trustworthy: a real, live article may
+    have been missed. Downgrade it to ``not_sure`` and annotate the note so the
+    operator double-checks instead of silently dropping a duplicate. A genuine
+    empty grounding (``resolve_failures == 0``) is left untouched.
+    """
+    if (
+        not candidates
+        and diagnostics.resolve_failures > 0
+        and output.existing == "no"
+    ):
+        return output.model_copy(
+            update={
+                "existing": "not_sure",
+                "existing_note": output.existing_note + _DEGRADED_NOTE_SUFFIX,
+            }
+        )
+    return output
+
+
 async def run_topic_dedup(
     *,
     gemini: GeminiClient,
     resolve: UrlResolveFn,
     input: TopicDedupInput,
-) -> TopicDedupOutput:
+) -> TopicDedupResult:
     """Two-stage dedup verdict for one candidate.
 
     ``resolve`` backs the stage-1 URL resolver (vertexaisearch redirect →
-    real URL, cached in ``url_resolution_cache``).
+    real URL, cached in ``url_resolution_cache``). Returns the verdict together
+    with the stage-1 :class:`Stage1Diagnostics` (persisted for observability).
     """
-    candidates = await run_existing_article_search(
+    stage1 = await run_existing_article_search(
         gemini=gemini, resolve=resolve, input=input
     )
+    candidates = stage1.articles
 
     system_prompt = await build_system_prompt()
     user_prompt = build_user_prompt(input, candidates)
@@ -90,4 +138,6 @@ async def run_topic_dedup(
         tools=["urlContext"],  # open the real candidate URLs to verify the match
     )
     output = TopicDedupOutput.model_validate(result.parsed)
-    return _constrain_to_candidates(output, candidates)
+    output = _constrain_to_candidates(output, candidates)
+    output = _apply_degraded_guard(output, candidates, stage1.diagnostics)
+    return TopicDedupResult(output=output, stage1=stage1.diagnostics)

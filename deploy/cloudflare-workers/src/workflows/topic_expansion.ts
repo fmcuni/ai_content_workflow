@@ -28,8 +28,16 @@ import { runTopicHot } from "../agents/topic_hot";
 
 const DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_THINKING_LEVEL = "HIGH";
-/** content_tool/graph/topic_expansion.py CONCURRENCY_CAP — analyse_candidate fan-out. */
-const CONCURRENCY_CAP = 5;
+/**
+ * content_tool/graph/topic_expansion.py CONCURRENCY_CAP — analyse_candidate fan-out.
+ * Lowered 5 -> 3: each candidate runs dedup (grounded search + per-chunk HEAD
+ * resolves + a urlContext verdict) AND topic_hot (googleSearch + urlContext)
+ * concurrently. At 5-way fan-out the combined load exhausted the Workers
+ * per-invocation subrequest budget, making stage-1 resolves fail silently so
+ * real articles were reported as "no" (see Stage1Diagnostics). Kept in sync
+ * with the Python CONCURRENCY_CAP.
+ */
+const CONCURRENCY_CAP = 3;
 
 interface Params {
   batchId: string;
@@ -236,11 +244,26 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
           runTopicDedup(sql, gemini, { topic, keywords }),
           runTopicHot(sql, gemini, { topic, keywords }),
         ]);
+        // One greppable line per candidate so an empty-candidate "no" is
+        // explainable from `wrangler tail` without a DB dive (mirrors the
+        // Python structlog line); the full struct is persisted below.
+        console.log(
+          `topic_existing_search.diagnostics topic=${JSON.stringify(topic)} ` +
+            `existing=${dedup.output.existing} ` +
+            `grounding_chunks=${dedup.stage1.grounding_chunks} ` +
+            `bowtie_hits=${dedup.stage1.bowtie_hits} ` +
+            `resolve_failures=${dedup.stage1.resolve_failures} ` +
+            `filtered_out=${dedup.stage1.filtered_out} ` +
+            `attempt_cap_hit=${dedup.stage1.attempt_cap_hit} ` +
+            `grounding_empty=${dedup.stage1.grounding_empty} ` +
+            `second_pass=${dedup.stage1.second_pass}`,
+        );
         await sql`
           UPDATE content_tool.topic_candidates
           SET existing = ${dedup.output.existing},
               existing_note = ${dedup.output.existing_note},
               existing_url = ${dedup.output.existing_url},
+              existing_search_debug = ${toJsonb(sql, dedup.stage1)},
               hot_topic = ${hot.output.hot_topic},
               hot_topic_note = ${hot.output.hot_topic_note},
               last_error = NULL

@@ -22,6 +22,7 @@ import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from typing import Any, TypedDict
 from uuid import UUID
 
@@ -30,7 +31,7 @@ from langgraph.types import Send
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from content_tool.agents.topic_dedup import run_topic_dedup
+from content_tool.agents.topic_dedup import TopicDedupResult, run_topic_dedup
 from content_tool.agents.topic_gen import run_topic_gen
 from content_tool.agents.topic_hot import run_topic_hot
 from content_tool.agents.url_resolver import UrlResolver
@@ -38,7 +39,6 @@ from content_tool.db.topic_batch_model import TopicBatch, TopicCandidate
 from content_tool.gemini.client import GeminiClient
 from content_tool.models.topic_batch import (
     TopicDedupInput,
-    TopicDedupOutput,
     TopicGenInput,
     TopicHotInput,
     TopicHotOutput,
@@ -50,7 +50,14 @@ _logger = logging.getLogger(__name__)
 # Cap concurrent in-flight ``analyse_candidate`` invocations. The factory
 # constructs one ``asyncio.Semaphore(CONCURRENCY_CAP)`` and shares it across
 # every Send-spawned task for the duration of one batch run.
-CONCURRENCY_CAP = 5
+#
+# Lowered 5 -> 3: each candidate runs the dedup (grounded search + per-chunk
+# HEAD resolves + a urlContext verdict) AND the hot-topic agent (googleSearch +
+# urlContext) concurrently. At 5-way fan-out the combined load exhausted the
+# Workers per-invocation subrequest budget, making stage-1 resolves fail
+# silently and real articles get reported as "no" (see Stage1Diagnostics).
+# Kept in sync with the Workers TopicExpansionWorkflow CONCURRENCY_CAP.
+CONCURRENCY_CAP = 3
 
 # Two retries (so up to three Gemini attempts in total) with exponential
 # backoff. See ``_retry_with_backoff`` below; values mirror the n8n
@@ -251,13 +258,13 @@ def build_topic_expansion_graph(
             dedup_input = TopicDedupInput(topic=topic, keywords=keywords)
             hot_input = TopicHotInput(topic=topic, keywords=keywords)
 
-            async def _do_dedup() -> TopicDedupOutput:
+            async def _do_dedup() -> TopicDedupResult:
                 # Dedup needs its own session (the stage-1 URL resolver writes to
                 # url_resolution_cache); it must not share one with the hot call
                 # running concurrently under the same gather. A fresh session per
                 # attempt also keeps retries clean. The resolver flushes within
                 # the session; commit here to persist the cache rows it wrote.
-                async def _call() -> TopicDedupOutput:
+                async def _call() -> TopicDedupResult:
                     async with session_factory() as dedup_session:
                         resolver = UrlResolver(session=dedup_session)
                         out = await run_topic_dedup(
@@ -285,9 +292,26 @@ def build_topic_expansion_graph(
                 values["existing_note"] = None
                 values["existing_url"] = None
             else:
-                values["existing"] = dedup_res.existing
-                values["existing_note"] = dedup_res.existing_note
-                values["existing_url"] = dedup_res.existing_url
+                values["existing"] = dedup_res.output.existing
+                values["existing_note"] = dedup_res.output.existing_note
+                values["existing_url"] = dedup_res.output.existing_url
+                values["existing_search_debug"] = asdict(dedup_res.stage1)
+                # One greppable line per candidate so an empty-candidate "no" is
+                # explainable without a DB dive (mirrors the Workers console log).
+                _logger.info(
+                    "topic_existing_search.diagnostics topic=%r existing=%s "
+                    "grounding_chunks=%d bowtie_hits=%d resolve_failures=%d "
+                    "filtered_out=%d attempt_cap_hit=%s grounding_empty=%s second_pass=%s",
+                    topic,
+                    dedup_res.output.existing,
+                    dedup_res.stage1.grounding_chunks,
+                    dedup_res.stage1.bowtie_hits,
+                    dedup_res.stage1.resolve_failures,
+                    dedup_res.stage1.filtered_out,
+                    dedup_res.stage1.attempt_cap_hit,
+                    dedup_res.stage1.grounding_empty,
+                    dedup_res.stage1.second_pass,
+                )
             if isinstance(hot_res, BaseException):
                 errors.append(f"hot_topic: {hot_res!r}")
                 values["hot_topic"] = None

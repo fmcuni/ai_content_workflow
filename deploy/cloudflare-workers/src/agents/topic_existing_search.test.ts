@@ -3,6 +3,7 @@ import type { Sql } from "postgres";
 
 import {
   MAX_CANDIDATES,
+  MAX_RESOLVE_ATTEMPTS,
   runExistingArticleSearch,
   type UrlResolveFn,
 } from "./topic_existing_search";
@@ -63,33 +64,45 @@ describe("runExistingArticleSearch", () => {
       v2: bowtie("v2", "https://www.bowtie.com.hk/blog/bar"),
     });
 
-    const out = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
+    const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "t",
       keywords: ["k"],
     });
 
-    expect(out.map((a) => a.url)).toEqual([
+    expect(articles.map((a) => a.url)).toEqual([
       "https://www.bowtie.com.hk/blog/foo",
       "https://www.bowtie.com.hk/blog/bar",
     ]);
-    expect(out[0]?.title).toBe("自願醫保比較");
+    expect(articles[0]?.title).toBe("自願醫保比較");
     expect(g.calls[0]?.tools).toEqual(["googleSearch"]);
     expect(g.calls[0]?.userPrompt).toContain("site:bowtie.com.hk/blog");
+    // Non-empty first pass → no retry, clean diagnostics.
+    expect(g.calls).toHaveLength(1);
+    expect(diagnostics).toMatchObject({
+      grounding_chunks: 2,
+      bowtie_hits: 2,
+      resolve_failures: 0,
+      filtered_out: 0,
+      grounding_empty: false,
+      second_pass: false,
+    });
   });
 
-  it("filters non-bowtie and unresolved chunks", async () => {
+  it("filters non-bowtie and counts unresolved chunks as resolve failures", async () => {
     const g = gemini([chunk("v1"), chunk("bad"), chunk("nores")]);
     const resolve = resolver({
       v1: bowtie("v1", "https://www.bowtie.com.hk/blog/foo"),
       bad: { vertexUri: "bad", finalUrl: "https://example.com/x", domain: "example.com", error: null },
     });
 
-    const out = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
+    const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "t",
       keywords: [],
     });
 
-    expect(out.map((a) => a.url)).toEqual(["https://www.bowtie.com.hk/blog/foo"]);
+    expect(articles.map((a) => a.url)).toEqual(["https://www.bowtie.com.hk/blog/foo"]);
+    expect(diagnostics.filtered_out).toBe(1); // example.com resolved but not bowtie
+    expect(diagnostics.resolve_failures).toBe(1); // "nores" never resolved
   });
 
   it("dedupes by URL ignoring trailing slash", async () => {
@@ -99,12 +112,12 @@ describe("runExistingArticleSearch", () => {
       v2: bowtie("v2", "https://www.bowtie.com.hk/blog/foo/"),
     });
 
-    const out = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
+    const { articles } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "t",
       keywords: [],
     });
 
-    expect(out).toHaveLength(1);
+    expect(articles).toHaveLength(1);
   });
 
   it("caps at MAX_CANDIDATES", async () => {
@@ -115,19 +128,71 @@ describe("runExistingArticleSearch", () => {
       map[`v${i}`] = bowtie(`v${i}`, `https://www.bowtie.com.hk/blog/p${i}`);
     }
 
-    const out = await runExistingArticleSearch(makeFakeSql(), gemini(chunks), resolver(map), {
+    const { articles } = await runExistingArticleSearch(makeFakeSql(), gemini(chunks), resolver(map), {
       topic: "t",
       keywords: [],
     });
 
-    expect(out).toHaveLength(MAX_CANDIDATES);
+    expect(articles).toHaveLength(MAX_CANDIDATES);
   });
 
-  it("returns an empty array when there are no grounding chunks", async () => {
-    const out = await runExistingArticleSearch(makeFakeSql(), gemini([]), resolver({}), {
+  it("caps resolve attempts per pass and retries once on empty", async () => {
+    // Many non-bowtie chunks; an unbounded loop would HEAD them all and exhaust
+    // the Workers per-invocation subrequest budget. Empty result triggers ONE
+    // retry, so total resolves are bounded at 2 * MAX_RESOLVE_ATTEMPTS.
+    const n = MAX_RESOLVE_ATTEMPTS + 10;
+    const chunks = Array.from({ length: n }, (_, i) => chunk(`v${i}`));
+    let calls = 0;
+    const resolve: UrlResolveFn = async (uri) => {
+      calls += 1;
+      return { vertexUri: uri, finalUrl: "https://example.com/x", domain: "example.com", error: null };
+    };
+
+    const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), gemini(chunks), resolve, {
       topic: "t",
       keywords: [],
     });
-    expect(out).toEqual([]);
+
+    expect(articles).toEqual([]);
+    expect(calls).toBe(MAX_RESOLVE_ATTEMPTS * 2);
+    expect(diagnostics.attempt_cap_hit).toBe(true);
+    expect(diagnostics.second_pass).toBe(true);
+    expect(diagnostics.filtered_out).toBe(MAX_RESOLVE_ATTEMPTS);
+  });
+
+  it("returns an empty list (and retries) when there are no grounding chunks", async () => {
+    const g = gemini([]);
+    const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolver({}), {
+      topic: "t",
+      keywords: [],
+    });
+    expect(articles).toEqual([]);
+    expect(g.calls).toHaveLength(2); // first pass empty → one retry
+    expect(diagnostics.grounding_empty).toBe(true);
+    expect(diagnostics.second_pass).toBe(true);
+  });
+
+  it("recovers via the retry when the first pass's resolves fail transiently", async () => {
+    // Simulate a transient resolve failure: each vertex URI fails the first time
+    // it is seen (first pass) and succeeds the second time (retry pass).
+    const g = gemini([chunk("v1", "手足口病")]);
+    const seen = new Set<string>();
+    const resolve: UrlResolveFn = async (uri) => {
+      if (!seen.has(uri)) {
+        seen.add(uri);
+        return { vertexUri: uri, finalUrl: null, domain: null, error: "Too many subrequests" };
+      }
+      return bowtie(uri, "https://www.bowtie.com.hk/blog/hfmd");
+    };
+
+    const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
+      topic: "兒童夏日手足口病",
+      keywords: [],
+    });
+
+    expect(articles.map((a) => a.url)).toEqual(["https://www.bowtie.com.hk/blog/hfmd"]);
+    expect(diagnostics.second_pass).toBe(true);
+    expect(diagnostics.bowtie_hits).toBe(1);
+    expect(g.calls).toHaveLength(2);
   });
 });

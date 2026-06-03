@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -71,4 +72,28 @@ async def test_resolve_does_not_commit_callers_session(db_session):
         )
     )).scalars().all()
     # If resolve() had committed, these would survive the rollback.
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_is_not_cached(db_session):
+    """A failed HEAD (timeout, network blip, or Workers' "Too many subrequests"
+    cap) must NOT be persisted: caching it for the 7-day TTL would poison the URL
+    and starve later topic-dedup runs of real candidates. The next encounter
+    must be free to retry, so no cache row may be written."""
+    vertex = "https://vertexaisearch.cloud.google.com/boom"
+
+    resolver = UrlResolver(session=db_session, timeout=5.0)
+    with respx.mock(assert_all_called=True) as router:
+        router.head(vertex).mock(
+            side_effect=httpx.ConnectError("Too many subrequests by single Worker invocation.")
+        )
+        resolved = await resolver.resolve(vertex)
+
+    assert resolved.final_url is None
+    assert resolved.error is not None
+
+    rows = (await db_session.execute(
+        select(UrlResolutionCache).where(UrlResolutionCache.vertex_uri == vertex)
+    )).scalars().all()
     assert rows == []
