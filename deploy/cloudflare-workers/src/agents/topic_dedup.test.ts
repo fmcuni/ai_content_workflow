@@ -147,7 +147,7 @@ describe("runTopicDedup", () => {
     const gemini = fakeGemini();
     const sql = makeFakeSql();
 
-    const { output, tokens } = await runTopicDedup(sql, gemini, baseInput(), fakeResolve);
+    const { output, tokens, stage1 } = await runTopicDedup(sql, gemini, baseInput(), fakeResolve);
 
     expect(output.existing).toBe("yes");
     expect(output.existing_url).toBe("https://www.bowtie.com.hk/blog/foo");
@@ -157,6 +157,11 @@ describe("runTopicDedup", () => {
       thinkingTokens: 100,
       latencyMs: 10,
     });
+    // Stage-1 diagnostics are surfaced for persistence: a clean first pass.
+    expect(stage1.bowtie_hits).toBe(2);
+    expect(stage1.resolve_failures).toBe(0);
+    expect(stage1.second_pass).toBe(false);
+    expect(stage1.grounding_empty).toBe(false);
   });
 
   it("blanks a fabricated URL and downgrades yes → not_sure", async () => {
@@ -183,9 +188,65 @@ describe("runTopicDedup", () => {
 
     await runTopicDedup(sql, gemini, baseInput(), fakeResolve);
 
-    const judge = gemini.calls[1];
+    // Empty first pass triggers ONE retry, so the judge is the 3rd call:
+    // search(empty) -> search-retry(empty) -> judge.
+    expect(gemini.calls.map((c) => c.agent)).toEqual([
+      "topic_existing_search",
+      "topic_existing_search",
+      "topic_dedup",
+    ]);
+    const judge = gemini.calls.find((c) => c.agent === "topic_dedup");
     if (judge === undefined) throw new Error("expected a judge call");
     expect(judge.userPrompt).toContain("候選文章：（無，搜尋不到相關文章）");
+  });
+
+  it("downgrades a 'no' to 'not_sure' when the empty list was caused by resolve failures", async () => {
+    // Grounding returns chunks, but every resolve fails (finalUrl null) — the
+    // transient-failure signature (e.g. the Workers subrequest cap). A real
+    // article may exist, so a confident "no" must not silently hide it.
+    const failing: UrlResolveFn = async (uri) => ({
+      vertexUri: uri,
+      finalUrl: null,
+      domain: null,
+      error: "Too many subrequests",
+    });
+    const gemini = new FakeGeminiClient(
+      {
+        topic_dedup: {
+          existing: "no",
+          existing_note: "候選清單為空。",
+          existing_url: "",
+        },
+      },
+      { topic_existing_search: GROUNDING },
+    );
+
+    const { output, stage1 } = await runTopicDedup(makeFakeSql(), gemini, baseInput(), failing);
+
+    expect(stage1.resolve_failures).toBeGreaterThan(0);
+    expect(stage1.second_pass).toBe(true); // empty first pass was retried
+    expect(output.existing).toBe("not_sure");
+    expect(output.existing_note).toContain("請人手覆檢");
+  });
+
+  it("leaves a genuine 'no' (empty grounding, no resolve failures) untouched", async () => {
+    const gemini = new FakeGeminiClient(
+      {
+        topic_dedup: {
+          existing: "no",
+          existing_note: "候選清單為空，網誌未有此主題。",
+          existing_url: "",
+        },
+      },
+      { topic_existing_search: [] },
+    );
+
+    const { output, stage1 } = await runTopicDedup(makeFakeSql(), gemini, baseInput(), fakeResolve);
+
+    expect(stage1.grounding_empty).toBe(true);
+    expect(stage1.resolve_failures).toBe(0);
+    expect(output.existing).toBe("no");
+    expect(output.existing_note).not.toContain("請人手覆檢");
   });
 });
 

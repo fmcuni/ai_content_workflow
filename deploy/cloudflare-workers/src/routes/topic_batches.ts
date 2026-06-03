@@ -100,6 +100,7 @@ interface TopicCandidateOut {
   existing_url: string | null;
   hot_topic: string | null;
   hot_topic_note: string | null;
+  existing_search_debug: unknown;
   persona_slug: string | null;
   acf_adv_id: number | null;
   acf_widget_id: number | null;
@@ -174,6 +175,7 @@ interface CandidateRow {
   existing_url: string | null;
   hot_topic: string | null;
   hot_topic_note: string | null;
+  existing_search_debug: unknown;
   persona_slug: string | null;
   acf_adv_id: number | null;
   acf_widget_id: number | null;
@@ -197,9 +199,9 @@ const BATCH_COLUMNS = `
 const CANDIDATE_COLUMNS = `
   candidate_id, batch_id, position, status, topic, keywords, original_topic,
   original_keywords, existing, existing_note, existing_url, hot_topic,
-  hot_topic_note, persona_slug, acf_adv_id, acf_widget_id, operator_note,
-  promote_mode, promoted_run_id, last_error, last_edited_by, last_edited_at,
-  created_at, updated_at
+  hot_topic_note, existing_search_debug, persona_slug, acf_adv_id, acf_widget_id,
+  operator_note, promote_mode, promoted_run_id, last_error, last_edited_by,
+  last_edited_at, created_at, updated_at
 `;
 
 // ---------------------------------------------------------------------------
@@ -244,6 +246,7 @@ function toCandidateOut(row: CandidateRow): TopicCandidateOut {
     existing_url: row.existing_url,
     hot_topic: row.hot_topic,
     hot_topic_note: row.hot_topic_note,
+    existing_search_debug: pgJson(row.existing_search_debug) ?? null,
     persona_slug: row.persona_slug,
     acf_adv_id: row.acf_adv_id,
     acf_widget_id: row.acf_widget_id,

@@ -42,6 +42,34 @@ export interface ExistingArticle {
 }
 
 /**
+ * Why stage-1 produced the candidate list it did — built from local loop
+ * counters (zero extra subrequests) and persisted per candidate so an
+ * empty-candidate "no" verdict is explainable. `resolveFailures > 0` with an
+ * empty list is the transient-failure signature (e.g. the Workers subrequest
+ * cap) rather than a genuine "no such article".
+ *
+ * Field names are snake_case to stay byte-identical to the Python
+ * `Stage1Diagnostics` so the persisted `existing_search_debug` row shape is
+ * shared across both backends.
+ */
+export interface Stage1Diagnostics {
+  grounding_chunks: number;
+  resolve_attempts: number;
+  resolved_count: number;
+  bowtie_hits: number;
+  filtered_out: number;
+  resolve_failures: number;
+  attempt_cap_hit: boolean;
+  grounding_empty: boolean;
+  second_pass: boolean;
+}
+
+export interface Stage1Result {
+  articles: ExistingArticle[];
+  diagnostics: Stage1Diagnostics;
+}
+
+/**
  * Resolves a vertexaisearch redirect URI to its final URL + apex domain. The
  * workflow wires `(uri) => resolveUrl(sql, uri)`; tests inject a stub. Injecting
  * it keeps this agent free of network so it stays unit-testable.
@@ -68,20 +96,17 @@ export function buildUserPrompt(opts: { topic: string; keywords: string[] }): st
 }
 
 /**
- * Grounded search → resolved real bowtie article URLs (deduped, capped).
- *
- * Returns an empty array when the model found no grounded bowtie article — the
- * correct, non-hallucinated "nothing exists yet" signal for stage 2.
+ * One grounded search pass: grounding chunks → resolved bowtie articles, with a
+ * `Stage1Diagnostics` built from local counters so the caller can tell a genuine
+ * "nothing found" apart from a resolve failure.
  */
-export async function runExistingArticleSearch(
-  sql: Sql,
+async function searchOnce(
   gemini: GeminiClient,
   resolve: UrlResolveFn,
-  input: { topic: string; keywords: string[] },
-): Promise<ExistingArticle[]> {
-  const systemPrompt = await buildSystemPrompt(sql);
-  const userPrompt = buildUserPrompt(input);
-
+  systemPrompt: string,
+  userPrompt: string,
+  secondPass: boolean,
+): Promise<Stage1Result> {
   const result = await gemini.generate({
     agent: "topic_existing_search",
     systemPrompt,
@@ -90,23 +115,89 @@ export async function runExistingArticleSearch(
     tools: ["googleSearch"],
   });
 
+  const chunks = result.groundingChunks ?? [];
   const seen = new Set<string>();
   const articles: ExistingArticle[] = [];
   let attempts = 0;
-  for (const chunk of result.groundingChunks ?? []) {
+  let resolvedCount = 0;
+  let bowtieHits = 0;
+  let filteredOut = 0;
+  let resolveFailures = 0;
+  let attemptCapHit = false;
+  for (const chunk of chunks) {
     const web = (chunk as { web?: GroundingWeb }).web;
     const vertexUri = web?.uri;
     if (!vertexUri) continue;
-    if (attempts >= MAX_RESOLVE_ATTEMPTS) break;
+    if (attempts >= MAX_RESOLVE_ATTEMPTS) {
+      attemptCapHit = true;
+      break;
+    }
     attempts += 1;
     const resolved = await resolve(vertexUri);
     const finalUrl = resolved.finalUrl;
-    if (!finalUrl || resolved.domain !== BOWTIE_DOMAIN) continue;
+    // No final URL = a resolve *failure* (HEAD timeout, network blip, or the
+    // Workers subrequest cap) — distinct from a successful resolve to a
+    // non-bowtie competitor domain, which is a filter.
+    if (!finalUrl) {
+      resolveFailures += 1;
+      continue;
+    }
+    resolvedCount += 1;
+    if (resolved.domain !== BOWTIE_DOMAIN) {
+      filteredOut += 1;
+      continue;
+    }
+    bowtieHits += 1;
     const key = finalUrl.replace(/\/+$/, "");
     if (seen.has(key)) continue;
     seen.add(key);
     articles.push({ url: finalUrl, title: web?.title ?? null });
     if (articles.length >= MAX_CANDIDATES) break;
   }
-  return articles;
+
+  return {
+    articles,
+    diagnostics: {
+      grounding_chunks: chunks.length,
+      resolve_attempts: attempts,
+      resolved_count: resolvedCount,
+      bowtie_hits: bowtieHits,
+      filtered_out: filteredOut,
+      resolve_failures: resolveFailures,
+      attempt_cap_hit: attemptCapHit,
+      grounding_empty: chunks.length === 0,
+      second_pass: secondPass,
+    },
+  };
+}
+
+/**
+ * Grounded search → resolved real bowtie article URLs (deduped, capped) plus
+ * the diagnostics explaining the result.
+ *
+ * Returns an empty article list when the model found no grounded bowtie article
+ * — the correct, non-hallucinated "nothing exists yet" signal for stage 2.
+ *
+ * An empty first pass is RETRIED once. The grounded search is reliable in
+ * isolation (it returns the real bowtie article for these topics); an empty
+ * result almost always means a transient in-run failure — the search tool
+ * returned no chunks, or every resolve failed under the Workers per-invocation
+ * subrequest budget while several candidates were analysed concurrently. A
+ * single retry recovers those without doubling cost on the common (non-empty)
+ * path. The decisive (second) pass's diagnostics are returned, flagged
+ * `second_pass: true`.
+ */
+export async function runExistingArticleSearch(
+  sql: Sql,
+  gemini: GeminiClient,
+  resolve: UrlResolveFn,
+  input: { topic: string; keywords: string[] },
+): Promise<Stage1Result> {
+  const systemPrompt = await buildSystemPrompt(sql);
+  const userPrompt = buildUserPrompt(input);
+
+  const first = await searchOnce(gemini, resolve, systemPrompt, userPrompt, false);
+  if (first.articles.length > 0) return first;
+
+  return searchOnce(gemini, resolve, systemPrompt, userPrompt, true);
 }

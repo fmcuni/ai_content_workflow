@@ -290,6 +290,7 @@ def _candidate_to_out(row: TopicCandidate) -> TopicCandidateOut:
         existing_url=row.existing_url,
         hot_topic=row.hot_topic,  # type: ignore[arg-type]
         hot_topic_note=row.hot_topic_note,
+        existing_search_debug=row.existing_search_debug,
         persona_slug=row.persona_slug,
         acf_adv_id=row.acf_adv_id,
         acf_widget_id=row.acf_widget_id,

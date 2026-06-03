@@ -18,11 +18,18 @@ import { getAssembled } from "../prompts/store";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import {
   type ExistingArticle,
+  type Stage1Diagnostics,
   type UrlResolveFn,
   runExistingArticleSearch,
 } from "./topic_existing_search";
 import { resolveUrl } from "./url_resolver";
 import { TOPIC_DEDUP_SCHEMA, type TopicDedupOutput } from "./topic_schemas";
+
+// Appended to `existing_note` when stage-1 could not confirm the candidate list
+// because resolves failed (so a real article may have been missed). Kept
+// byte-identical to the Python `_DEGRADED_NOTE_SUFFIX`.
+const DEGRADED_NOTE_SUFFIX =
+  "（系統提示：檢索時連結解析失敗，未能確認是否已有文章，請人手覆檢。）";
 
 export interface TopicDedupInput {
   topic: string;
@@ -87,20 +94,47 @@ function constrainToCandidates(
 }
 
 /**
+ * Never report a confident "no" when stage-1 could not actually confirm. If the
+ * candidate list is empty *because* every resolve failed (chunks were returned
+ * but none resolved — the transient-failure signature, e.g. the Workers
+ * subrequest cap), a "no" is not trustworthy: a real, live article may have
+ * been missed. Downgrade it to `not_sure` and annotate the note so the operator
+ * double-checks. A genuine empty grounding (`resolve_failures === 0`) is left
+ * untouched.
+ */
+function applyDegradedGuard(
+  output: TopicDedupOutput,
+  candidates: ExistingArticle[],
+  diagnostics: Stage1Diagnostics,
+): TopicDedupOutput {
+  if (candidates.length === 0 && diagnostics.resolve_failures > 0 && output.existing === "no") {
+    return {
+      ...output,
+      existing: "not_sure",
+      existing_note: output.existing_note + DEGRADED_NOTE_SUFFIX,
+    };
+  }
+  return output;
+}
+
+/**
  * Run the two-stage topic-dedup for one candidate. `sql` backs the stage-1 URL
  * resolver (vertexaisearch redirect → real URL, cached in url_resolution_cache).
  * `resolve` is injectable for tests; it defaults to the sql-backed resolver.
+ * Returns the verdict, token usage, and the stage-1 diagnostics (persisted for
+ * observability).
  */
 export async function runTopicDedup(
   sql: Sql,
   gemini: GeminiClient,
   input: TopicDedupInput,
   resolve: UrlResolveFn = (uri) => resolveUrl(sql, uri),
-): Promise<{ output: TopicDedupOutput; tokens: TopicDedupTokens }> {
-  const candidates = await runExistingArticleSearch(sql, gemini, resolve, {
+): Promise<{ output: TopicDedupOutput; tokens: TopicDedupTokens; stage1: Stage1Diagnostics }> {
+  const stage1 = await runExistingArticleSearch(sql, gemini, resolve, {
     topic: input.topic,
     keywords: input.keywords,
   });
+  const candidates = stage1.articles;
 
   const systemPrompt = await buildSystemPrompt(sql);
   const userPrompt = buildUserPrompt(
@@ -118,7 +152,8 @@ export async function runTopicDedup(
   });
 
   const raw = result.parsed as unknown as TopicDedupOutput;
-  const output = constrainToCandidates(raw, candidates);
+  const constrained = constrainToCandidates(raw, candidates);
+  const output = applyDegradedGuard(constrained, candidates, stage1.diagnostics);
 
   return {
     output,
@@ -128,5 +163,6 @@ export async function runTopicDedup(
       thinkingTokens: result.thinkingTokens,
       latencyMs: result.latencyMs,
     },
+    stage1: stage1.diagnostics,
   };
 }

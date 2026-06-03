@@ -9,7 +9,7 @@ with a custom Gemini stub. We exercise:
   ready_for_review``
 * one candidate that always raises through retries lands with
   ``last_error`` set but the batch still completes
-* the shared semaphore caps concurrent in-flight Gemini calls at 5
+* the shared semaphore caps concurrent in-flight candidates at CONCURRENCY_CAP
 """
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ async def test_topic_expansion_graph_end_to_end(
     """Happy path + one always-failing candidate.
 
     Hits all four nodes, verifies persisted rows + status transitions,
-    and asserts the semaphore caps candidate-level concurrency at five.
+    and asserts the semaphore caps candidate-level concurrency at CONCURRENCY_CAP.
     """
     caplog.set_level(logging.WARNING, logger="content_tool.graph.topic_expansion")
 

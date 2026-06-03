@@ -46,8 +46,12 @@ async def test_topic_dedup_returns_grounded_url():
         input=TopicDedupInput(topic="退保須知", keywords=["退保", "cash value"]),
     )
 
-    assert out.existing == "yes"
-    assert out.existing_url == "https://www.bowtie.com.hk/blog/zh/foo"
+    assert out.output.existing == "yes"
+    assert out.output.existing_url == "https://www.bowtie.com.hk/blog/zh/foo"
+    # Stage-1 diagnostics are surfaced for persistence.
+    assert out.stage1.bowtie_hits == 2
+    assert out.stage1.resolve_failures == 0
+    assert out.stage1.second_pass is False
 
 
 @pytest.mark.asyncio
@@ -90,8 +94,12 @@ async def test_hallucinated_url_is_blanked_and_downgraded():
         input=TopicDedupInput(topic="x", keywords=["k"]),
     )
 
-    assert out.existing_url == ""
-    assert out.existing == "not_sure"
+    assert out.output.existing_url == ""
+    assert out.output.existing == "not_sure"
+
+
+def _judge_call(client: FakeGeminiClient) -> dict:
+    return next(c for c in client.calls if c["agent"] == "topic_dedup")
 
 
 @pytest.mark.asyncio
@@ -105,8 +113,11 @@ async def test_no_grounded_candidates_renders_empty_list():
         input=TopicDedupInput(topic="x", keywords=[]),
     )
 
-    assert out.existing == "no"
-    judge = client.calls[1]
+    # Genuine empty grounding (no resolve failures) → "no" stands untouched.
+    assert out.output.existing == "no"
+    assert out.stage1.grounding_empty is True
+    assert out.stage1.resolve_failures == 0
+    judge = _judge_call(client)
     assert "候選文章：（無，搜尋不到相關文章）" in judge["user_prompt"]
     # Empty-keywords path renders 「（無）」 in the user prompt.
     assert "focus_keywords:\n（無）" in judge["user_prompt"]
@@ -129,5 +140,29 @@ async def test_non_bowtie_grounding_is_filtered_out():
         input=TopicDedupInput(topic="x", keywords=["k"]),
     )
 
-    assert out.existing == "no"
-    assert "候選文章：（無，搜尋不到相關文章）" in client.calls[1]["user_prompt"]
+    # Resolved cleanly to a competitor (a filter, not a failure) → "no" stands.
+    assert out.output.existing == "no"
+    assert "候選文章：（無，搜尋不到相關文章）" in _judge_call(client)["user_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_no_is_downgraded_to_not_sure_when_resolves_failed():
+    # Grounding returned chunks, but every resolve failed (the transient-failure
+    # signature, e.g. the Workers subrequest cap). A confident "no" must not
+    # silently hide a possibly-existing article.
+    async def failing_resolve(uri: str) -> ResolvedUrl:
+        return ResolvedUrl(uri, None, None, "Too many subrequests")
+
+    verdict = {"existing": "no", "existing_note": "候選清單為空。", "existing_url": ""}
+    client = _client(verdict, grounding=_GROUNDING)
+
+    out = await run_topic_dedup(
+        gemini=client,
+        resolve=failing_resolve,
+        input=TopicDedupInput(topic="兒童夏日手足口病", keywords=[]),
+    )
+
+    assert out.stage1.resolve_failures > 0
+    assert out.stage1.second_pass is True  # empty first pass was retried
+    assert out.output.existing == "not_sure"
+    assert "請人手覆檢" in out.output.existing_note
