@@ -3,6 +3,7 @@ import type { Sql } from "postgres";
 
 import {
   MAX_CANDIDATES,
+  MAX_RESOLVE_ATTEMPTS,
   runExistingArticleSearch,
   type UrlResolveFn,
 } from "./topic_existing_search";
@@ -121,6 +122,28 @@ describe("runExistingArticleSearch", () => {
     });
 
     expect(out).toHaveLength(MAX_CANDIDATES);
+  });
+
+  it("caps resolve attempts on a long mixed grounding list", async () => {
+    // Arrange — many non-bowtie chunks; an unbounded loop would HEAD them all and
+    // exhaust the Workers per-invocation subrequest budget.
+    const n = MAX_RESOLVE_ATTEMPTS + 10;
+    const chunks = Array.from({ length: n }, (_, i) => chunk(`v${i}`));
+    let calls = 0;
+    const resolve: UrlResolveFn = async (uri) => {
+      calls += 1;
+      return { vertexUri: uri, finalUrl: "https://example.com/x", domain: "example.com", error: null };
+    };
+
+    // Act
+    const out = await runExistingArticleSearch(makeFakeSql(), gemini(chunks), resolve, {
+      topic: "t",
+      keywords: [],
+    });
+
+    // Assert — stops at the cap, resolving no more than MAX_RESOLVE_ATTEMPTS.
+    expect(out).toEqual([]);
+    expect(calls).toBe(MAX_RESOLVE_ATTEMPTS);
   });
 
   it("returns an empty array when there are no grounding chunks", async () => {

@@ -114,6 +114,14 @@ export async function resolveUrl(
     error = truncateError(errorMessage(err));
   }
 
-  await upsertCache(sql, { vertexUri, finalUrl, domain, error });
+  // Only cache *successful* resolutions. A transient failure — a HEAD timeout, a
+  // network blip, or Cloudflare's "Too many subrequests by single Worker
+  // invocation" per-invocation cap — must NOT be persisted: the 7-day TTL would
+  // poison the URL so every later lookup returns a null domain, the existing
+  // article is dropped from the candidate list, and topic-dedup wrongly answers
+  // "no". Skipping the write lets the next encounter retry. Mirrors UrlResolver.
+  if (error === null) {
+    await upsertCache(sql, { vertexUri, finalUrl, domain, error });
+  }
   return { vertexUri, finalUrl, domain, error };
 }

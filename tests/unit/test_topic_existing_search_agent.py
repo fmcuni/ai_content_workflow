@@ -2,6 +2,7 @@ import pytest
 
 from content_tool.agents.topic_existing_search import (
     MAX_CANDIDATES,
+    MAX_RESOLVE_ATTEMPTS,
     run_existing_article_search,
 )
 from content_tool.agents.url_resolver import ResolvedUrl
@@ -108,6 +109,30 @@ async def test_caps_at_max_candidates():
     )
 
     assert len(out) == MAX_CANDIDATES
+
+
+@pytest.mark.asyncio
+async def test_caps_resolve_attempts_on_long_mixed_grounding():
+    """Bounds HEAD subrequests per search: a long grounding list of non-bowtie
+    chunks must not trigger an unbounded resolve loop, which on Cloudflare Workers
+    would exhaust the per-invocation subrequest budget shared across candidates.
+    We resolve at most MAX_RESOLVE_ATTEMPTS chunks, then stop."""
+    grounding = [_chunk(f"v{i}") for i in range(MAX_RESOLVE_ATTEMPTS + 10)]
+    calls = 0
+
+    async def resolve(uri: str) -> ResolvedUrl:
+        nonlocal calls
+        calls += 1
+        return ResolvedUrl(uri, "https://example.com/x", "example.com")
+
+    out = await run_existing_article_search(
+        gemini=_client(grounding),
+        resolve=resolve,
+        input=TopicDedupInput(topic="t", keywords=[]),
+    )
+
+    assert out == []
+    assert calls == MAX_RESOLVE_ATTEMPTS
 
 
 @pytest.mark.asyncio

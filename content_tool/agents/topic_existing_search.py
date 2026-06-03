@@ -37,6 +37,13 @@ _BOWTIE_DOMAIN = "bowtie.com.hk"
 # Cap the candidate list handed to the judge: enough to cover near-duplicates,
 # small enough to keep the stage-2 urlContext verification cheap.
 MAX_CANDIDATES = 5
+# Cap how many grounding chunks we HEAD-resolve per search. Each resolve is a
+# network subrequest; on Cloudflare Workers (the prod backend) these share a
+# per-invocation subrequest budget across the concurrently-analysed candidates,
+# so an unbounded loop over a long, mixed grounding list can exhaust the cap and
+# make every later resolve fail. Kept above MAX_CANDIDATES so a clean
+# site:-scoped search (mostly bowtie hits) still fills the candidate list.
+MAX_RESOLVE_ATTEMPTS = 12
 
 
 @dataclass(frozen=True)
@@ -84,11 +91,15 @@ async def run_existing_article_search(
 
     seen: set[str] = set()
     articles: list[ExistingArticle] = []
+    attempts = 0
     for chunk in result.grounding_chunks or []:
         web = cast("dict[str, Any]", chunk.get("web") or {})
         vertex_uri = web.get("uri")
         if not isinstance(vertex_uri, str) or not vertex_uri:
             continue
+        if attempts >= MAX_RESOLVE_ATTEMPTS:
+            break
+        attempts += 1
         resolved = await resolve(vertex_uri)
         final_url = resolved.final_url
         if not final_url or resolved.domain != _BOWTIE_DOMAIN:

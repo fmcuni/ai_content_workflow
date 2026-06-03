@@ -28,6 +28,13 @@ const BOWTIE_DOMAIN = "bowtie.com.hk";
 // Cap the candidate list handed to the judge: enough to cover near-duplicates,
 // small enough to keep the stage-2 urlContext verification cheap.
 export const MAX_CANDIDATES = 5;
+// Cap how many grounding chunks we HEAD-resolve per search. Each resolve is a
+// network subrequest; on Cloudflare Workers (the prod backend) these share a
+// per-invocation subrequest budget across the concurrently-analysed candidates,
+// so an unbounded loop over a long, mixed grounding list can exhaust the cap and
+// make every later resolve fail. Kept above MAX_CANDIDATES so a clean
+// site:-scoped search (mostly bowtie hits) still fills the candidate list.
+export const MAX_RESOLVE_ATTEMPTS = 12;
 
 export interface ExistingArticle {
   url: string;
@@ -85,10 +92,13 @@ export async function runExistingArticleSearch(
 
   const seen = new Set<string>();
   const articles: ExistingArticle[] = [];
+  let attempts = 0;
   for (const chunk of result.groundingChunks ?? []) {
     const web = (chunk as { web?: GroundingWeb }).web;
     const vertexUri = web?.uri;
     if (!vertexUri) continue;
+    if (attempts >= MAX_RESOLVE_ATTEMPTS) break;
+    attempts += 1;
     const resolved = await resolve(vertexUri);
     const finalUrl = resolved.finalUrl;
     if (!finalUrl || resolved.domain !== BOWTIE_DOMAIN) continue;

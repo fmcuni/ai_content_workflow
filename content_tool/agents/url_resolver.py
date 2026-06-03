@@ -48,26 +48,34 @@ class UrlResolver:
                 domain = None
                 error = str(e)
 
-            stmt = insert(UrlResolutionCache).values(
-                vertex_uri=vertex_uri, final_url=final, domain=domain, error=error,
-                expires_at=datetime.now(UTC) + self._ttl,
-            ).on_conflict_do_update(
-                index_elements=["vertex_uri"],
-                set_={"final_url": final, "domain": domain, "error": error,
-                      "resolved_at": datetime.now(UTC),
-                      "expires_at": datetime.now(UTC) + self._ttl},
-            )
-            await self._session.execute(stmt)
-            # flush (not commit): resolve() runs inside the caller's transaction
-            # (resolve_citations accumulates Citation rows across the grounding
-            # loop and commits once at the end). Committing here would prematurely
-            # persist earlier iterations' Citations, so a later failure could leave
-            # a partial, un-rollback-able write. flush makes the cache row visible
-            # to subsequent lookups within this transaction while leaving the
-            # commit boundary to the caller. Mirrors the Workers port, where the
-            # cache upsert and citation inserts are separate statements that only
-            # land together when the surrounding step succeeds.
-            await self._session.flush()
+            # Only cache *successful* resolutions. A transient failure — a HEAD
+            # timeout, a network blip, or Cloudflare's "Too many subrequests by
+            # single Worker invocation" per-invocation cap — must NOT be
+            # persisted: the 7-day TTL would poison the URL so every later
+            # lookup returns a null domain, the existing article is dropped from
+            # the candidate list, and topic-dedup wrongly answers "no". Skipping
+            # the write lets the next encounter retry instead.
+            if error is None:
+                stmt = insert(UrlResolutionCache).values(
+                    vertex_uri=vertex_uri, final_url=final, domain=domain, error=error,
+                    expires_at=datetime.now(UTC) + self._ttl,
+                ).on_conflict_do_update(
+                    index_elements=["vertex_uri"],
+                    set_={"final_url": final, "domain": domain, "error": error,
+                          "resolved_at": datetime.now(UTC),
+                          "expires_at": datetime.now(UTC) + self._ttl},
+                )
+                await self._session.execute(stmt)
+                # flush (not commit): resolve() runs inside the caller's transaction
+                # (resolve_citations accumulates Citation rows across the grounding
+                # loop and commits once at the end). Committing here would prematurely
+                # persist earlier iterations' Citations, so a later failure could leave
+                # a partial, un-rollback-able write. flush makes the cache row visible
+                # to subsequent lookups within this transaction while leaving the
+                # commit boundary to the caller. Mirrors the Workers port, where the
+                # cache upsert and citation inserts are separate statements that only
+                # land together when the surrounding step succeeds.
+                await self._session.flush()
             return ResolvedUrl(vertex_uri, final, domain, error)
         finally:
             if own:
