@@ -64,8 +64,12 @@ const DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_THINKING_LEVEL = "HIGH";
 /** WordPress "use the theme default page template" — mirrors WP_DEFAULT_PAGE_TEMPLATE. */
 const WP_DEFAULT_PAGE_TEMPLATE = "";
-/** HITL waitForEvent timeout — generous so a paused run survives overnight. */
-const HITL_TIMEOUT = "24 hours";
+// HITL waitForEvent timeout. We do NOT want HITL gates to expire — a paused run
+// must survive until a human acts on it. Cloudflare `waitForEvent` always has a
+// timeout (omitting it silently reverts to the 24h default, which is exactly the
+// expiry we are removing), so we pin it to the platform maximum: 1 year, the same
+// cap as `step.sleep`. This is "effectively never" for our purposes.
+const HITL_TIMEOUT = "1 year";
 
 interface Params {
   runId: string;
