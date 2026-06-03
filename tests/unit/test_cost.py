@@ -13,6 +13,21 @@ def test_calculates_cost_usd_cents():
     assert cents == 9
 
 
+def test_prices_gemini_3_1_pro_preview():
+    c = CostCalculator.load_from("config/pricing.yaml")
+    cents = c.estimate_cents(
+        model="gemini-3.1-pro-preview",
+        tokens_in=100_000,
+        tokens_out=20_000,
+        thinking_tokens=5_000,
+    )
+    # 100_000/1e6 * 2.00 = 0.20    USD
+    # 20_000/1e6 * 12.00 = 0.24    USD
+    # 5_000/1e6 * 12.00  = 0.06    USD
+    # total              = 0.50 USD = 50 cents
+    assert cents == 50
+
+
 def test_cost_calculator_handles_refresh_scan_inputs():
     """Sanity guard: estimate_cents works for typical refresh_scan token volumes.
 

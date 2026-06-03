@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import and_, select, text
 
-from content_tool.config import config_path
+from content_tool.config import config_path, get_settings
 from content_tool.db.models import Draft, GapAnalysisRow, Run
 from content_tool.observability.cost import CostCalculator
 
@@ -42,8 +42,12 @@ async def cost_for_run(
             tout += d.tokens_out or 0
             tthk += d.thinking_tokens or 0
 
+        # Price by the model the run actually used. gap_analyses.model is the
+        # only per-run model record; create-mode runs have no GA row, so fall
+        # back to the currently-configured default model.
+        model = ga.model if ga else get_settings().gemini_model
         cents = calc.estimate_cents(
-            model="gemini-3.5-flash",
+            model=model,
             tokens_in=tin,
             tokens_out=tout,
             thinking_tokens=tthk,
@@ -91,8 +95,9 @@ async def cost_summary(
                 tin += d.tokens_in or 0
                 tout += d.tokens_out or 0
                 tthk += d.thinking_tokens or 0
+            model = ga.model if ga else get_settings().gemini_model
             total_cents += calc.estimate_cents(
-                model="gemini-3.5-flash",
+                model=model,
                 tokens_in=tin,
                 tokens_out=tout,
                 thinking_tokens=tthk,

@@ -4,13 +4,13 @@
 //   GET /summary    ?start=YYYY-MM-DD&end=YYYY-MM-DD  (both required)
 //   GET /run/:runId
 //
-// Cost math + rounding live in src/db/costs.ts (truncating int cents at the
-// gemini-3.5-flash rate, matching the Python `CostCalculator`).
+// Cost math + rounding live in src/db/costs.ts (truncating int cents, priced by
+// each run's actual gap_analyses.model, matching the Python `CostCalculator`).
 
 import { Hono } from "hono";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
-import { getCostSummary, getRunCost } from "../db/costs";
+import { DEFAULT_MODEL, getCostSummary, getRunCost } from "../db/costs";
 
 const costsRouter = new Hono<{ Bindings: Env }>();
 
@@ -50,13 +50,19 @@ costsRouter.get("/summary", async (c) => {
     );
   }
 
-  const summary = await withDb(c.env, c.executionCtx, (sql) => getCostSummary(sql, start, end));
+  const fallbackModel = c.env.GEMINI_MODEL ?? DEFAULT_MODEL;
+  const summary = await withDb(c.env, c.executionCtx, (sql) =>
+    getCostSummary(sql, start, end, fallbackModel),
+  );
   return c.json(summary);
 });
 
 costsRouter.get("/run/:runId", async (c) => {
   const runId = c.req.param("runId");
-  const result = await withDb(c.env, c.executionCtx, (sql) => getRunCost(sql, runId));
+  const fallbackModel = c.env.GEMINI_MODEL ?? DEFAULT_MODEL;
+  const result = await withDb(c.env, c.executionCtx, (sql) =>
+    getRunCost(sql, runId, fallbackModel),
+  );
   if (result === null) {
     return c.json({ detail: "no usage" }, 404);
   }

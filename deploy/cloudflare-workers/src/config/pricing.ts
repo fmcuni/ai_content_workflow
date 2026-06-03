@@ -18,6 +18,13 @@ export interface ModelPricing {
 export type PricingTable = Readonly<Record<string, ModelPricing>>;
 
 export const PRICING: PricingTable = {
+  // Standard (paid) tier, prompts <= 200k tokens. The long-context (>200k)
+  // rates are intentionally not modelled — this tool stays well under 200k.
+  "gemini-3.1-pro-preview": {
+    input_per_million_usd: 2.0,
+    output_per_million_usd: 12.0,
+    thinking_per_million_usd: 12.0,
+  },
   "gemini-3.5-flash": {
     input_per_million_usd: 0.3,
     output_per_million_usd: 2.5,

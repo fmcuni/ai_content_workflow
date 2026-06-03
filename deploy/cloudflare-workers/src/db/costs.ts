@@ -7,15 +7,18 @@
 //       + thinking_tokens/1e6 * thinking_rate
 //   cents = int(usd * 100)   // Python int() TRUNCATES toward zero
 //
-// All per-run cost uses the "gemini-3.5-flash" rate, exactly as the Python
-// routes hardcode `model="gemini-3.5-flash"` for both /summary and /run.
+// Per-run cost is priced by the model the run actually used: gap_analyses.model
+// (the only per-run model record). Create-mode runs have no GA row, so the
+// caller passes a `fallbackModel` (GEMINI_MODEL ?? DEFAULT_MODEL) used in that
+// case — mirroring the Python route's `ga.model if ga else settings.gemini_model`.
 // refresh_scan_30d does NOT use these rates — it sums the precomputed
 // `est_cost_usd_cents` column straight from refresh_evaluations.
 
 import { PRICING } from "../config/pricing";
 import type { getSql } from "./client";
 
-const COST_MODEL = "gemini-3.5-flash";
+/** Fallback Gemini model when a run has no gap-analysis row (create mode). */
+export const DEFAULT_MODEL = "gemini-3.1-pro-preview";
 
 /** Token triple summed across a run's gap analysis + drafts. */
 export interface TokenTotals {
@@ -53,6 +56,8 @@ function n(value: number | null | undefined): number {
 
 interface RunTokenRow {
   run_id: string;
+  // gap_analyses.model for the run (null when no GA row → create mode).
+  ga_model: string | null;
   // GA columns are `integer` over the wire (numbers); draft columns come from
   // `SUM()` and arrive as strings under `fetch_types: false` — both are coerced
   // through `num()` so the per-run math never falls into JS string concatenation.
@@ -73,7 +78,10 @@ interface RunTokenRow {
  * added arithmetically, never concatenated. Returns both the token totals and
  * the truncated per-run cents.
  */
-export function runTokensAndCents(row: RunTokenRow): { totals: TokenTotals; cents: number } {
+export function runTokensAndCents(
+  row: RunTokenRow,
+  fallbackModel: string,
+): { totals: TokenTotals; cents: number } {
   const totals: TokenTotals = {
     tokens_in: num(row.ga_tokens_in) + num(row.draft_tokens_in),
     tokens_out: num(row.ga_tokens_out) + num(row.draft_tokens_out),
@@ -82,7 +90,7 @@ export function runTokensAndCents(row: RunTokenRow): { totals: TokenTotals; cent
   return {
     totals,
     cents: estimateCents(
-      COST_MODEL,
+      row.ga_model ?? fallbackModel,
       totals.tokens_in,
       totals.tokens_out,
       totals.thinking_tokens,
@@ -91,10 +99,10 @@ export function runTokensAndCents(row: RunTokenRow): { totals: TokenTotals; cent
 }
 
 /** Sum truncated per-run cents across all run rows (Python total_cents loop). */
-export function sumRunCents(rows: readonly RunTokenRow[]): number {
+export function sumRunCents(rows: readonly RunTokenRow[], fallbackModel: string): number {
   let totalCents = 0;
   for (const row of rows) {
-    totalCents += runTokensAndCents(row).cents;
+    totalCents += runTokensAndCents(row, fallbackModel).cents;
   }
   return totalCents;
 }
@@ -125,9 +133,10 @@ export interface CostSummary {
 
 /**
  * Replicates `/costs/summary`. Sums the gap-analysis row (one-or-none per run)
- * plus all drafts per run, applies the gemini-3.5-flash rate, truncates to
- * cents PER RUN, then sums those per-run cents — exactly as the Python loop
- * does (each `estimate_cents` call truncates independently before summing).
+ * plus all drafts per run, prices each run at its own `gap_analyses.model`
+ * (or `fallbackModel` when the run has no GA row), truncates to cents PER RUN,
+ * then sums those per-run cents — exactly as the Python loop does (each
+ * `estimate_cents` call truncates independently before summing).
  *
  * `refresh_scan_30d` is ALWAYS the last 30 days from refresh_evaluations
  * (hardcoded `now() - INTERVAL '30 days'`), independent of [start, end].
@@ -136,6 +145,7 @@ export async function getCostSummary(
   sql: ReturnType<typeof getSql>,
   start: string,
   end: string,
+  fallbackModel: string,
 ): Promise<CostSummary> {
   // One row per run, with token totals split into GA vs drafts so we can match
   // the Python `(ga.x or 0) + sum(draft.x or 0)` semantics in JS.
@@ -154,6 +164,7 @@ export async function getCostSummary(
   const rows = await sql<RunTokenRow[]>`
     SELECT
       r.run_id                       AS run_id,
+      ga.model                       AS ga_model,
       ga.tokens_in                   AS ga_tokens_in,
       ga.tokens_out                  AS ga_tokens_out,
       ga.thinking_tokens             AS ga_thinking_tokens,
@@ -175,7 +186,7 @@ export async function getCostSummary(
       AND r.created_at < (${end}::date + INTERVAL '1 day')
   `;
 
-  const totalCents = sumRunCents(rows);
+  const totalCents = sumRunCents(rows, fallbackModel);
 
   const refreshRows = await sql<RefreshScanRow[]>`
     SELECT
@@ -209,11 +220,17 @@ export interface RunCost extends TokenTotals {
 export async function getRunCost(
   sql: ReturnType<typeof getSql>,
   runId: string,
+  fallbackModel: string,
 ): Promise<RunCost | null> {
   const gaRows = await sql<
-    { tokens_in: number | null; tokens_out: number | null; thinking_tokens: number | null }[]
+    {
+      model: string | null;
+      tokens_in: number | null;
+      tokens_out: number | null;
+      thinking_tokens: number | null;
+    }[]
   >`
-    SELECT tokens_in, tokens_out, thinking_tokens
+    SELECT model, tokens_in, tokens_out, thinking_tokens
     FROM content_tool.gap_analyses
     WHERE run_id = ${runId}::uuid
     LIMIT 1
@@ -244,6 +261,6 @@ export async function getRunCost(
     tokens_in: tin,
     tokens_out: tout,
     thinking_tokens: tthk,
-    est_usd_cents: estimateCents(COST_MODEL, tin, tout, tthk),
+    est_usd_cents: estimateCents(ga?.model ?? fallbackModel, tin, tout, tthk),
   };
 }

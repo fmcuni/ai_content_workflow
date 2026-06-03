@@ -3,14 +3,24 @@ import { describe, expect, it } from "vitest";
 import { estimateCents, runTokensAndCents, sumRunCents } from "./costs";
 
 // gemini-3.5-flash rates (USD per 1M): input 0.3, output 2.5, thinking 2.5.
-// cents = trunc((tin/1e6*0.3 + tout/1e6*2.5 + tthk/1e6*2.5) * 100)
+// gemini-3.1-pro-preview rates (USD per 1M): input 2.0, output 12.0, thinking 12.0.
+// cents = trunc((tin/1e6*in + tout/1e6*out + tthk/1e6*thk) * 100)
+//
+// Per-run pricing uses row.ga_model when present, else the fallbackModel arg.
+const FLASH = "gemini-3.5-flash";
 
 describe("estimateCents", () => {
   it("truncates toward zero like Python int(usd*100)", () => {
     // Arrange: chosen so usd*100 has a fractional part that must be dropped.
     // 1_000_000 in => 0.3 usd => 30 cents exactly.
     // Act / Assert
-    expect(estimateCents("gemini-3.5-flash", 1_000_000, 0, 0)).toBe(30);
+    expect(estimateCents(FLASH, 1_000_000, 0, 0)).toBe(30);
+  });
+
+  it("prices gemini-3.1-pro-preview at its own (higher) rates", () => {
+    // 1_000_000 in => 2.0 usd => 200 cents; output/thinking at 12.0/M.
+    expect(estimateCents("gemini-3.1-pro-preview", 1_000_000, 0, 0)).toBe(200);
+    expect(estimateCents("gemini-3.1-pro-preview", 0, 1_000_000, 1_000_000)).toBe(2400);
   });
 
   it("returns 0 for an unknown model", () => {
@@ -19,7 +29,7 @@ describe("estimateCents", () => {
 
   it("truncates small sub-cent token counts to 0", () => {
     // 3837 in + 2953 out + 4501 thinking ≈ 0.0196 usd => 1.96 cents => 1.
-    expect(estimateCents("gemini-3.5-flash", 3837, 2953, 4501)).toBe(1);
+    expect(estimateCents(FLASH, 3837, 2953, 4501)).toBe(1);
   });
 });
 
@@ -30,6 +40,7 @@ describe("runTokensAndCents — string SUM coercion (regression)", () => {
     // `n()` path did `3837 + "2953"` => "38372953" (string concat) and blew up.
     const row = {
       run_id: "r1",
+      ga_model: FLASH,
       ga_tokens_in: 3837,
       ga_tokens_out: 2953,
       ga_thinking_tokens: 4501,
@@ -39,7 +50,7 @@ describe("runTokensAndCents — string SUM coercion (regression)", () => {
     };
 
     // Act
-    const { totals } = runTokensAndCents(row);
+    const { totals } = runTokensAndCents(row, FLASH);
 
     // Assert: arithmetic addition, NOT concatenation.
     expect(totals).toEqual({
@@ -52,6 +63,7 @@ describe("runTokensAndCents — string SUM coercion (regression)", () => {
   it("treats null token columns as 0 (Python `x or 0`)", () => {
     const row = {
       run_id: "r1",
+      ga_model: FLASH,
       ga_tokens_in: null,
       ga_tokens_out: null,
       ga_thinking_tokens: null,
@@ -60,7 +72,7 @@ describe("runTokensAndCents — string SUM coercion (regression)", () => {
       draft_thinking_tokens: null,
     };
 
-    const { totals, cents } = runTokensAndCents(row);
+    const { totals, cents } = runTokensAndCents(row, FLASH);
 
     expect(totals).toEqual({ tokens_in: 0, tokens_out: 0, thinking_tokens: 0 });
     expect(cents).toBe(0);
@@ -69,6 +81,7 @@ describe("runTokensAndCents — string SUM coercion (regression)", () => {
   it("handles numeric draft sums too (no fetch_types dependence)", () => {
     const row = {
       run_id: "r1",
+      ga_model: FLASH,
       ga_tokens_in: 100,
       ga_tokens_out: 0,
       ga_thinking_tokens: 0,
@@ -77,9 +90,41 @@ describe("runTokensAndCents — string SUM coercion (regression)", () => {
       draft_thinking_tokens: 0,
     };
 
-    const { totals } = runTokensAndCents(row);
+    const { totals } = runTokensAndCents(row, FLASH);
 
     expect(totals.tokens_in).toBe(150);
+  });
+
+  it("prices by the run's ga_model, not the fallback", () => {
+    // ga_model = pro; even though fallbackModel is flash, the pro rate applies.
+    const row = {
+      run_id: "r1",
+      ga_model: "gemini-3.1-pro-preview",
+      ga_tokens_in: 1_000_000,
+      ga_tokens_out: 0,
+      ga_thinking_tokens: 0,
+      draft_tokens_in: 0,
+      draft_tokens_out: 0,
+      draft_thinking_tokens: 0,
+    };
+
+    expect(runTokensAndCents(row, FLASH).cents).toBe(200); // pro: 1M in * $2.0
+  });
+
+  it("falls back to fallbackModel when ga_model is null (create mode)", () => {
+    const row = {
+      run_id: "r1",
+      ga_model: null,
+      ga_tokens_in: 1_000_000,
+      ga_tokens_out: 0,
+      ga_thinking_tokens: 0,
+      draft_tokens_in: 0,
+      draft_tokens_out: 0,
+      draft_thinking_tokens: 0,
+    };
+
+    // fallback = pro => 200 cents; would be 30 under flash.
+    expect(runTokensAndCents(row, "gemini-3.1-pro-preview").cents).toBe(200);
   });
 });
 
@@ -90,6 +135,7 @@ describe("sumRunCents — per-run truncation then sum", () => {
     const rows = [
       {
         run_id: "a",
+        ga_model: FLASH,
         ga_tokens_in: 3837,
         ga_tokens_out: 2953,
         ga_thinking_tokens: 4501,
@@ -99,6 +145,7 @@ describe("sumRunCents — per-run truncation then sum", () => {
       },
       {
         run_id: "b",
+        ga_model: FLASH,
         ga_tokens_in: 3837,
         ga_tokens_out: 2953,
         ga_thinking_tokens: 4501,
@@ -108,7 +155,7 @@ describe("sumRunCents — per-run truncation then sum", () => {
       },
     ];
 
-    expect(sumRunCents(rows)).toBe(2);
+    expect(sumRunCents(rows, FLASH)).toBe(2);
   });
 
   it("does NOT inflate when draft sums arrive as strings (the reported bug)", () => {
@@ -118,6 +165,7 @@ describe("sumRunCents — per-run truncation then sum", () => {
     const rows = [
       {
         run_id: "a",
+        ga_model: FLASH,
         ga_tokens_in: 3837,
         ga_tokens_out: 2953,
         ga_thinking_tokens: 4501,
@@ -127,10 +175,10 @@ describe("sumRunCents — per-run truncation then sum", () => {
       },
     ];
 
-    expect(sumRunCents(rows)).toBe(1);
+    expect(sumRunCents(rows, FLASH)).toBe(1);
   });
 
   it("returns 0 for no rows", () => {
-    expect(sumRunCents([])).toBe(0);
+    expect(sumRunCents([], FLASH)).toBe(0);
   });
 });
