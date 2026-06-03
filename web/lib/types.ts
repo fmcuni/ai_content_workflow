@@ -89,6 +89,24 @@ export type CandidateStatus = "candidate" | "promoted" | "skipped" | "errored";
 export type ExistingVerdict = "yes" | "no" | "not_sure";
 export type HotTopicVerdict = "yes" | "no";
 
+/**
+ * Dedup stage-1 (topic_existing_search) diagnostics — mirrors the backend
+ * Stage1Diagnostics. Explains why `existing` was decided, especially empty
+ * "no" verdicts: a high `resolve_failures` with no `bowtie_hits` means the
+ * search hit transient failures rather than genuinely finding no article.
+ */
+export interface Stage1Diagnostics {
+  grounding_chunks: number;
+  resolve_attempts: number;
+  resolved_count: number;
+  bowtie_hits: number;
+  filtered_out: number;
+  resolve_failures: number;
+  attempt_cap_hit: boolean;
+  grounding_empty: boolean;
+  second_pass: boolean;
+}
+
 export interface TopicCandidate {
   candidate_id: string;
   batch_id: string;
@@ -103,6 +121,7 @@ export interface TopicCandidate {
   existing_url: string | null;
   hot_topic: HotTopicVerdict | null;
   hot_topic_note: string | null;
+  existing_search_debug: Stage1Diagnostics | null;
   persona_slug: string | null;
   acf_adv_id: number | null;
   acf_widget_id: number | null;
