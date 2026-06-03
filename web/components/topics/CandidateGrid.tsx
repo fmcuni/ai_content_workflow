@@ -12,6 +12,7 @@ import type {
   Persona,
   PromoteResponse,
   PromotionItem,
+  Stage1Diagnostics,
   TopicBatch,
   TopicCandidate,
 } from "@/lib/types";
@@ -455,6 +456,7 @@ function CandidateRow({
             url={c.existing_url}
           />
           <VerdictBadge kind="hot" verdict={c.hot_topic} note={c.hot_topic_note} />
+          {c.existing_search_debug && <Stage1DebugChip d={c.existing_search_debug} />}
           {errored && (
             <span
               title={c.last_error ?? "error"}
@@ -590,6 +592,48 @@ function CandidateRow({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Compact dedup stage-1 diagnostics, surfaced under the verdict badges so an
+ * "existing=no" can be explained at a glance. Highlighted (accent) when the
+ * search hit trouble — resolve failures, a retry, or the attempt cap — since
+ * those are the cases where a "no" may be hiding a real article.
+ */
+function Stage1DebugChip({ d }: { d: Stage1Diagnostics }) {
+  const suspect = d.resolve_failures > 0 || d.attempt_cap_hit;
+  const flags = [
+    d.second_pass && "↻retry",
+    d.resolve_failures > 0 && `⚠${d.resolve_failures} resolve-fail`,
+    d.attempt_cap_hit && "cap-hit",
+    d.grounding_empty && "∅ no-chunks",
+  ].filter(Boolean) as string[];
+
+  const title = [
+    `grounding chunks: ${d.grounding_chunks}`,
+    `resolved: ${d.resolved_count} / ${d.resolve_attempts} attempted`,
+    `bowtie hits: ${d.bowtie_hits}`,
+    `filtered (non-bowtie): ${d.filtered_out}`,
+    `resolve failures: ${d.resolve_failures}`,
+    `attempt cap hit: ${d.attempt_cap_hit}`,
+    `grounding empty: ${d.grounding_empty}`,
+    `second pass (retry): ${d.second_pass}`,
+  ].join("\n");
+
+  return (
+    <span
+      title={title}
+      className={cn(
+        "font-mono text-[10px] uppercase tracking-[0.12em] px-1.5 py-[1px] border max-w-[150px] truncate cursor-help",
+        suspect
+          ? "text-accent-deep border-accent/40 bg-accent/[0.06]"
+          : "text-ink-faint border-rule",
+      )}
+    >
+      srch · {d.grounding_chunks}c · {d.bowtie_hits}✓
+      {flags.length > 0 && <> · {flags.join(" · ")}</>}
+    </span>
   );
 }
 
