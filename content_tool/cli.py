@@ -1,3 +1,9 @@
+"""``content-tool`` command-line entry points (e.g. ``gap-analysis``).
+
+A thin CLI over the same pipeline pieces the API uses, for local one-off runs
+without the web UI.
+"""
+
 import asyncio
 import json
 from datetime import date

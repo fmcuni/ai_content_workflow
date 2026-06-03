@@ -28,9 +28,9 @@ def test_get_refresh_config_loads_yaml() -> None:
 def test_config_path_is_absolute_and_exists() -> None:
     """Bundled config must resolve to an absolute path regardless of cwd.
 
-    The packaged desktop sidecar runs with a cwd that is not the repo root, so
-    any cwd-relative ``config/...`` lookup raises FileNotFoundError → 500. The
-    resolver pins the path to the package/bundle root instead.
+    A process launched with a cwd that is not the repo root would make any
+    cwd-relative ``config/...`` lookup raise FileNotFoundError → 500. The
+    resolver pins the path to the package root instead.
     """
     from content_tool.config import config_path, resource_root
 

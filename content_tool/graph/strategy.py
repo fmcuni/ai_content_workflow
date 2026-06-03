@@ -1,3 +1,10 @@
+"""Strategy subgraph — the research + outline phase of a run.
+
+Runs up to the HITL_1 outline gate. The entry point is conditional on
+``start_mode``: refresh runs fetch the existing article and run gap analysis
+before outlining, whereas create runs skip straight to the outline.
+"""
+
 from datetime import date
 from typing import Any
 from uuid import UUID

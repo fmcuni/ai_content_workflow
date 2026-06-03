@@ -7,9 +7,8 @@ full article pipeline. The database stays on Supabase, reached via
 
 This replaced the retired "Worker + 2 Containers" stack (formerly in
 `deploy/cloudflare/`, now removed). The Python backend in `content_tool/` is
-**not** deleted — it remains the desktop Tauri app's bundled sidecar, runs the
-evals suite, and is used for local dev. It is just no longer the production
-hosting path.
+**not** deleted — it runs the evals suite and is used for local dev. It is just
+no longer the production hosting path.
 
 - **Service:** `bowtie-content-tool-poc`
 - **URL:** https://bowtie-content-tool-poc.fmc.workers.dev

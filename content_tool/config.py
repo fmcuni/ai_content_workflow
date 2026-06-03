@@ -1,48 +1,24 @@
-import os
-import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic_settings import (
-    BaseSettings,
-    JsonConfigSettingsSource,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-)
-
-DEFAULT_CONFIG_DIR = Path.home() / "Library" / "Application Support" / "BowtieContentTool"
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def resource_root() -> Path:
-    """Root directory holding bundled runtime assets (``config/``, ``prompts/``).
+    """Root directory holding runtime assets (``config/``, ``prompts/``).
 
-    Under PyInstaller the spec extracts those data dirs to ``sys._MEIPASS``; in a
-    source checkout they live at the repo root, one level above this package.
-    Resolving against this root — never the process cwd — keeps asset lookups
-    working when the desktop sidecar runs with an arbitrary working directory.
+    These live at the repo root, one level above this package. Resolving against
+    this root — never the process cwd — keeps asset lookups stable regardless of
+    where the process is launched from.
     """
-    bundle_dir = getattr(sys, "_MEIPASS", None)
-    return Path(bundle_dir) if bundle_dir else Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[1]
 
 
 def config_path(*parts: str) -> Path:
-    """Absolute path to a file under the bundled ``config/`` directory."""
+    """Absolute path to a file under the ``config/`` directory."""
     return resource_root().joinpath("config", *parts)
-
-
-def desktop_config_dir() -> Path:
-    """Directory holding the desktop app's local config file.
-
-    Overridable via ``BOWTIE_CONFIG_DIR`` (used by tests and packaging).
-    """
-    override = os.environ.get("BOWTIE_CONFIG_DIR")
-    return Path(override) if override else DEFAULT_CONFIG_DIR
-
-
-def desktop_config_path() -> Path:
-    return desktop_config_dir() / "config.json"
 
 
 class Settings(BaseSettings):
@@ -50,7 +26,9 @@ class Settings(BaseSettings):
         env_file=".env.local", case_sensitive=False, extra="ignore"
     )
 
-    # Credentials are optional so the app can boot into a "needs setup" state.
+    # Credentials come from the environment / .env.local. They are typed optional
+    # so Settings can be constructed in contexts that don't need them (e.g. loading
+    # refresh config); runtime wiring (init_runtime) enforces their presence.
     postgres_url: str | None = None
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.1-pro-preview"
@@ -69,22 +47,6 @@ class Settings(BaseSettings):
     refresh_config_path: str = "config/refresh.yaml"
     refresh_cron_enabled: bool = True
 
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Precedence: init kwargs > env > .env.local > desktop JSON file > defaults.
-        path = desktop_config_path()
-        json_source = JsonConfigSettingsSource(
-            settings_cls, json_file=path if path.is_file() else None
-        )
-        return (init_settings, env_settings, dotenv_settings, json_source, file_secret_settings)
-
 
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
@@ -99,9 +61,8 @@ def is_configured(settings: Settings) -> bool:
 def get_refresh_config() -> dict[str, Any]:
     settings = get_settings()
     path = Path(settings.refresh_config_path)
-    # A relative default ("config/refresh.yaml") must resolve against the
-    # bundle/repo root, not the process cwd — the packaged sidecar's cwd is not
-    # the repo. An absolute override (env / desktop config.json) is honored as-is.
+    # A relative default ("config/refresh.yaml") must resolve against the repo
+    # root, not the process cwd. An absolute override (env) is honored as-is.
     if not path.is_absolute():
         path = resource_root() / path
     if not path.exists():

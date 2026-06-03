@@ -9,11 +9,10 @@ import { SetupScreen } from "@/components/SetupScreen";
 import { isAuthRoute } from "@/lib/auth-routes";
 import { setupApi } from "@/lib/api";
 
-// The packaged desktop backend is a PyInstaller binary: cold boot (unpack +
-// imports + startup) takes ~15s and can run longer when startup makes a network
-// call. The window navigates here as soon as the frontend (:3000) is up — well
-// before the backend (:8000) — so this gate must ride out the whole cold boot
-// rather than surfacing a dead-end error mid-startup.
+// The backend can be briefly unreachable during a cold start or a transient
+// dependency hiccup (DB/WordPress unavailable at launch). The frontend may load
+// before the backend is ready to answer, so this gate must ride out the whole
+// boot window rather than surfacing a dead-end error mid-startup.
 const BOOT_RETRY_COUNT = 12; // ~30s of retries at the capped delay below
 const RETRY_DELAY_CAP_MS = 2_500;
 // Once retries are exhausted we keep polling in the background so a slow or

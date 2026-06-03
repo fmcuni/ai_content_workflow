@@ -1,3 +1,10 @@
+"""FastAPI application entry point.
+
+Builds the app, mounts the HTTP routers under ``api/routes/``, and manages
+startup/shutdown (DB engine, LangGraph checkpointer). Runs drive the compiled
+graph via the ``RunExecutor`` in :mod:`content_tool.api.sse`.
+"""
+
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -57,8 +64,8 @@ def _build_seo_resolver(settings: Settings) -> SeoPluginResolver:
 async def init_runtime(app: FastAPI, settings: Settings) -> None:
     """Wire the credentialed runtime (DB, Gemini, WP, executor) onto ``app.state``.
 
-    Idempotent: disposes a prior engine so it can run again after first-run setup
-    without a process restart. Caller must ensure credentials are present.
+    Idempotent: disposes a prior engine so it can safely run more than once.
+    Caller must ensure credentials are present.
     """
     assert settings.postgres_url and settings.gemini_api_key, "init_runtime requires credentials"
 
@@ -108,7 +115,7 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Default to an unconfigured runtime so routes can detect "needs setup".
+    # Default to an unconfigured runtime so routes can report an unconfigured state.
     app.state.engine = None
     app.state.session_factory = None
     app.state.run_executor = None
@@ -119,9 +126,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     if is_configured(settings):
         # Never let a transient dependency hiccup (WordPress/DB unreachable at
-        # launch) crash the lifespan: that would exit uvicorn and leave the
-        # desktop shell pointing at a vanished backend with no recourse. Bind
-        # the port regardless and surface the failure via logs + a degraded
+        # launch) crash the lifespan: that would exit uvicorn with no recourse.
+        # Bind the port regardless and surface the failure via logs + a degraded
         # state, so the frontend gate's polling can recover once deps return.
         try:
             await init_runtime(app, settings)
@@ -129,7 +135,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.exception("runtime init failed at startup; serving in degraded state")
             app.state.configured = False
     else:
-        logger.info("awaiting setup: credentials not configured")
+        logger.warning(
+            "credentials not configured; set POSTGRES_URL and GEMINI_API_KEY "
+            "(e.g. in .env.local) and restart"
+        )
 
     try:
         yield

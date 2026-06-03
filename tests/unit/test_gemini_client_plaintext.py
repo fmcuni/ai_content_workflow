@@ -1,11 +1,9 @@
 """Regression tests for the ``response_schema=None`` path of RealGeminiClient.
 
-The setup credential check (``content_tool/desktop/verify.py``) calls
-``generate`` with ``response_schema=None`` and a plain "ping" prompt. Gemini
-then replies with prose ("Pong! ..."), which is NOT JSON. The client must
-treat that as success — a valid key was proven — instead of raising while
-trying to parse the prose as JSON. Forcing JSON parsing there made every
-correct credential fail verification.
+When ``generate`` is called with ``response_schema=None`` and a plain prompt,
+Gemini replies with prose (e.g. "Pong! ..."), which is NOT JSON. The client must
+treat that as success — the raw text is preserved and ``parsed`` is left empty —
+instead of raising while trying to parse the prose as JSON.
 """
 
 from typing import Any

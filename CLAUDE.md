@@ -73,10 +73,10 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
   account on push to `main` (secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).
   Runtime secrets (`POSTGRES_URL`, `GEMINI_API_KEY`, `WP_*`) are set once via
   `wrangler secret put` and preserved across deploys.
-- The Python backend (`content_tool/`) is **retained** — it is the desktop Tauri
-  app's bundled sidecar, runs the `evals/` suite, and is used for local dev. It is
-  no longer the production hosting path. (The old Worker+Containers stack —
-  `deploy/cloudflare/`, `Dockerfile.cf-*` — was retired.)
+- The Python backend (`content_tool/`) is **retained** — it runs the `evals/`
+  suite and is used for local dev. It is no longer the production hosting path.
+  (The old Worker+Containers stack — `deploy/cloudflare/`, `Dockerfile.cf-*` — and
+  the Tauri desktop app were retired.)
 - Parity gate: `node deploy/cloudflare-workers/parity/check-parity.mjs` diffs the TS
   backend against the Python reference over read-only routes.
 

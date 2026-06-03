@@ -1,3 +1,11 @@
+"""Writer node — generates the article draft.
+
+Composes the prompt from the approved outline, the selected persona, and the
+gathered sources, then calls Gemini to produce the draft (and citation intents
+later resolved by ``resolve_citations``). Honours reviewer ``refine_notes`` on
+HITL_2 revise rounds.
+"""
+
 import json
 import re
 from dataclasses import dataclass

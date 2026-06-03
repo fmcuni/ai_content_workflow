@@ -54,5 +54,5 @@ it when building, e.g.
 `NEXT_PUBLIC_API_BASE=https://bowtie-content-tool-poc.fmc.workers.dev npm run cf:deploy`.
 See `wrangler.jsonc` and `open-next.config.ts` for the Worker config.
 
-The same Next build also runs as the desktop Tauri app's frontend and for local
-dev — Cloudflare is only the production hosting target.
+The same Next build also runs for local dev — Cloudflare is only the production
+hosting target.

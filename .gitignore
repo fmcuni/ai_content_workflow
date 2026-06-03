@@ -26,26 +26,28 @@ out/
 .pnpm-store/
 *.tsbuildinfo
 
+# Cloudflare Workers / Wrangler / OpenNext build state
+.wrangler/
+.open-next/
+.vercel/
+
+# Test & coverage artifacts (web: Playwright, Vitest)
+playwright-report/
+test-results/
+coverage/
+.nyc_output/
+
 # Environment & secrets
 .env
 .env.local
 .env.*.local
 *.key
 *.pem
-
-# Desktop app local config (normally lives outside the repo under
-# ~/Library/Application Support/BowtieContentTool; guarded here in case
-# BOWTIE_CONFIG_DIR is pointed inside the repo)
-BowtieContentTool/
-
-# Desktop packaging artifacts (also covered by src-tauri/.gitignore and build/)
-src-tauri/target/
-src-tauri/binaries/
-src-tauri/resources/
-src-tauri/gen/
-src-tauri/icons/*.png
-src-tauri/icons/*.icns
-src-tauri/icons/*.ico
+# Wrangler local plaintext secrets (NEVER commit — used by `wrangler dev`).
+# Real secrets live in Cloudflare via `wrangler secret put`; see each
+# wrangler.jsonc for the list (POSTGRES_URL, GEMINI_API_KEY, AUTH_SECRET, ...).
+.dev.vars
+.dev.vars.*
 
 # IDE
 .vscode/
@@ -76,6 +78,7 @@ index-keywords.png
 
 # Local agent scratch / tooling
 .agents/
+.runlogs/
 skills-lock.json
 
 # Local build logs and tool profile backups (not repo content)

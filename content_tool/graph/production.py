@@ -1,3 +1,10 @@
+"""Production subgraph — the drafting + audit phase of a run.
+
+Turns the approved outline into a rendered, audited draft (writer → citation
+resolution → HTML render → audit, with an internal refine loop), then runs up to
+the HITL_2 gate where the editor approves, publishes, or requests changes.
+"""
+
 from datetime import date
 from typing import Any
 from uuid import UUID

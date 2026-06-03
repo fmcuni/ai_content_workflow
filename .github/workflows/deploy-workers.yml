@@ -4,9 +4,9 @@ name: Deploy Workers
 #
 # This replaces the retired "Worker + 2 Containers" stack (the old
 # deploy-cloudflare.yml + Dockerfile.cf-backend/.cf-frontend). The Python
-# backend in content_tool/ is NOT deployed here — it remains for the desktop
-# Tauri sidecar, the evals, and local dev. The production backend is now the
-# TypeScript Worker in deploy/cloudflare-workers/.
+# backend in content_tool/ is NOT deployed here — it remains for the evals and
+# local dev. The production backend is now the TypeScript Worker in
+# deploy/cloudflare-workers/.
 #
 # Two Workers are deployed on the personal Cloudflare account (fmc.workers.dev):
 #   - Backend  : bowtie-content-tool-poc  (deploy/cloudflare-workers/)

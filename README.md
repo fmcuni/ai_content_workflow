@@ -1,6 +1,15 @@
 # Bowtie AI Content Tool
 
-LangGraph-based content update tool. See `docs/superpowers/specs/2026-05-21-bowtie-ai-content-tool-update-route-mvp-design.md` for design.
+LangGraph-based content update tool with two Human-In-The-Loop gates, publishing
+to WordPress.
+
+**New to the repo? Start here:**
+- 📖 [`docs/CODEBASE_GUIDE.md`](docs/CODEBASE_GUIDE.md) — what every folder is, how a
+  request flows end-to-end, and a suggested reading order.
+- 🤝 [`CONTRIBUTING.md`](CONTRIBUTING.md) — local setup, the two-backend parity
+  rule, migrations, code style, and the PR workflow.
+- 🧭 [`CLAUDE.md`](CLAUDE.md) — the canonical one-screen project brief.
+- 🏗️ Original design: `docs/superpowers/specs/2026-05-21-bowtie-ai-content-tool-update-route-mvp-design.md`.
 
 ## Dev setup
 
@@ -28,12 +37,11 @@ content-tool gap-analysis --article-url https://www.bowtie.com.hk/blog/... --top
 ## Manual smoke test (Plan 2)
 
 ```bash
-# 1. Start Postgres + apply migrations
-docker run -d --name content_tool_pg -p 5432:5432 \
-  -e POSTGRES_USER=content_tool -e POSTGRES_PASSWORD=content_tool -e POSTGRES_DB=content_tool postgres:16
-export POSTGRES_URL=postgresql+asyncpg://content_tool:content_tool@localhost:5432/content_tool
+# 1. Start the local DB + apply all migrations (Supabase migrations are canonical;
+#    the legacy alembic/ directory is retired).
+supabase db reset
+export POSTGRES_URL=<from `supabase status` — the connection string>
 export GEMINI_API_KEY=<your-key>
-alembic upgrade head
 
 # 2. Start the API
 uvicorn content_tool.api.main:app --reload --port 8000
@@ -69,8 +77,8 @@ Backend must be running on http://localhost:8000.
 ## Deployment (production)
 
 Production runs on a **Workers-native** Cloudflare stack (the database stays on
-Supabase). The Python backend here is still used for the desktop Tauri sidecar,
-the evals suite, and local dev — it is just not the production hosting path.
+Supabase). The Python backend here is used for the evals suite and local dev —
+it is just not the production hosting path.
 
 | Component | Service | URL |
 |---|---|---|
@@ -87,25 +95,27 @@ the evals suite, and local dev — it is just not the production hosting path.
 This replaced the retired "Worker + 2 Containers" stack (formerly `deploy/cloudflare/`,
 `Dockerfile.cf-*`, `.github/workflows/deploy-cloudflare.yml` — all removed).
 
-## WordPress smoke test (staging)
+## WordPress smoke test
 
-1. Set up an Application Password for your WP user at:
-   `https://staging.bowtie.com.hk/wp-admin/profile.php` → "Application Passwords"
+1. Set up an Application Password for your WP user at
+   `<WP_BASE_URL>/wp-admin/profile.php` → "Application Passwords".
 
-2. Export env:
+2. Export env (set `WP_BASE_URL` / `WP_TARGET` explicitly for the environment you
+   intend to publish to):
 ```bash
-export WP_BASE_URL=https://staging.bowtie.com.hk
-export WP_TARGET=staging
+export WP_BASE_URL=<your-wp-base-url>
+export WP_TARGET=<your-target>
 export WP_USERNAME=<your-wp-username>
 export WP_APP_PASSWORD=<application-password>
 ```
 
-3. Run a full end-to-end via UI. After approving HITL_2 (status = Draft),
-   confirm the post appears in `/wp-admin/edit.php?post_status=draft` on staging.
+3. Run a full end-to-end via the UI. After approving HITL_2 (status = Draft),
+   confirm the post appears under `/wp-admin/edit.php?post_status=draft`.
 
-4. **Before pointing at production**: explicitly set `WP_TARGET=production` and `WP_BASE_URL=https://www.bowtie.com.hk`.
-   The dry-publish endpoint shows `target_label` — verify it matches expectation
-   before approving any HITL_2 against production.
+4. **Safety:** the dry-publish endpoint shows `target_label` — always verify it
+   matches the environment you expect **before** approving any HITL_2. Never
+   point at production without explicitly setting `WP_TARGET` and `WP_BASE_URL`
+   for production.
 
 ## Ops
 

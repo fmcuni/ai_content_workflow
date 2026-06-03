@@ -1,3 +1,11 @@
+"""Root graph composition.
+
+Wires the ``strategy`` and ``production`` subgraphs into the top-level run graph
+and declares the two Human-In-The-Loop interrupts (HITL_1 after the outline,
+HITL_2 after the draft). State is checkpointed to Postgres so an interrupted run
+can be resumed via ``POST /runs/{id}/resume``.
+"""
+
 import logging
 from typing import Any
 from uuid import UUID

@@ -1,3 +1,10 @@
+"""RunExecutor + SSE streaming.
+
+Drives a compiled LangGraph run to completion (pausing at the HITL interrupts)
+and streams each step to the browser as Server-Sent Events. Every emitted event
+is also mirrored into the ``run_event_logs`` table for the verbose debug panel.
+"""
+
 import asyncio
 import json
 import logging

@@ -1,3 +1,10 @@
+"""``ContentToolState`` — the shared LangGraph state for a run.
+
+This TypedDict is the single object threaded through every node in the graph:
+nodes read their inputs from it and write their outputs back into it. Start here
+to understand what data is available at each step of the pipeline.
+"""
+
 from typing import Any, Literal, NotRequired, TypedDict
 
 
