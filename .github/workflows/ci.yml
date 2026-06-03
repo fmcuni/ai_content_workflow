@@ -49,24 +49,16 @@ jobs:
   judge-evals:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'prompt-change')
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: content_tool
-          POSTGRES_PASSWORD: content_tool
-          POSTGRES_DB: content_tool
-        ports: ["5432:5432"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - run: uv venv && uv pip install -e ".[dev]"
-      - env:
-          POSTGRES_URL: postgresql+asyncpg://content_tool:content_tool@localhost:5432/content_tool
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
+      # Exercises judge_runner against canned fixtures (FakeGeminiClient) to prove
+      # wiring — no DB and no real Gemini key needed. When evals/runner.py grows a
+      # "sample N fixtures with judge" mode that hits a real DB, add schema setup via
+      # the supabase migrations (see tests/conftest.py apply_migrations / the
+      # nightly-evals workflow) and the GEMINI_API_KEY secret — NOT alembic (retired;
+      # schema is Supabase-owned).
+      - run: |
           source .venv/bin/activate
-          alembic upgrade head
-          # Engineer extends evals/runner.py to support a "sample 5 fixtures with judge" mode.
-          # MVP: just exercise judge_runner against canned fixtures to prove wiring.
           pytest tests/unit/test_judge_runner.py -v
