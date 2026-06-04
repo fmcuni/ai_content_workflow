@@ -186,6 +186,44 @@ class ArticleEditRequest(BaseModel):
     wp_publish_at: datetime | None = None
 
 
+class RunWpMetaPatch(BaseModel):
+    """Partial update of a run's editable destination / brief fields.
+
+    Used by the Ledger board's inline cell editors. Only fields explicitly
+    provided (non-null) are overwritten, mirroring the ``wp_values`` block in
+    ``PUT /article``. Persona/Voice is intentionally absent — it is read-only in
+    the board (edit it on the run page). ``acf_adv_id`` / ``acf_widget_id`` only
+    affect re-runs / republish, never the already-generated draft.
+    """
+
+    acf_adv_id: int | None = None
+    acf_widget_id: int | None = None
+    wp_author_id: int | None = None
+    wp_category_ids: list[int] | None = None
+    wp_slug: str | None = None
+    wp_publish_status: Literal["draft", "future", "publish"] | None = None
+    wp_publish_at: datetime | None = None
+    # Optimistic-concurrency guard against the latest Render's version (the run's
+    # content version token, shared with PUT /article). When set, the patch is
+    # rejected (409 stale_version) if another reviewer saved since this client
+    # loaded the render. Omit for last-write-wins.
+    expected_version: int | None = None
+
+
+class TopicBatchDefaultsPatch(BaseModel):
+    """Partial update of a topic batch's promotion defaults.
+
+    Editing a default only affects runs promoted **after** the change, never an
+    already-generated draft/run. Only fields present in the request are applied
+    (so a default can be cleared to null or toggled false).
+    """
+
+    persona_default: str | None = None
+    acf_adv_id_default: int | None = None
+    acf_widget_id_default: int | None = None
+    auto_accept_hitl1_default: bool | None = None
+
+
 class RepublishResponse(BaseModel):
     wp_post_id: int
     link: str | None = None

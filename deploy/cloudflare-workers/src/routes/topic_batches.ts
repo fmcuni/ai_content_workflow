@@ -5,6 +5,8 @@ import { withDb } from "../db/client";
 import { getEventLogs, parseLogQuery } from "../db/event-log";
 import { pgJson, pgTimestampToIso, toJsonb } from "../db/serialize";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
+import { requireRole } from "../auth/authz";
+import type { AuthVars } from "../auth/middleware";
 
 // ---------------------------------------------------------------------------
 // Env extension
@@ -67,6 +69,13 @@ interface PatchCandidateIn {
   acf_widget_id?: number | null;
   operator_note?: string | null;
   editor_email?: string;
+}
+
+interface TopicBatchDefaultsPatchBody {
+  persona_default?: string | null;
+  acf_adv_id_default?: number | null;
+  acf_widget_id_default?: number | null;
+  auto_accept_hitl1_default?: boolean | null;
 }
 
 interface SkipCandidateRequest {
@@ -319,7 +328,7 @@ function isPromoteMode(value: string | undefined): value is PromoteMode {
 // Router
 // ---------------------------------------------------------------------------
 
-const topicBatchesRouter = new Hono<{ Bindings: Env }>();
+const topicBatchesRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 
 // ---------------------------------------------------------------------------
 // POST / — create a topic batch + kick the topic-expansion workflow
@@ -484,6 +493,60 @@ topicBatchesRouter.get("/:id/logs", async (c) => {
 topicBatchesRouter.options("/:id/logs", (c) =>
   corsPreflight(resolveCorsOrigin(c.req.header("origin") ?? null, c.env.FRONTEND_ORIGIN)),
 );
+
+// ---------------------------------------------------------------------------
+// PATCH /:id — partial update of a batch's promotion defaults.
+//
+// The Ledger band's inline default editors (voice/adv/widget/auto-H1). Only the
+// fields present in the request are applied (so a default can be cleared to null
+// or toggled false), mirroring `model_dump(exclude_unset=True)`. A default only
+// affects runs promoted AFTER the change, so this is safe in any batch state.
+// Role: editor+. Mirrors content_tool/api/routes/topic_batches.py.
+// ---------------------------------------------------------------------------
+topicBatchesRouter.patch("/:id", requireRole("editor"), async (c) => {
+  const batchId = c.req.param("id");
+  const body = await c.req
+    .json<TopicBatchDefaultsPatchBody>()
+    .catch(() => ({}) as TopicBatchDefaultsPatchBody);
+
+  const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const existing = await selectBatch(sql, batchId);
+    if (existing[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+
+    // Presence-based partial update: a field present in the JSON (even null /
+    // false) is applied; an absent field is left untouched.
+    const assignments: ReturnType<Sql>[] = [];
+    if (body.persona_default !== undefined) {
+      assignments.push(sql`persona_default = ${body.persona_default}`);
+    }
+    if (body.acf_adv_id_default !== undefined) {
+      assignments.push(sql`acf_adv_id_default = ${body.acf_adv_id_default}`);
+    }
+    if (body.acf_widget_id_default !== undefined) {
+      assignments.push(sql`acf_widget_id_default = ${body.acf_widget_id_default}`);
+    }
+    if (body.auto_accept_hitl1_default !== undefined) {
+      assignments.push(sql`auto_accept_hitl1_default = ${body.auto_accept_hitl1_default}`);
+    }
+
+    if (assignments.length > 0) {
+      await sql`
+        UPDATE content_tool.topic_batches
+        SET ${assignments.reduce((acc, a) => sql`${acc}, ${a}`)}
+        WHERE batch_id = ${batchId}
+      `;
+    }
+    const rows = await selectBatch(sql, batchId);
+    return { batch: rows[0]! };
+  });
+
+  if ("error" in result) {
+    return c.json({ detail: "topic batch not found" }, 404);
+  }
+  return c.json(toBatchOut(result.batch));
+});
 
 // ---------------------------------------------------------------------------
 // PATCH /:id/candidates/:cid — partial update

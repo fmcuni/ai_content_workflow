@@ -35,6 +35,7 @@ from content_tool.api.schemas import (
     PromoteResponseItem,
     SkipCandidateRequest,
     TopicBatchCreateResponse,
+    TopicBatchDefaultsPatch,
     TopicBatchIn,
     TopicBatchOut,
     TopicCandidateOut,
@@ -437,6 +438,28 @@ async def topic_batch_logs(
             limit=limit,
             level=level,
         )
+
+
+@router.patch("/{batch_id}", response_model=TopicBatchOut)
+async def patch_topic_batch_defaults(
+    batch_id: UUID,
+    payload: TopicBatchDefaultsPatch,
+    sf: async_sessionmaker[Any] = Depends(get_session_factory),  # noqa: B008
+) -> TopicBatchOut:
+    """Partial-update a batch's promotion defaults (Ledger band inline edits).
+
+    Only the fields present in the request are applied. A default only affects
+    runs promoted **after** the change — never an already-generated draft/run —
+    so this is safe in any non-deleted batch state.
+    """
+    async with sf() as session:
+        batch = await _load_batch_or_404(session, batch_id)
+        provided = payload.model_dump(exclude_unset=True)
+        for key, value in provided.items():
+            setattr(batch, key, value)
+        await session.commit()
+        await session.refresh(batch)
+        return _batch_to_out(batch)
 
 
 @router.patch(

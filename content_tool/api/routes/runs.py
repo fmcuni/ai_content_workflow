@@ -24,6 +24,7 @@ from content_tool.api.schemas import (
     RegenerateRequest,
     RepublishResponse,
     ResumeRequest,
+    RunWpMetaPatch,
 )
 from content_tool.api.sse import RunAlreadyExecutingError, sse_stream
 from content_tool.db.models import (
@@ -47,6 +48,7 @@ from content_tool.wordpress.client import (
     WP_DEFAULT_PAGE_TEMPLATE,
 )
 from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
+from content_tool.wordpress.slug import canonicalize_slug
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,17 @@ async def list_runs(
                 "acf_widget_id": r.acf_widget_id,
                 "edit_note": r.edit_note,
                 "auto_accept_hitl1": r.auto_accept_hitl1,
+                # WordPress destination — the Ledger board's WORDPRESS columns
+                # read these from the list (display + inline-edit round-trip).
+                "wp_author_id": r.wp_author_id,
+                "wp_category_ids": r.wp_category_ids,
+                "wp_tag_ids": r.wp_tag_ids,
+                "wp_featured_media_id": r.wp_featured_media_id,
+                "wp_slug": r.wp_slug,
+                "wp_excerpt": r.wp_excerpt,
+                "wp_publish_status": r.wp_publish_status,
+                "wp_publish_at": r.wp_publish_at.isoformat() if r.wp_publish_at else None,
+                "wp_pushed_post_id": r.wp_pushed_post_id,
             }
             for r in rows
         ]
@@ -804,6 +817,111 @@ async def edit_article(
             await session.execute(update(Run).where(Run.run_id == run_id).values(**wp_values))
         await session.commit()
     return {"ok": True}
+
+
+# Editable run fields exposed by the Ledger board's inline cells. Persona/Voice
+# is intentionally excluded — it is read-only in the board (audit decision 1).
+_PATCH_RUN_FIELDS = (
+    "acf_adv_id",
+    "acf_widget_id",
+    "wp_author_id",
+    "wp_category_ids",
+    "wp_slug",
+    "wp_publish_status",
+    "wp_publish_at",
+)
+
+
+@router.patch("/{run_id}")
+async def patch_run_wp_meta(
+    run_id: UUID,
+    payload: RunWpMetaPatch,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> dict:
+    """Partial-update a run's destination / brief fields (Ledger inline edits).
+
+    Only the fields the caller actually supplied (non-null) are overwritten,
+    mirroring the ``wp_values`` block in ``PUT /article``. Optimistic concurrency
+    uses the latest Render's ``version`` (the run's content token, shared with
+    ``PUT /article``): when ``expected_version`` is set, a stale value is rejected
+    with 409 ``stale_version`` and nothing is written. ``wp_slug`` is canonicalized
+    (decode-then-encode) so the grid shows decoded and WordPress receives encoded.
+    """
+    from sqlalchemy import update
+
+    values: dict = {
+        field: getattr(payload, field)
+        for field in _PATCH_RUN_FIELDS
+        if getattr(payload, field) is not None
+    }
+    if "wp_slug" in values:
+        values["wp_slug"] = canonicalize_slug(values["wp_slug"])
+
+    async with sf() as session:
+        run = (
+            await session.execute(select(Run).where(Run.run_id == run_id))
+        ).scalar_one_or_none()
+        if not run:
+            raise HTTPException(404, "run not found")
+
+        # The latest render holds the optimistic-concurrency token. A run still
+        # generating may not have one yet — destination edits without a version
+        # are then last-write-wins.
+        draft_q = (
+            select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
+        )
+        latest_draft = (await session.execute(draft_q)).scalar_one_or_none()
+        render = None
+        if latest_draft is not None:
+            render = (
+                await session.execute(
+                    select(Render).where(Render.draft_id == latest_draft.draft_id)
+                )
+            ).scalar_one_or_none()
+
+        new_version: int | None = None
+        if render is not None:
+            # Snapshot the committed version BEFORE the UPDATE — issuing the
+            # statement synchronizes the in-memory attribute, so reading it after
+            # would already reflect the bump.
+            current_version = render.version
+        if payload.expected_version is not None:
+            if render is None:
+                raise HTTPException(404, "no render for this run")
+            result = await session.execute(
+                update(Render)
+                .where(
+                    Render.render_id == render.render_id,
+                    Render.version == payload.expected_version,
+                )
+                .values(version=Render.version + 1)
+            )
+            if result.rowcount == 0:
+                # Conditional WHERE matched no row → another reviewer saved since
+                # the client loaded this render. `current_version` is the current.
+                raise HTTPException(
+                    409,
+                    {
+                        "error": "stale_version",
+                        "message": "run was changed since you loaded it",
+                        "current_version": current_version,
+                    },
+                )
+            new_version = current_version + 1
+        elif render is not None:
+            # Last-write-wins, but still advance the token so a concurrent article
+            # editor holding the old version is rejected on their next save.
+            await session.execute(
+                update(Render)
+                .where(Render.render_id == render.render_id)
+                .values(version=Render.version + 1)
+            )
+            new_version = current_version + 1
+
+        if values:
+            await session.execute(update(Run).where(Run.run_id == run_id).values(**values))
+        await session.commit()
+    return {"ok": True, "version": new_version}
 
 
 @router.post("/{run_id}/republish", response_model=RepublishResponse)

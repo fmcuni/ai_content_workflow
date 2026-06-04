@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Ledger — Runs board (demo v2)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --paper:#F8F5EE; --paper-deep:#EFE9DC; --ink:#1A1714; --ink-soft:#4A453E;
+  --ink-faint:#8B8275; --rule:#D8D0BF; --accent:#B0331E; --accent-deep:#872416;
+  --ok:#2F6B3A; --warn:#B27A0A; --info:#3A5A8C;
+  --sans:"IBM Plex Sans","Noto Sans TC",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --display:"Fraunces","Noto Serif TC",ui-serif,Georgia,serif;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;}
+body{background-color:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.025 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");}
+a{color:var(--accent);text-decoration:none;} a:hover{text-decoration:underline;text-underline-offset:2px;}
+.wrap{max-width:1320px;margin:0 auto;padding:0 24px 140px;}
+
+.masthead{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--paper) 86%,transparent);backdrop-filter:blur(8px);}
+.masthead .row1{max-width:1320px;margin:0 auto;padding:22px 24px 10px;display:flex;align-items:center;justify-content:space-between;}
+.brand{font-family:var(--display);font-size:15px;letter-spacing:.16em;text-transform:uppercase;font-weight:500;}
+.dateline{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--ink-faint);text-transform:uppercase;}
+.masthead .row2{max-width:1320px;margin:0 auto;padding:0 24px 12px;display:flex;gap:22px;border-bottom:1px solid var(--ink);}
+.nav-link{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);padding-bottom:10px;border-bottom:2px solid transparent;margin-bottom:-1px;}
+.nav-link.active{color:var(--ink);border-bottom-color:var(--accent);} .nav-link:hover{color:var(--ink);text-decoration:none;}
+
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:34px 0 14px;}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-faint);}
+.hed{font-family:var(--display);font-variation-settings:"opsz" 144,"SOFT" 80;font-weight:500;line-height:1.02;font-size:46px;margin:4px 0 6px;}
+.dek{font-size:15px;color:var(--ink-soft);max-width:66ch;line-height:1.45;}
+.viewtoggle{display:inline-flex;border:1px solid var(--rule);border-radius:2px;overflow:hidden;flex-shrink:0;}
+.viewtoggle button{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;padding:7px 13px;background:var(--paper);color:var(--ink-faint);border:0;cursor:pointer;}
+.viewtoggle button.active{background:var(--ink);color:var(--paper);}
+
+.tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--ink);margin-top:10px;}
+.tab{position:relative;display:flex;align-items:center;gap:8px;padding:10px 16px;margin-bottom:-1px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);background:none;border:0;border-bottom:2px solid transparent;cursor:pointer;}
+.tab.active{color:var(--ink);border-bottom-color:var(--accent);} .tab:hover{color:var(--ink);}
+.tab .glyph{color:var(--ink-soft);} .tab .ct{font-variant-numeric:tabular-nums;color:var(--ink-soft);}
+.tab .badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:var(--accent);color:var(--paper);font-size:9px;font-variant-numeric:tabular-nums;line-height:1;}
+
+.rail{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--rule);}
+.search{flex:1;min-width:200px;max-width:320px;display:flex;align-items:center;gap:7px;border:1px solid var(--rule);border-radius:2px;background:var(--paper);padding:6px 10px;}
+.search input{border:0;background:none;outline:0;font-family:var(--sans);font-size:13px;width:100%;color:var(--ink);}
+.search .ic{color:var(--ink-faint);}
+.fld{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--rule);border-radius:2px;background:var(--paper);padding:7px 8px;cursor:pointer;}
+.toggle-chip{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--rule);border-radius:2px;background:var(--paper);color:var(--ink-faint);padding:7px 11px;cursor:pointer;display:inline-flex;gap:7px;align-items:center;}
+.toggle-chip.on{background:var(--accent);color:var(--paper);border-color:var(--accent);}
+.rail .spacer{flex:1;}
+
+.gridwrap{overflow:auto;max-height:calc(100vh - 232px);border-bottom:1px solid var(--rule);}
+table.ledger{border-collapse:separate;border-spacing:0;width:100%;min-width:1240px;font-size:13px;}
+.ledger thead th{position:sticky;z-index:5;background:var(--paper-deep);}
+.ledger thead .c-sel,.ledger thead .c-topic{z-index:7;}
+.grouprow th{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);text-align:left;padding:8px 12px 4px;border-bottom:1px solid var(--rule);font-weight:500;top:0;}
+.colrow th{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);text-align:left;padding:4px 12px 9px;border-bottom:2px solid var(--ink);white-space:nowrap;font-weight:500;top:26px;}
+.colrow th.sortable{cursor:pointer;} .colrow th.sortable:hover{color:var(--ink);}
+.grp-start{border-left:1px solid var(--rule);box-shadow:-3px 0 0 -2px var(--rule);}
+.c-sel{position:sticky;left:0;z-index:6;background:var(--paper-deep);width:32px;padding-left:14px;}
+.c-topic{position:sticky;left:32px;z-index:6;background:var(--paper-deep);min-width:300px;max-width:340px;}
+tbody .c-sel,tbody .c-topic{background:var(--paper);}
+tbody tr:hover .c-sel,tbody tr:hover .c-topic{background:var(--paper-deep);}
+
+.ledger tbody td{padding:8px 12px;border-bottom:1px solid var(--rule);vertical-align:top;white-space:nowrap;}
+.ledger.compact tbody td{padding:4px 12px;}
+.ledger tbody tr.run:hover td{background:color-mix(in srgb,var(--paper-deep) 55%,transparent);}
+.cellmuted{color:var(--ink-faint);} .num{font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:12px;}
+
+/* group header row */
+tr.grouphead td{background:var(--paper);border-bottom:1px solid var(--ink);padding:0;position:sticky;left:0;top:51px;z-index:4;}
+.gh{display:flex;align-items:center;gap:10px;padding:14px 12px 7px;cursor:pointer;}
+.gh .bar{width:3px;height:15px;border-radius:2px;}
+.gh .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);}
+.gh .ct{font-variant-numeric:tabular-nums;color:var(--ink-faint);font-family:var(--mono);font-size:11px;}
+.gh .tw{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-left:auto;padding-right:6px;}
+.gh .chevg{color:var(--ink-faint);font-size:10px;width:12px;}
+.g-review .bar{background:var(--accent);} .g-generating .bar{background:var(--info);}
+.g-approved .bar{background:var(--ok);} .g-failed .bar{background:var(--accent-deep);}
+
+/* identity (frozen) cell */
+.idrow{display:flex;gap:7px;align-items:flex-start;}
+.idrow.child{padding-left:22px;position:relative;}
+.idrow.child::before{content:"└";position:absolute;left:6px;top:1px;color:var(--ink-faint);font-family:var(--mono);font-size:12px;}
+.chev{background:none;border:0;cursor:pointer;color:var(--ink-faint);font-size:11px;padding:2px 2px 0 0;line-height:1;}
+.chev:hover{color:var(--accent);}
+.chev.ph{visibility:hidden;}
+.idmeta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px;}
+.topiclink{font-family:var(--display);font-variation-settings:"opsz" 28,"SOFT" 70;font-size:15.5px;line-height:1.15;color:var(--ink);display:block;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+tr.run:hover .topiclink{color:var(--accent);}
+.idsub{font-family:var(--mono);font-size:10px;color:var(--ink-faint);letter-spacing:.02em;margin-top:3px;}
+.idsub a{color:var(--accent);}
+.idsrc{font-family:var(--mono);font-size:10px;margin-top:3px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.idsrc a{color:var(--ink-soft);} .idsrc a:hover{color:var(--accent);}
+.kw{display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:5px;}
+.kw span{font-family:var(--mono);font-size:9.5px;color:var(--ink-soft);border:1px solid var(--rule);border-radius:2px;padding:0 5px;background:color-mix(in srgb,var(--paper-deep) 40%,transparent);}
+
+.tag{font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--rule);border-radius:2px;padding:1px 5px;background:color-mix(in srgb,var(--paper-deep) 60%,transparent);white-space:nowrap;}
+.tag .g{color:var(--ink-faint);margin-right:3px;}
+.auto{font-family:var(--mono);font-size:8px;letter-spacing:.1em;color:var(--ink-soft);border:1px solid var(--rule);border-radius:2px;padding:1px 3px;}
+.stamp{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;border:1px solid;border-radius:2px;padding:1px 6px;white-space:nowrap;}
+.dot{width:5px;height:5px;border-radius:99px;display:inline-block;}
+.s-ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--rule));} .s-ok .dot{background:var(--ok);}
+.s-accent{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--rule));} .s-accent .dot{background:var(--accent);}
+.s-warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--rule));} .s-warn .dot{background:var(--warn);}
+.s-info{color:var(--info);border-color:color-mix(in srgb,var(--info) 45%,var(--rule));} .s-info .dot{background:var(--info);}
+.s-danger{color:var(--accent-deep);border-color:color-mix(in srgb,var(--accent-deep) 45%,var(--rule));} .s-danger .dot{background:var(--accent-deep);}
+.s-neutral{color:var(--ink-faint);border-color:var(--rule);} .s-neutral .dot{background:var(--ink-faint);}
+.pulse .dot{animation:pulse 1.4s ease-in-out infinite;} @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+/* inline-edit cells */
+.editcell{position:relative;display:inline-block;}
+.editcell select{font-family:var(--sans);font-size:12.5px;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:2px;padding:2px 16px 2px 5px;margin:-2px -5px;cursor:pointer;appearance:none;max-width:138px;text-overflow:ellipsis;}
+.editcell::after{content:"▾";position:absolute;right:1px;top:50%;transform:translateY(-50%);font-size:8px;color:var(--ink-faint);opacity:0;pointer-events:none;}
+.editcell:hover::after{opacity:1;}
+.editcell:hover select{border-color:var(--rule);background:var(--paper);}
+.editcell select:focus{outline:0;border-color:var(--accent);background:var(--paper);}
+.editcell.dirty select{color:var(--accent);font-weight:500;}
+.tin{font-family:var(--sans);font-size:12.5px;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:2px;padding:2px 5px;margin:-2px -5px;width:150px;}
+.tin:hover{border-color:var(--rule);background:var(--paper);}
+.tin:focus{outline:0;border-color:var(--accent);background:var(--paper);}
+.tin.dirty{color:var(--accent);}
+.din{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);background:transparent;border:1px solid transparent;border-radius:2px;padding:2px 4px;margin:-2px -4px;}
+.din:hover{border-color:var(--rule);background:var(--paper);} .din:focus{outline:0;border-color:var(--accent);background:var(--paper);}
+.numin{font-family:var(--mono);font-size:11.5px;width:54px;color:var(--ink-soft);background:transparent;border:1px solid transparent;border-radius:2px;padding:2px 4px;margin:-2px -4px;}
+.numin:hover{border-color:var(--rule);background:var(--paper);} .numin:focus{outline:0;border-color:var(--accent);background:var(--paper);}
+
+/* batch progress summary */
+.bsum{display:flex;align-items:center;gap:12px;color:var(--ink-soft);font-size:12px;}
+.prog{width:120px;height:6px;border:1px solid var(--rule);border-radius:99px;overflow:hidden;background:var(--paper);}
+.prog i{display:block;height:100%;background:var(--accent);}
+.bsum .mono{font-family:var(--mono);font-size:11px;}
+
+.acts{display:flex;gap:6px;align-items:center;white-space:nowrap;}
+.btn{font-family:var(--sans);font-size:11.5px;font-weight:500;border-radius:2px;padding:4px 9px;cursor:pointer;border:1px solid transparent;white-space:nowrap;}
+.btn-primary{background:var(--ink);color:var(--paper);border-color:var(--ink);} .btn-primary:hover{background:var(--accent);border-color:var(--accent);}
+.btn-secondary{background:var(--paper);color:var(--ink);border-color:var(--rule);} .btn-secondary:hover{border-color:var(--ink);}
+.btn-danger{background:var(--paper);color:var(--accent-deep);border-color:color-mix(in srgb,var(--accent) 40%,var(--rule));} .btn-danger:hover{background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.linkact{font-size:11.5px;font-weight:500;color:var(--accent);white-space:nowrap;}
+input[type=checkbox]{accent-color:var(--accent);cursor:pointer;width:14px;height:14px;}
+
+/* run expand → draft + destination preview */
+tr.insert td{background:var(--paper-deep)!important;border-bottom:2px solid var(--ink);padding:0;}
+.preview{padding:14px 20px 18px;display:grid;grid-template-columns:1.5fr 1fr;gap:30px;}
+.preview h4{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 9px;}
+.pv-draft .seo{font-family:var(--display);font-size:18px;line-height:1.2;color:var(--ink);}
+.pv-draft .metad{font-size:12.5px;color:var(--ink-soft);margin-top:4px;line-height:1.45;}
+.pv-draft .heads{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
+.pv-draft .heads span{font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;border:1px solid var(--rule);border-radius:2px;padding:1px 6px;color:var(--ink-soft);background:color-mix(in srgb,var(--paper) 60%,transparent);}
+.pv-draft .exc{font-family:var(--display);font-size:13.5px;line-height:1.65;color:var(--ink-soft);margin:0;}
+.openfull{font-size:11.5px;font-weight:500;display:inline-block;margin-top:9px;}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:12.5px;align-items:baseline;}
+.kv dt{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);}
+.kv dd{margin:0;color:var(--ink-soft);} .kv dd.mono{font-family:var(--mono);font-size:11.5px;} .kv dd b{color:var(--ink);}
+.empty{font-family:var(--display);font-style:italic;color:var(--ink-faint);font-size:17px;padding:36px 4px;}
+
+/* topic batch → full-width tinted band */
+tr.batchband td{background:color-mix(in srgb,var(--paper-deep) 82%,var(--paper));border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);padding:0;}
+.band{display:flex;align-items:center;gap:20px;padding:13px 16px;border-left:3px solid var(--accent);}
+.band .bchev{background:none;border:0;cursor:pointer;color:var(--ink-faint);font-size:12px;padding:0;}
+.band .bchev:hover{color:var(--accent);}
+.band .bhead{min-width:260px;}
+.band .bmeta-top{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
+.band .btheme{font-family:var(--display);font-size:17px;color:var(--ink);}
+.band .bsub{font-family:var(--mono);font-size:10px;color:var(--ink-faint);letter-spacing:.02em;margin-top:2px;}
+.band .bdefaults{display:flex;align-items:center;gap:14px;color:var(--ink-soft);font-size:12px;}
+.band .bdefaults .editcell select{max-width:120px;}
+.band .bprogwrap{display:flex;align-items:center;gap:9px;}
+.band .prog{width:120px;height:6px;border:1px solid var(--rule);border-radius:99px;overflow:hidden;background:var(--paper);}
+.band .prog i{display:block;height:100%;background:var(--accent);}
+.band .bmono{font-family:var(--mono);font-size:11px;color:var(--ink-soft);}
+.band .bspacer{flex:1;}
+.bandlabel td{background:color-mix(in srgb,var(--paper-deep) 50%,var(--paper))!important;padding:6px 16px 6px 22px;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);border-bottom:1px solid var(--rule);}
+
+.bulkbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(160%);transition:transform .22s cubic-bezier(.2,.8,.2,1);z-index:60;display:flex;align-items:center;gap:8px;background:var(--ink);color:var(--paper);border-radius:4px;padding:9px 12px 9px 16px;box-shadow:0 8px 30px rgba(0,0,0,.25);max-width:96vw;flex-wrap:wrap;}
+.bulkbar.show{transform:translateX(-50%) translateY(0);}
+.bulkbar .cnt{font-family:var(--mono);font-size:12px;margin-right:6px;white-space:nowrap;} .bulkbar .cnt b{color:var(--paper);}
+.bbtn{font-family:var(--sans);font-size:11.5px;font-weight:500;border:1px solid color-mix(in srgb,var(--paper) 30%,transparent);background:transparent;color:var(--paper);border-radius:2px;padding:5px 9px;cursor:pointer;white-space:nowrap;}
+.bbtn:hover{background:color-mix(in srgb,var(--paper) 14%,transparent);}
+.bbtn.live{border-color:#e88a72;color:#f4c4b6;} .bbtn.danger:hover{background:color-mix(in srgb,var(--accent) 50%,transparent);}
+.bulkbar .clr{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#c9b9a0;cursor:pointer;background:none;border:0;}
+.bulkbar .sep{width:1px;height:20px;background:color-mix(in srgb,var(--paper) 24%,transparent);margin:0 2px;}
+
+.scrim{position:fixed;inset:0;background:rgba(26,23,20,.5);z-index:70;display:none;align-items:center;justify-content:center;padding:20px;}
+.scrim.show{display:flex;}
+.dialog{background:var(--paper);border:1px solid var(--ink);border-radius:4px;max-width:440px;width:100%;padding:22px 24px;}
+.dialog h3{font-family:var(--display);font-size:22px;font-weight:500;margin:0 0 8px;}
+.dialog p{font-size:13.5px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}
+.dialog .ft{display:flex;justify-content:flex-end;gap:8px;}
+.warnbox{border-left:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);padding:9px 12px;font-size:12.5px;color:var(--accent-deep);margin:0 0 16px;}
+.toasts{position:fixed;right:20px;bottom:20px;z-index:80;display:flex;flex-direction:column;gap:8px;}
+.toast{background:var(--ink);color:var(--paper);font-size:12.5px;padding:9px 14px;border-radius:3px;box-shadow:0 6px 20px rgba(0,0,0,.2);max-width:340px;animation:slidein .2s ease;}
+.toast.ok{border-left:3px solid var(--ok);} .toast.err{border-left:3px solid var(--accent);}
+@keyframes slidein{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--ink-faint);letter-spacing:.04em;padding:12px 0 0;}
+.legend b{color:var(--accent);font-weight:400;}
+.note{font-family:var(--mono);font-size:10px;color:var(--ink-faint);letter-spacing:.04em;padding:8px 0 0;}
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="row1"><div class="brand">Bowtie AI Content Workflow</div><div class="dateline" id="dateline"></div></div>
+  <div class="row2">
+    <a class="nav-link" href="#">Runs</a><a class="nav-link active" href="#">Ledger</a>
+    <a class="nav-link" href="#">Library</a><a class="nav-link" href="#">Voices</a><a class="nav-link" href="#">Prompts</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <div class="kicker">The Ledger · Live</div>
+      <h1 class="hed">Runs</h1>
+      <p class="dek">Every rewrite, new article and topic batch as one board — grouped by where it stands, edit destinations inline, drill into a batch to see the articles it spawned, and act on many at once.</p>
+    </div>
+    <div class="viewtoggle" title="Demo only"><button>Desk</button><button class="active">▤ Ledger</button></div>
+  </div>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <div class="rail">
+    <label class="search"><span class="ic">⌕</span><input id="q" type="text" placeholder="Search topic, run id or URL…" /></label>
+    <select class="fld" id="f-voice"><option value="">Voice · All</option></select>
+    <span class="spacer"></span>
+    <button class="toggle-chip" id="t-collapse" title="Collapse the Approved & Failed groups">⊟ Collapse done</button>
+    <button class="toggle-chip" id="t-cols" title="Show/hide the WordPress column group">▦ WordPress cols</button>
+    <button class="toggle-chip" id="t-density">≡ Compact</button>
+  </div>
+
+  <div class="gridwrap">
+    <table class="ledger" id="grid"><thead id="ghead"></thead><tbody id="gbody"></tbody></table>
+  </div>
+
+  <div class="legend">
+    <span>groups: <b>Needs review</b> · Generating · Approved · Failed</span>
+    <span>⬤ status colour — the only colour-coded signal</span>
+    <span>└ = run promoted from the batch above</span>
+    <span>hover Voice / Author / Category / Slug / Publish / Date / Adv / Widget → inline edit</span>
+  </div>
+  <p class="note">Static demo with mock data. Grouping, nesting, inline edits, filters, bulk actions and the debug-log expand are live; nothing persists. Slug shows decoded CJK and accepts encoded or decoded input.</p>
+</div>
+
+<div class="bulkbar" id="bulkbar">
+  <span class="cnt"><b id="bulk-cnt">0</b> selected</span><span class="sep"></span>
+  <button class="bbtn" data-bulk="approve">Approve outline</button>
+  <button class="bbtn live" data-bulk="publish">Publish</button>
+  <button class="bbtn" data-bulk="republish">Republish</button>
+  <button class="bbtn" data-bulk="author">Assign author…</button>
+  <button class="bbtn" data-bulk="category">Assign category…</button>
+  <button class="bbtn" data-bulk="restart">Restart failed</button>
+  <button class="bbtn danger" data-bulk="delete">Delete</button>
+  <button class="clr" id="bulk-clear">Clear</button>
+</div>
+
+<div class="scrim" id="scrim"><div class="dialog">
+  <h3 id="dlg-title"></h3><div id="dlg-warn"></div><p id="dlg-body"></p>
+  <div class="ft"><button class="btn btn-secondary" id="dlg-cancel">Cancel</button><button class="btn btn-primary" id="dlg-ok">Confirm</button></div>
+</div></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ── option lists ───────────────────────────────────────────── */
+const PERSONAS=["Dr. Wong (健康)","Amy Lee","保險編輯","理財顧問","Default"];
+const AUTHORS=["F. Ma","A. Lee","編輯部","C. Chan"];
+const CATS=["健康","保險","理財","危疾","醫療"];
+const PUB=[["draft","Draft"],["future","Scheduled"],["publish","Live"]];
+const enc=s=>encodeURIComponent(s); const dec=s=>{try{return decodeURIComponent(s);}catch(e){return s;}};
+
+function h(n){const d=new Date(Date.now()-n*3600e3);const D=["SUN","MON","TUE","WED","THU","FRI","SAT"];
+  return {iso:d.toISOString(),lbl:`${D[d.getDay()]} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,ts:d.getTime()};}
+function dstr(n){const d=new Date(Date.now()+n*864e5);return d.toISOString().slice(0,10);}
+
+/* status → stamp + group */
+const ST={
+  hitl_1:{tone:"accent",label:"HITL_1",grp:"review"}, hitl_2:{tone:"accent",label:"HITL_2",grp:"review"},
+  changes_requested:{tone:"warn",label:"Changes req.",grp:"review"},
+  pending:{tone:"info",label:"Queued",pulse:1,grp:"generating"}, fetching:{tone:"info",label:"Fetching",pulse:1,grp:"generating"},
+  strategy:{tone:"info",label:"Strategy",pulse:1,grp:"generating"}, production:{tone:"info",label:"Production",pulse:1,grp:"generating"},
+  persisted:{tone:"ok",label:"Saved draft",grp:"approved"}, published:{tone:"ok",label:"Published",grp:"approved"},
+  failed:{tone:"danger",label:"Failed",grp:"failed"}, rejected:{tone:"danger",label:"Rejected",grp:"failed"}, cancelled:{tone:"neutral",label:"Cancelled",grp:"failed"},
+};
+const BST={
+  ready_for_review:{tone:"accent",label:"Ready for review",grp:"review"}, partially_promoted:{tone:"warn",label:"Partly promoted",grp:"review"},
+  generating:{tone:"info",label:"Generating",pulse:1,grp:"generating"}, analysing:{tone:"info",label:"Analysing",pulse:1,grp:"generating"},
+  done:{tone:"ok",label:"Done",grp:"approved"}, failed:{tone:"danger",label:"Failed",grp:"failed"},
+};
+const GROUPS=[["review","Needs your review"],["generating","Generating"],["approved","Approved & published"],["failed","Failed & closed"]];
+
+/* ── mock data ──────────────────────────────────────────────── */
+let RUNS=[
+  // standalone rewrites
+  {id:"a3f1",cat:"rewrite",route:"full_rewrite",status:"hitl_2",topic:"兒童手足口病：症狀、預防與保險保障",url:"bowtie.com.hk/blog/hand-foot-mouth",persona:"Dr. Wong (健康)",mode:"full_rewrite",kw:["手足口病","兒童健康","預防"],adv:412,widget:88,auto:true,pub:"draft",author:"F. Ma",catg:"健康",slug:"%E6%89%8B%E8%B6%B3%E5%8F%A3%E7%97%85-%E9%A0%90%E9%98%B2",pubAt:"",post:null,iter:2,t:h(2)},
+  {id:"7c20",cat:"rewrite",route:"small_refresh",status:"hitl_1",topic:"危疾保險點揀？2026 最新比較",url:"bowtie.com.hk/blog/critical-illness",persona:"保險編輯",mode:"small_refresh",kw:["危疾保險","比較"],adv:301,widget:55,auto:false,pub:"draft",author:"A. Lee",catg:"危疾",slug:"critical-illness-2026",pubAt:"",post:null,iter:1,t:h(5)},
+  {id:"b914",cat:"rewrite",route:"full_rewrite",status:"failed",topic:"白內障手術費用與醫療保險",url:"bowtie.com.hk/blog/cataract-surgery",persona:"Dr. Wong (健康)",mode:"auto",kw:["白內障","手術費用","醫療保險"],adv:118,widget:42,auto:false,pub:"draft",author:"F. Ma",catg:"醫療",slug:"cataract-surgery-cost",pubAt:"",post:null,iter:3,t:h(8),err:"Gemini returned malformed JSON at publish step (attempt 3/3)."},
+  {id:"5de8",cat:"rewrite",route:"small_refresh",status:"changes_requested",topic:"自願醫保計劃 (VHIS) 2026 懶人包",url:"bowtie.com.hk/blog/vhis-2026",persona:"保險編輯",mode:"small_refresh",kw:["VHIS","自願醫保"],adv:501,widget:91,auto:false,pub:"draft",author:"A. Lee",catg:"保險",slug:"vhis-2026",pubAt:"",post:null,iter:2,t:h(11)},
+  {id:"e472",cat:"rewrite",route:"full_rewrite",status:"published",topic:"糖尿病飲食指南：港式餐單建議",url:"bowtie.com.hk/blog/diabetes-diet",persona:"Dr. Wong (健康)",mode:"full_rewrite",kw:["糖尿病","飲食","餐單"],adv:233,widget:61,auto:false,pub:"publish",author:"F. Ma",catg:"健康",slug:"%E7%B3%96%E5%B0%BF%E7%97%85-%E9%A3%B2%E9%A3%9F",pubAt:dstr(-1),post:109820,iter:2,t:h(33)},
+  {id:"f1a9",cat:"rewrite",route:"small_refresh",status:"persisted",topic:"門診保險邊間好？",url:"bowtie.com.hk/blog/outpatient",persona:"保險編輯",mode:"small_refresh",kw:["門診保險"],adv:188,widget:44,auto:false,pub:"draft",author:"A. Lee",catg:"保險",slug:"outpatient-insurance",pubAt:"",post:109799,iter:1,t:h(40)},
+  {id:"c6b2",cat:"rewrite",route:"full_rewrite",status:"pending",topic:"流感疫苗 2026：邊個要打？",url:"bowtie.com.hk/blog/flu-vaccine",persona:"Dr. Wong (健康)",mode:"auto",kw:["流感","疫苗"],adv:301,widget:67,auto:true,pub:"draft",author:"F. Ma",catg:"健康",slug:"flu-vaccine-2026",pubAt:"",post:null,iter:0,t:h(0.1)},
+  // standalone create
+  {id:"9d34",cat:"create",status:"production",topic:"長者牙科保險全攻略",audience:"長者及照顧者",persona:"Amy Lee",mode:"auto",kw:["牙科保險","長者"],adv:209,widget:73,auto:true,pub:"future",author:"編輯部",catg:"保險",slug:"senior-dental-guide",pubAt:dstr(6),post:null,iter:0,t:h(0.3)},
+  {id:"2a7e",cat:"create",status:"published",topic:"在家工作如何保持健康？",audience:"在職人士",persona:"Amy Lee",mode:"auto",kw:["在家工作","健康"],adv:77,widget:30,auto:true,pub:"publish",author:"編輯部",catg:"健康",slug:"wfh-staying-healthy",pubAt:dstr(-2),post:109841,iter:1,t:h(26)},
+  {id:"8b51",cat:"create",status:"strategy",topic:"年度體檢應該驗咩？",audience:"35–50 歲在職人士",persona:"Default",mode:"auto",kw:["體檢","身體檢查"],adv:140,widget:50,auto:true,pub:"draft",author:"C. Chan",catg:"醫療",slug:"",pubAt:"",post:null,iter:0,t:h(0.05)},
+  {id:"3f60",cat:"create",status:"rejected",topic:"加密貨幣與退休規劃",audience:"年輕投資者",persona:"理財顧問",mode:"auto",kw:["加密貨幣","退休"],adv:90,widget:12,auto:false,pub:"draft",author:"C. Chan",catg:"理財",slug:"",pubAt:"",post:null,iter:1,t:h(50)},
+  // children of batch b2 (promoted create runs)
+  {id:"d1c4",batch:"b2",cat:"create",status:"published",topic:"住院現金保障點計？",audience:"投保人",persona:"保險編輯",mode:"auto",kw:["住院現金"],adv:501,widget:91,auto:true,pub:"publish",author:"A. Lee",catg:"保險",slug:"hospital-cash",pubAt:dstr(0),post:109880,iter:1,t:h(18)},
+  {id:"d2c9",batch:"b2",cat:"create",status:"hitl_2",topic:"門診 vs 住院保險點分？",audience:"投保人",persona:"保險編輯",mode:"auto",kw:["門診","住院"],adv:501,widget:91,auto:true,pub:"draft",author:"A. Lee",catg:"保險",slug:"outpatient-vs-inpatient",pubAt:"",post:null,iter:1,t:h(17)},
+  {id:"d3a1",batch:"b2",cat:"create",status:"production",topic:"高端醫療保險值唔值？",audience:"投保人",persona:"保險編輯",mode:"auto",kw:["高端醫療"],adv:501,widget:91,auto:true,pub:"future",author:"A. Lee",catg:"保險",slug:"high-end-medical",pubAt:dstr(4),post:null,iter:0,t:h(16)},
+  {id:"d4e7",batch:"b2",cat:"create",status:"persisted",topic:"自付費用 (Co-pay) 係咩？",audience:"投保人",persona:"保險編輯",mode:"auto",kw:["自付費用","copay"],adv:501,widget:91,auto:true,pub:"draft",author:"A. Lee",catg:"保險",slug:"co-pay-explained",pubAt:"",post:109876,iter:1,t:h(15)},
+  {id:"d5f3",batch:"b2",cat:"create",status:"failed",topic:"保費點解年年加？",audience:"投保人",persona:"保險編輯",mode:"auto",kw:["保費"],adv:501,widget:91,auto:true,pub:"draft",author:"A. Lee",catg:"保險",slug:"premium-increase",pubAt:"",post:null,iter:2,t:h(14),err:"Audit failed — 2 high-severity compliance findings unresolved."},
+];
+let BATCHES=[
+  {id:"b1",kind:"batch",status:"ready_for_review",theme:"夏季兒童常見疾病系列",audience:"家長",focus:"預防與保障",count:8,promoted:0,kwt:4,persona:"Dr. Wong (健康)",adv:412,widget:88,auto:true,cost:42,by:"franco.ma",t:h(1)},
+  {id:"b2",kind:"batch",status:"partially_promoted",theme:"2026 醫保產品比較",audience:"投保人",focus:"產品比較與選擇",count:12,promoted:5,kwt:5,persona:"保險編輯",adv:501,widget:91,auto:true,cost:88,by:"a.lee",t:h(20)},
+  {id:"b3",kind:"batch",status:"generating",theme:"長者健康與照顧",audience:"長者照顧者",focus:"日常照顧",count:10,promoted:0,kwt:4,persona:"Amy Lee",adv:209,widget:73,auto:false,cost:11,by:"franco.ma",t:h(0.1)},
+];
+
+/* ── state ──────────────────────────────────────────────────── */
+let tab="all", density=0, showWp=1, qStr="", fVoice="";
+const selected=new Set(), expanded=new Set(), collapsedG=new Set();
+const dirty={};
+
+(function(){const s=document.getElementById("f-voice");PERSONAS.forEach(p=>{const o=document.createElement("option");o.value=p;o.textContent="Voice · "+p;s.appendChild(o);});})();
+(function(){const d=new Date();const D=["SUN","MON","TUE","WED","THU","FRI","SAT"],M=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const wk=Math.ceil((((d-new Date(d.getFullYear(),0,1))/864e5)+1)/7);
+  document.getElementById("dateline").textContent=`VOL. ${wk}  ·  ${D[d.getDay()]} ${String(d.getDate()).padStart(2,"0")} ${M[d.getMonth()]} ${d.getFullYear()}`;})();
+
+const TABS=[["all","All",""],["rewrite","Rewrites","↻"],["create","New articles","✦"],["topic_gen","Topic batches","❉"]];
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const childrenOf=id=>RUNS.filter(r=>r.batch===id);
+
+/* top-level items per tab (children handled via nesting) */
+function topItems(){
+  if(tab==="rewrite") return RUNS.filter(r=>r.cat==="rewrite");
+  if(tab==="create")  return RUNS.filter(r=>r.cat==="create");           // incl. batch children, flat
+  if(tab==="topic_gen") return [...BATCHES];
+  return [...RUNS.filter(r=>!r.batch), ...BATCHES];                       // All: standalone runs + batch parents
+}
+function grpOf(it){return it.kind==="batch"?BST[it.status].grp:ST[it.status].grp;}
+function matchQ(it){if(!qStr)return true;const q=qStr.toLowerCase();return ((it.topic||it.theme||"")+" "+(it.url||"")+" "+(it.id||"")).toLowerCase().includes(q);}
+function matchV(it){return !fVoice||(it.persona||"")===fVoice;}
+
+function counts(){
+  const out={};
+  TABS.forEach(([k])=>{
+    let items = k==="topic_gen"?BATCHES : k==="rewrite"?RUNS.filter(r=>r.cat==="rewrite") : k==="create"?RUNS.filter(r=>r.cat==="create") : [...RUNS.filter(r=>!r.batch),...BATCHES];
+    out[k]={ct:items.length, need:items.filter(it=>grpOf(it)==="review").length};
+  });
+  return out;
+}
+
+/* ── tabs ───────────────────────────────────────────────────── */
+function renderTabs(){
+  const c=counts();
+  document.getElementById("tabs").innerHTML=TABS.map(([k,lbl,g])=>`
+    <button class="tab ${k===tab?'active':''}" data-tab="${k}">
+      ${g?`<span class="glyph">${g}</span>`:''}${lbl}<span class="ct">${c[k].ct}</span>
+      ${c[k].need?`<span class="badge">${c[k].need}</span>`:''}</button>`).join("");
+  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;selected.clear();expanded.clear();render();});
+}
+
+/* ── header ─────────────────────────────────────────────────── */
+function renderHead(){
+  const wp=showWp;
+  document.getElementById("ghead").innerHTML=`
+   <tr class="grouprow">
+     <th class="c-sel"></th><th class="c-topic">Topic — run identity</th>
+     <th colspan="3" class="grp-start">Brief</th>
+     ${wp?'<th colspan="5" class="grp-start">WordPress destination</th>':''}
+     <th class="grp-start">Action</th>
+   </tr>
+   <tr class="colrow">
+     <th class="c-sel"><input type="checkbox" id="selall"></th>
+     <th class="c-topic">Topic · type · status · keywords</th>
+     <th class="grp-start">Voice</th><th>Adv ID</th><th>Widget ID</th>
+     ${wp?'<th class="grp-start">Author</th><th>Category</th><th>Slug (decoded)</th><th>Publish</th><th>Post date</th>':''}
+     <th class="grp-start">Action</th>
+   </tr>`;
+  const sa=document.getElementById("selall");
+  sa.onclick=()=>{const all=collectVisibleRuns();if(sa.checked)all.forEach(r=>selected.add(r.id));else all.forEach(r=>selected.delete(r.id));render();};
+}
+
+function stamp(o){return `<span class="stamp s-${o.tone} ${o.pulse?'pulse':''}"><span class="dot"></span>${esc(o.label)}</span>`;}
+function colCount(){return 2+3+(showWp?5:0)+1;}
+
+/* ── identity cell (run) ────────────────────────────────────── */
+function identity(it,child){
+  const typeLabel=it.cat==="create"?"New article":(it.route==="full_rewrite"?"Rewrite · Full":"Rewrite · Small");
+  const glyph=it.cat==="create"?"✦":"↻";
+  const st=ST[it.status];
+  const sub=`<span>${esc(it.id)}</span> · ${esc(it.mode)}${it.post?` · <a href="#" title="Open live post">WP #${it.post} ↗</a>`:''}`;
+  const source=it.cat==="rewrite"&&it.url?`<div class="idsrc"><a href="https://${esc(it.url)}" target="_blank" rel="noopener" title="Open source article — ${esc(it.url)}">↗ ${esc(it.url)}</a></div>`:'';
+  return `<div class="idrow ${child?'child':''}">
+    <button class="chev" data-exp="${it.id}" title="Show draft preview">${expanded.has(it.id)?'▾':'▸'}</button>
+    <div>
+      <div class="idmeta"><span class="tag"><span class="g">${glyph}</span>${typeLabel}</span>${stamp(st)}${it.auto?'<span class="auto">AUTO H1</span>':''}</div>
+      <a class="topiclink" href="#" title="${esc(it.topic)}">${esc(it.topic)}</a>
+      <div class="idsub">${sub}</div>
+      ${source}
+      <div class="kw">${it.kw.slice(0,3).map(k=>`<span>${esc(k)}</span>`).join("")}${it.kw.length>3?`<span>+${it.kw.length-3}</span>`:""}</div>
+    </div>
+  </div>`;
+}
+
+/* inline editors */
+function selCell(id,field,opts,val){const d=dirty[id]&&dirty[id].has(field);
+  return `<span class="editcell ${d?'dirty':''}"><select data-edit="${id}" data-field="${field}">${opts.map(o=>{const v=Array.isArray(o)?o[0]:o,l=Array.isArray(o)?o[1]:o;return `<option value="${esc(v)}" ${v===val?'selected':''}>${esc(l)}</option>`;}).join("")}</select></span>`;}
+function slugCell(it){const d=dirty[it.id]&&dirty[it.id].has("slug");
+  return `<input class="tin ${d?'dirty':''}" data-edit="${it.id}" data-field="slug" value="${esc(dec(it.slug))}" title="Stored: ${esc(it.slug||'—')}\nAccepts decoded (手足口病) or encoded (%E6…)" placeholder="—">`;}
+function dateCell(it){const d=dirty[it.id]&&dirty[it.id].has("pubAt");
+  return `<input type="date" class="din ${d?'dirty':''}" data-edit="${it.id}" data-field="pubAt" value="${esc(it.pubAt||'')}">`;}
+function numCell(it,f){const d=dirty[it.id]&&dirty[it.id].has(f);
+  return `<input class="numin ${d?'dirty':''}" type="number" data-edit="${it.id}" data-field="${f}" value="${it[f]}">`;}
+
+/* actions */
+function runActions(it){const s=it.status;
+  if(s==="hitl_1")return `<div class="acts"><button class="btn btn-primary" data-act="approve_outline" data-id="${it.id}">Approve outline</button><a class="linkact" href="#">Review →</a></div>`;
+  if(s==="hitl_2")return `<div class="acts"><button class="btn btn-primary" data-act="publish" data-id="${it.id}">Approve &amp; publish</button><button class="btn btn-secondary" data-act="changes" data-id="${it.id}">Changes</button><button class="btn btn-danger" data-act="reject" data-id="${it.id}">Reject</button></div>`;
+  if(s==="changes_requested")return `<a class="linkact" href="#">Open run →</a>`;
+  if(s==="failed")return `<div class="acts"><button class="btn btn-secondary" data-act="restart" data-id="${it.id}">Restart</button><a class="linkact" href="#">Inspect →</a></div>`;
+  return `<a class="linkact" href="#">Open →</a>`;}
+
+/* ── row builders ───────────────────────────────────────────── */
+function runRow(it,child){
+  const wp=showWp?`
+    <td class="grp-start">${selCell(it.id,"author",AUTHORS,it.author)}</td>
+    <td>${selCell(it.id,"catg",CATS,it.catg)}</td>
+    <td>${slugCell(it)}</td>
+    <td>${selCell(it.id,"pub",PUB,it.pub)}</td>
+    <td>${dateCell(it)}</td>`:"";
+  return `<tr class="run" data-row="${it.id}">
+    <td class="c-sel"><input type="checkbox" data-sel="${it.id}" ${selected.has(it.id)?'checked':''}></td>
+    <td class="c-topic">${identity(it,child)}</td>
+    <td class="grp-start">${selCell(it.id,"persona",PERSONAS,it.persona)}</td>
+    <td>${numCell(it,"adv")}</td><td>${numCell(it,"widget")}</td>
+    ${wp}
+    <td class="grp-start">${runActions(it)}</td>
+  </tr>`+(expanded.has(it.id)?insertRun(it):"");
+}
+
+function batchRow(it){
+  const st=BST[it.status],pct=Math.round(100*it.promoted/it.count);
+  return `<tr class="batchband" data-row="${it.id}">
+    <td colspan="${colCount()}"><div class="band">
+      <button class="bchev" data-exp="${it.id}" title="Show promoted runs">${expanded.has(it.id)?'▾':'▸'}</button>
+      <input type="checkbox" data-sel="${it.id}" ${selected.has(it.id)?'checked':''}>
+      <div class="bhead">
+        <div class="bmeta-top"><span class="tag"><span class="g">❉</span>Topic batch</span>${stamp(st)}</div>
+        <a class="btheme" href="#" title="${esc(it.theme)}">${esc(it.theme)}</a>
+        <div class="bsub">${esc(it.audience)} · 焦點 ${esc(it.focus)} · ${it.count} topics · by ${esc(it.by)}</div>
+      </div>
+      <div class="bprogwrap"><span class="prog"><i style="width:${pct}%"></i></span><span class="bmono">${it.promoted}/${it.count} promoted</span></div>
+      <div class="bdefaults">
+        <span class="bmono">HK$ ${(it.cost/100).toFixed(2)}</span>
+        ${it.auto?'<span class="tag">AUTO H1 default</span>':''}
+        <span class="bmono">Voice</span>${selCell(it.id,"persona",PERSONAS,it.persona)}
+        <span class="bmono">Adv ${it.adv} · Widget ${it.widget}</span>
+      </div>
+      <span class="bspacer"></span>
+      ${batchActions(it)}
+    </div></td>
+  </tr>`+(expanded.has(it.id)?insertBatch(it):"");
+}
+function batchActions(it){
+  if(it.status==="ready_for_review")return `<button class="btn btn-primary" data-act="review" data-id="${it.id}">Review topics</button>`;
+  if(it.status==="partially_promoted")return `<div class="acts"><button class="btn btn-primary" data-act="review" data-id="${it.id}">Finish promotion</button></div>`;
+  if(it.status==="failed")return `<a class="linkact" href="#">Inspect →</a>`;
+  return `<a class="linkact" href="#">Open →</a>`;}
+
+/* run expand → draft + destination preview (no debug log) */
+function previewHeads(it){
+  const base = it.cat==="create" ? ["背景","重點分析","常見問題 FAQ"] : ["症狀與成因","最新數據","保障與保險","常見問題 FAQ"];
+  return [...it.kw.slice(0,1), ...base].slice(0,4);
+}
+function insertRun(it){
+  const live=it.pub==="publish";
+  const pass=it.status!=="failed";
+  const aH=it.status==="failed"?2:0, aM=it.iter%3, aL=(it.iter+1)%3;
+  const cost=(1.2+it.iter*0.62).toFixed(2);
+  const meta=`了解${it.kw[0]||it.topic}的重點、${it.kw[1]||"保障選擇"}與香港最新資訊，助你做出明智決定。`;
+  const para=`本文根據最新香港資料更新，說明${it.topic}的關鍵重點，並比較相關的保障與保險選項，附常見問題解答……`;
+  return `<tr class="insert"><td colspan="${colCount()}"><div class="preview">
+    <div class="pv-draft">
+      <h4>Draft preview</h4>
+      <div class="seo">${esc(it.topic)}</div>
+      <div class="metad">${esc(meta)}</div>
+      <div class="heads">${previewHeads(it).map(x=>`<span>H2 · ${esc(x)}</span>`).join("")}</div>
+      <p class="exc">${esc(para)}</p>
+      <a class="openfull" href="#">Open full draft →</a>
+    </div>
+    <div class="pv-dest">
+      <h4>Destination &amp; checks</h4>
+      <dl class="kv">
+        <dt>Target</dt><dd>${live?'production · <b style="color:var(--accent-deep)">live</b>':'production'}</dd>
+        ${it.cat==="rewrite"&&it.url?`<dt>Source</dt><dd class="mono"><a href="https://${esc(it.url)}" target="_blank" rel="noopener">${esc(it.url)} ↗</a></dd>`:''}
+        <dt>Slug</dt><dd class="mono">${esc(dec(it.slug)||"—")}</dd>
+        <dt>Author</dt><dd>${esc(it.author)}</dd>
+        <dt>Category</dt><dd>${esc(it.catg)}</dd>
+        <dt>Publish</dt><dd>${PUB.find(p=>p[0]===it.pub)[1]}${it.pubAt?` · ${esc(it.pubAt)}`:""}</dd>
+        <dt>Audit</dt><dd><span class="stamp s-${pass?'ok':'danger'}"><span class="dot"></span>${pass?'PASS':'FAIL'}</span> &nbsp;${aH}H ${aM}M ${aL}L</dd>
+        <dt>Cost</dt><dd class="mono">HK$ ${cost} · ${it.iter} it</dd>
+        <dt>Last touch</dt><dd>${esc(it.author)} · ${esc(it.t.lbl)}</dd>
+        ${it.err?`<dt>Error</dt><dd style="color:var(--accent-deep)">${esc(it.err)}</dd>`:""}
+      </dl>
+    </div></div></td></tr>`;
+}
+function insertBatch(it){
+  const kids=childrenOf(it.id);
+  if(!kids.length) return `<tr class="insert"><td colspan="${colCount()}"><div style="padding:14px 20px"><p class="empty" style="padding:0;font-size:15px">No runs promoted yet — review the ${it.count} candidate topics to promote them.</p></div></td></tr>`;
+  return `<tr class="bandlabel"><td colspan="${colCount()}">└ Promoted runs · ${kids.length} of ${it.count} topics</td></tr>`+kids.map(k=>runRow(k,true)).join("");
+}
+
+/* ── render ─────────────────────────────────────────────────── */
+function collectVisibleRuns(){
+  // runs eligible for select-all = visible run rows (incl. expanded children), excludes batches
+  const out=[];
+  topItems().filter(it=>matchQ(it)&&matchV(it)).forEach(it=>{
+    if(it.kind==="batch"){ if(expanded.has(it.id)) childrenOf(it.id).forEach(k=>out.push(k)); }
+    else out.push(it);
+  });
+  return out;
+}
+function render(){
+  document.getElementById("grid").className="ledger"+(density?" compact":"");
+  renderTabs(); renderHead();
+  const body=document.getElementById("gbody");
+  let items=topItems().filter(it=>matchQ(it)&&matchV(it));
+  items.sort((a,b)=>b.t.ts-a.t.ts); // newest first within group
+  let html="";
+  for(const [gk,glabel] of GROUPS){
+    const inG=items.filter(it=>grpOf(it)===gk);
+    if(!inG.length) continue;
+    const open=!collapsedG.has(gk);
+    html+=`<tr class="grouphead g-${gk}"><td colspan="${colCount()}"><div class="gh" data-grp="${gk}">
+       <span class="chevg">${open?'▾':'▸'}</span><span class="bar"></span>
+       <span class="lbl">${glabel}</span><span class="ct">${inG.length}</span>
+       ${gk==='review'?'<span class="tw">waiting on you</span>':''}
+     </div></td></tr>`;
+    if(open) html+=inG.map(it=>it.kind==="batch"?batchRow(it):runRow(it,false)).join("");
+  }
+  body.innerHTML=html||`<tr><td colspan="${colCount()}"><p class="empty">Nothing filed under this edition.</p></td></tr>`;
+
+  body.querySelectorAll("[data-grp]").forEach(g=>g.onclick=()=>{const k=g.dataset.grp;collapsedG.has(k)?collapsedG.delete(k):collapsedG.add(k);render();});
+  body.querySelectorAll("[data-exp]").forEach(b=>b.onclick=()=>{const id=b.dataset.exp;expanded.has(id)?expanded.delete(id):expanded.add(id);render();});
+  body.querySelectorAll("[data-sel]").forEach(c=>c.onchange=()=>{c.checked?selected.add(c.dataset.sel):selected.delete(c.dataset.sel);renderBulk();});
+  body.querySelectorAll("[data-edit]").forEach(el=>el.onchange=()=>{
+    const id=el.dataset.edit,f=el.dataset.field;const it=[...RUNS,...BATCHES].find(r=>r.id===id);
+    if(it){it[f]=el.value;}(dirty[id]=dirty[id]||new Set()).add(f);
+    const shown = f==="slug"?`“${el.value}” (stored ${enc(el.value)})` : (el.tagName==="SELECT"?`“${el.options[el.selectedIndex].text}”`:`“${el.value}”`);
+    toast("ok",`Saved ${f} → ${shown} · ${id}`); render();
+  });
+  body.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>act(b.dataset.act,b.dataset.id));
+  renderBulk();
+}
+
+/* ── actions ────────────────────────────────────────────────── */
+function act(a,id){const it=[...RUNS,...BATCHES].find(r=>r.id===id);
+  if(a==="publish"){if(it.pub==="publish"){confirm1("Approve & publish live?",`“${it.topic}” will publish to WordPress as a public, live post. Hard to undo.`,true,()=>{it.status="published";it.post=it.post||(110000+Math.floor(Math.random()*900));toast("ok","Published live · "+id);render();});return;}
+    it.status="persisted";toast("ok","Approved & saved as draft · "+id);render();return;}
+  if(a==="approve_outline"){it.status="production";toast("ok","Outline approved · "+id);render();return;}
+  if(a==="restart"){it.status="pending";it.err=null;toast("ok","Run restarted · "+id);render();return;}
+  if(a==="reject"){it.status="rejected";toast("err","Draft rejected · "+id);render();return;}
+  if(a==="changes"){it.status="changes_requested";toast("ok","Changes requested · "+id);render();return;}
+  if(a==="review"){toast("ok","→ would open batch detail · "+id);return;}
+}
+
+/* ── bulk ───────────────────────────────────────────────────── */
+function renderBulk(){document.querySelectorAll("[data-sel]").forEach(c=>{c.checked=selected.has(c.dataset.sel);});
+  document.getElementById("bulk-cnt").textContent=selected.size;
+  document.getElementById("bulkbar").classList.toggle("show",selected.size>0);}
+function selRuns(){return RUNS.filter(r=>selected.has(r.id));}
+document.querySelectorAll("[data-bulk]").forEach(b=>b.onclick=()=>bulk(b.dataset.bulk));
+document.getElementById("bulk-clear").onclick=()=>{selected.clear();render();};
+function bulk(a){const runs=selRuns();
+  if(a==="approve"){const e=runs.filter(r=>r.status==="hitl_1");if(!e.length)return toast("err","No selected runs are at HITL_1.");
+    confirm1(`Approve ${e.length} outline(s)?`,`${e.length} run(s) at HITL_1 approved. ${runs.length-e.length} ineligible skipped.`,false,()=>{e.forEach(r=>r.status="production");done(`Approved ${e.length} outline(s)`);});return;}
+  if(a==="publish"){const e=runs.filter(r=>r.status==="hitl_2");if(!e.length)return toast("err","No selected runs are at HITL_2.");
+    const live=e.filter(r=>r.pub==="publish").length;
+    confirm1(`Publish ${e.length} post(s)${live?` — ${live} LIVE`:''}?`,`${e.length} run(s) at HITL_2 approved & published. ${runs.length-e.length} ineligible skipped.`,live>0,()=>{e.forEach(r=>{r.status="published";if(!r.post)r.post=110000+Math.floor(Math.random()*900);});done(`Published ${e.length}`);});return;}
+  if(a==="republish"){const e=runs.filter(r=>["published","persisted"].includes(r.status));if(!e.length)return toast("err","No selected runs are saved/published.");
+    confirm1(`Republish ${e.length}?`,`Re-push ${e.length} run(s) with current metadata.`,e.some(r=>r.pub==="publish"),()=>done(`Republished ${e.length}`));return;}
+  if(a==="author"){if(!runs.length)return toast("err","Select runs first.");pick("Assign author to "+runs.length+" run(s)",AUTHORS,v=>{runs.forEach(r=>{r.author=v;(dirty[r.id]=dirty[r.id]||new Set()).add("author");});done(`Author → ${v} on ${runs.length}`);});return;}
+  if(a==="category"){if(!runs.length)return toast("err","Select runs first.");pick("Assign category to "+runs.length+" run(s)",CATS,v=>{runs.forEach(r=>{r.catg=v;(dirty[r.id]=dirty[r.id]||new Set()).add("catg");});done(`Category → ${v} on ${runs.length}`);});return;}
+  if(a==="restart"){const e=runs.filter(r=>r.status==="failed");if(!e.length)return toast("err","No selected runs are failed.");
+    confirm1(`Restart ${e.length} failed run(s)?`,`${e.length} failed run(s) re-run from the top.`,false,()=>{e.forEach(r=>{r.status="pending";r.err=null;});done(`Restarted ${e.length}`);});return;}
+  if(a==="delete"){const n=runs.length;if(!n)return;confirm1(`Remove ${n} run(s)?`,`${n} run(s) and derived work permanently deleted. Live WordPress posts unaffected.`,true,()=>{RUNS=RUNS.filter(r=>!selected.has(r.id));done(`Removed ${n}`);});return;}
+}
+function done(m){selected.clear();render();toast("ok",m);}
+function pick(title,opts,cb){dlgOpen(title,"",`<select class="fld" id="pickval" style="width:100%;padding:9px;font-size:13px">${opts.map(o=>`<option>${esc(o)}</option>`).join("")}</select>`,false,()=>cb(document.getElementById("pickval").value));}
+
+/* ── dialog + toast ─────────────────────────────────────────── */
+let dlgCb=null;
+function confirm1(t,b,warn,cb){dlgOpen(t,warn?"⚠ Hard to undo — confirm the count above.":"",`<p>${esc(b)}</p>`,warn,cb);}
+function dlgOpen(t,warn,bodyHtml,danger,cb){document.getElementById("dlg-title").textContent=t;
+  document.getElementById("dlg-warn").innerHTML=warn?`<div class="warnbox">${esc(warn)}</div>`:"";
+  document.getElementById("dlg-body").innerHTML=bodyHtml;
+  const ok=document.getElementById("dlg-ok");ok.className="btn "+(danger?"btn-danger":"btn-primary");
+  dlgCb=cb;document.getElementById("scrim").classList.add("show");}
+document.getElementById("dlg-cancel").onclick=()=>document.getElementById("scrim").classList.remove("show");
+document.getElementById("scrim").onclick=e=>{if(e.target.id==="scrim")e.currentTarget.classList.remove("show");};
+document.getElementById("dlg-ok").onclick=()=>{document.getElementById("scrim").classList.remove("show");if(dlgCb)dlgCb();dlgCb=null;};
+function toast(k,m){const c=document.getElementById("toasts");const el=document.createElement("div");el.className="toast "+k;el.textContent=m;c.appendChild(el);setTimeout(()=>{el.style.opacity="0";el.style.transition="opacity .3s";setTimeout(()=>el.remove(),300);},2600);}
+
+/* ── filters ────────────────────────────────────────────────── */
+document.getElementById("q").oninput=e=>{qStr=e.target.value;render();};
+document.getElementById("f-voice").onchange=e=>{fVoice=e.target.value;render();};
+document.getElementById("t-collapse").onclick=function(){const on=this.classList.toggle("on");if(on){collapsedG.add("approved");collapsedG.add("failed");}else{collapsedG.delete("approved");collapsedG.delete("failed");}render();};
+document.getElementById("t-cols").onclick=function(){showWp=!showWp;this.classList.toggle("on",!showWp);render();};
+document.getElementById("t-density").onclick=function(){density=!density;this.classList.toggle("on",density);this.textContent=density?"≡ Comfortable":"≡ Compact";render();};
+
+render();
+</script>
+</body>
+</html>

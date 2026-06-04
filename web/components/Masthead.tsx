@@ -10,15 +10,25 @@ import { signOut, useSession } from "@/lib/auth-client";
 import { useRole } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { href: "/", label: "Runs" },
+// `exact` entries match only their own path (so the Desk's "/" and the Ledger's
+// "/runs" don't both light up, and deeper run pages like /runs/{id}/hitl2 don't
+// activate the Ledger tab); the rest match on prefix.
+interface NavItem {
+  href: string;
+  label: string;
+  exact?: boolean;
+}
+
+const NAV: NavItem[] = [
+  { href: "/", label: "Runs", exact: true },
+  { href: "/runs", label: "Ledger", exact: true },
   { href: "/library", label: "Library" },
   { href: "/voices", label: "Voices" },
   { href: "/prompts", label: "Prompts" },
 ];
 
 // Admin-only nav entries, appended when the operator can manage users.
-const ADMIN_NAV = [{ href: "/admin/users", label: "Users" }];
+const ADMIN_NAV: NavItem[] = [{ href: "/admin/users", label: "Users" }];
 
 function isoWeek(d: Date): number {
   const target = new Date(d.valueOf());
@@ -80,7 +90,7 @@ export function Masthead() {
       <div className="mx-auto max-w-[1180px] px-5 md:px-10 pb-3 flex items-center justify-between">
         <nav className="flex items-center gap-6 text-[13px]">
           {navItems.map((n) => {
-            const active = n.href === "/" ? pathname === "/" : pathname.startsWith(n.href);
+            const active = n.exact ? pathname === n.href : pathname.startsWith(n.href);
             return (
               <Link
                 key={n.href}

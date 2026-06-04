@@ -14,6 +14,7 @@ import {
 } from "../wordpress/client";
 import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
+import { canonicalizeSlug } from "../wordpress/slug";
 import { restartGuard } from "./run_guards";
 import type { AuthVars } from "../auth/middleware";
 import { resolveActorIdentity } from "./identity";
@@ -192,6 +193,16 @@ interface RunListRow {
   acf_widget_id: number;
   edit_note: string | null;
   auto_accept_hitl1: boolean;
+  // WordPress destination — the Ledger board's WORDPRESS columns read these.
+  wp_author_id: number | null;
+  wp_category_ids: unknown;
+  wp_tag_ids: unknown;
+  wp_featured_media_id: number | null;
+  wp_slug: string | null;
+  wp_excerpt: string | null;
+  wp_publish_status: string | null;
+  wp_publish_at: string | null;
+  wp_pushed_post_id: number | null;
 }
 
 interface RunDetailRow extends RunListRow {
@@ -202,14 +213,7 @@ interface RunDetailRow extends RunListRow {
   approved_by: string | null;
   hitl_2_decision: string | null;
   hitl_2_notes: string | null;
-  wp_publish_status: string | null;
-  wp_author_id: number | null;
-  wp_category_ids: unknown;
-  wp_tag_ids: unknown;
-  wp_featured_media_id: number | null;
-  wp_slug: string | null;
-  wp_excerpt: string | null;
-  wp_pushed_post_id: number | null;
+  // wp_* destination fields are inherited from RunListRow; detail adds these:
   wp_pushed_at: string | null;
   wp_push_error: unknown;
   topic_candidate_id: string | null;
@@ -399,7 +403,9 @@ runsRouter.get("/", async (c) => {
       SELECT
         run_id, status, topic, article_url, mode, created_at, chosen_route,
         iteration_count, start_mode, target_audience, keywords, persona,
-        acf_adv_id, acf_widget_id, edit_note, auto_accept_hitl1
+        acf_adv_id, acf_widget_id, edit_note, auto_accept_hitl1,
+        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
+        wp_slug, wp_excerpt, wp_publish_status, wp_publish_at, wp_pushed_post_id
       FROM content_tool.runs
       ${statusClause}
       ORDER BY created_at DESC
@@ -425,6 +431,16 @@ runsRouter.get("/", async (c) => {
       acf_widget_id: r.acf_widget_id,
       edit_note: r.edit_note,
       auto_accept_hitl1: r.auto_accept_hitl1 === true,
+      // WordPress destination — the Ledger board's WORDPRESS columns read these.
+      wp_author_id: r.wp_author_id,
+      wp_category_ids: pgJson(r.wp_category_ids),
+      wp_tag_ids: pgJson(r.wp_tag_ids),
+      wp_featured_media_id: r.wp_featured_media_id,
+      wp_slug: r.wp_slug,
+      wp_excerpt: r.wp_excerpt,
+      wp_publish_status: r.wp_publish_status,
+      wp_publish_at: pgTimestampToIso(r.wp_publish_at),
+      wp_pushed_post_id: r.wp_pushed_post_id,
     })),
   );
 });
@@ -1180,6 +1196,17 @@ interface ApplyEditsBody {
   notes?: string | null;
 }
 
+interface RunWpMetaPatchBody {
+  acf_adv_id?: number | null;
+  acf_widget_id?: number | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_slug?: string | null;
+  wp_publish_status?: string | null;
+  wp_publish_at?: string | null;
+  expected_version?: number | null;
+}
+
 interface RepublishRunRow {
   start_mode: string;
   created_by: string | null;
@@ -1639,6 +1666,109 @@ runsRouter.put("/:id/article", requireRole("viewer"), async (c) => {
     );
   }
   return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /:id — partial update of a run's destination / brief fields.
+//
+// The Ledger board's inline cell editors. Only fields the caller supplied
+// (non-null) are overwritten (COALESCE preserves the rest), mirroring the
+// `wp_values` block in PUT /article. Persona/Voice is intentionally NOT here —
+// it is read-only in the board. Optimistic concurrency uses the latest Render's
+// `version` (the run's content token, shared with PUT /article): a stale
+// `expected_version` is rejected with 409 stale_version. `wp_slug` is
+// canonicalized (decode-then-encode). Role: editor+.
+// Mirrors content_tool/api/routes/runs.py::patch_run_wp_meta.
+// ---------------------------------------------------------------------------
+runsRouter.patch("/:id", requireRole("editor"), async (c) => {
+  const runId = c.req.param("id");
+  const body = await c.req
+    .json<RunWpMetaPatchBody>()
+    .catch(() => ({}) as RunWpMetaPatchBody);
+
+  const expectedVersion = body.expected_version ?? null;
+  const slug = body.wp_slug != null ? canonicalizeSlug(body.wp_slug) : null;
+
+  const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const runRows = await sql<{ run_id: string }[]>`
+      SELECT run_id FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (runRows[0] === undefined) {
+      return { kind: "not_found" as const };
+    }
+
+    // Latest render = the optimistic-concurrency token. A still-generating run
+    // may not have one yet — a destination edit without a version is then
+    // last-write-wins.
+    const renderRows = await sql<{ render_id: string; version: number }[]>`
+      SELECT r.render_id, r.version
+      FROM content_tool.renders r
+      JOIN content_tool.drafts d ON d.draft_id = r.draft_id
+      WHERE d.run_id = ${runId}
+      ORDER BY d.iteration DESC
+      LIMIT 1
+    `;
+    const render = renderRows[0];
+
+    let newVersion: number | null = null;
+    if (expectedVersion !== null) {
+      if (render === undefined) {
+        return { kind: "no_render" as const };
+      }
+      const result = await sql`
+        UPDATE content_tool.renders
+        SET version = version + 1
+        WHERE render_id = ${render.render_id} AND version = ${expectedVersion}
+      `;
+      if (result.count === 0) {
+        // Conditional WHERE matched no row → another reviewer saved since the
+        // client loaded this render. `render.version` is the committed current.
+        return { kind: "stale" as const, currentVersion: render.version };
+      }
+      newVersion = render.version + 1;
+    } else if (render !== undefined) {
+      // Last-write-wins, but still advance the token so a concurrent article
+      // editor holding the old version is rejected on their next save.
+      await sql`
+        UPDATE content_tool.renders SET version = version + 1
+        WHERE render_id = ${render.render_id}
+      `;
+      newVersion = render.version + 1;
+    }
+
+    // Only overwrite fields the caller supplied (non-null); COALESCE preserves
+    // the existing value for omitted fields — matches PUT /article's wp_values.
+    await sql`
+      UPDATE content_tool.runs SET
+        acf_adv_id = COALESCE(${body.acf_adv_id ?? null}, acf_adv_id),
+        acf_widget_id = COALESCE(${body.acf_widget_id ?? null}, acf_widget_id),
+        wp_author_id = COALESCE(${body.wp_author_id ?? null}, wp_author_id),
+        wp_category_ids = COALESCE(${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)}, wp_category_ids),
+        wp_slug = COALESCE(${slug}, wp_slug),
+        wp_publish_status = COALESCE(${body.wp_publish_status ?? null}, wp_publish_status),
+        wp_publish_at = COALESCE(${body.wp_publish_at ?? null}, wp_publish_at)
+      WHERE run_id = ${runId}
+    `;
+    return { kind: "ok" as const, version: newVersion };
+  });
+
+  if (outcome.kind === "not_found") {
+    return c.json({ detail: "run not found" }, 404);
+  }
+  if (outcome.kind === "no_render") {
+    return c.json({ detail: "no render for this run" }, 404);
+  }
+  if (outcome.kind === "stale") {
+    return c.json(
+      {
+        error: "stale_version",
+        message: "run was changed since you loaded it",
+        current_version: outcome.currentVersion,
+      },
+      409,
+    );
+  }
+  return c.json({ ok: true, version: outcome.version });
 });
 
 // ---------------------------------------------------------------------------

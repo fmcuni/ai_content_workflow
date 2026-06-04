@@ -8,11 +8,13 @@ import type {
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
-  RefreshEvaluation, Render, RepublishResponse, RunEventLog, RunSummary, ScanResponse,
+  RefreshEvaluation, Render, RepublishResponse, RunCost, RunEventLog, RunSummary,
+  RunWpMetaPatch, ScanResponse,
   SetupConfigureResult, SetupRequest, SetupStatus, SetupVerifyResult,
   SourcePolicyDoc, SourcePolicyPreviewResponse, SourcePolicyResponse, SourcePolicyRevertResponse,
   SourcePolicySaveResponse, SourcePolicyVersionDetail, SourcePolicyVersionsResponse,
-  TopicBatch, TopicBatchCreateResponse, TopicBatchIn, TopicCandidate, UserPromptExample,
+  TopicBatch, TopicBatchCreateResponse, TopicBatchDefaultsPatch, TopicBatchIn, TopicCandidate,
+  UserPromptExample,
   WpCategoryOption, WpUserOption,
 } from "./types";
 
@@ -112,10 +114,19 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  // Ledger inline edit: partial update of a run's destination / brief fields.
+  // Returns the new render version (null when the run has no draft yet).
+  patchRun: (runId: string, body: RunWpMetaPatch) =>
+    http<{ ok: boolean; version: number | null }>(`${BASE}/${runId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   republish: (runId: string) =>
     http<RepublishResponse>(`${BASE}/${runId}/republish`, { method: "POST" }),
   getLatestRender: (runId: string) => http<Render>(`${BASE}/${runId}/render`),
   getLatestAudit: (runId: string) => http<Audit>(`${BASE}/${runId}/audit`),
+  // Cost lives under /costs (not /api/runs); 404s for runs with no usage yet.
+  getRunCost: (runId: string) => http<RunCost>(`/api/costs/run/${runId}`),
   resumeHitl1: (
     runId: string,
     body: { decision: "approve" | "edit_outline" | "override_route" | "cancel";
@@ -248,6 +259,12 @@ export const topicBatchesApi = {
     http<TopicBatch[]>(`${TOPIC_BATCHES_BASE}${status ? `?status=${status}` : ""}`),
   detail: (batchId: string) =>
     http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}`),
+  // Ledger band inline edit: partial update of a batch's promotion defaults.
+  patch: (batchId: string, body: TopicBatchDefaultsPatch) =>
+    http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   getLogs: (batchId: string, params?: LogQueryParams) =>
     http<RunEventLog[]>(`${TOPIC_BATCHES_BASE}/${batchId}/logs${logQueryString(params)}`),
   eventsUrl: (batchId: string) => {

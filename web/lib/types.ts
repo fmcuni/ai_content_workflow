@@ -55,6 +55,9 @@ export interface RunSummary {
   wp_featured_media_id?: number | null;
   wp_slug?: string | null;
   wp_excerpt?: string | null;
+  // Scheduled/recorded publish datetime (exists on the run row; the Ledger's
+  // Post-date column reads it, falling back to "—" when the list omits it).
+  wp_publish_at?: string | null;
   wp_pushed_post_id?: number | null;
   error?: { type: string; message: string } | null;
 }
@@ -270,6 +273,40 @@ export interface Render {
   faq_schema_jsonld: Record<string, unknown> | null;
   excerpt_suggestion: string;
   slug_suggestion: string;
+  // Optimistic-concurrency token (latest render). Echoed back as
+  // `expected_version` on PUT /article and PATCH /runs/{id} so a stale edit
+  // is rejected (409 stale_version) instead of clobbering.
+  version?: number;
+}
+
+/**
+ * Partial update of a run's editable destination / brief fields, sent by the
+ * Ledger board's inline cell editors via PATCH /runs/{id}. Only provided
+ * (non-null) fields are overwritten. Persona/Voice is intentionally absent —
+ * it is read-only in the board. `expected_version` (the latest render's
+ * version) opts into optimistic concurrency; omit for last-write-wins.
+ */
+export interface RunWpMetaPatch {
+  acf_adv_id?: number | null;
+  acf_widget_id?: number | null;
+  wp_author_id?: number | null;
+  wp_category_ids?: number[] | null;
+  wp_slug?: string | null;
+  wp_publish_status?: "draft" | "future" | "publish" | null;
+  wp_publish_at?: string | null;
+  expected_version?: number | null;
+}
+
+/**
+ * Partial update of a topic batch's promotion defaults, sent by the Ledger
+ * band's inline default editors via PATCH /topic-batches/{id}. Only fields
+ * present are applied; a default only affects runs promoted AFTER the change.
+ */
+export interface TopicBatchDefaultsPatch {
+  persona_default?: string | null;
+  acf_adv_id_default?: number | null;
+  acf_widget_id_default?: number | null;
+  auto_accept_hitl1_default?: boolean | null;
 }
 
 export interface AuditFinding {
@@ -289,6 +326,18 @@ export interface Audit {
   severity_low: number;
   llm_findings: { findings: AuditFinding[] };
   deterministic_findings: { findings: AuditFinding[] };
+}
+
+// Token usage + estimated spend for a single run, priced by the model the run
+// actually used. Shape mirrors GET /costs/run/{id} on both backends
+// (content_tool/api/routes/costs.py + deploy/cloudflare-workers/src/routes/costs.ts):
+// integer token counts and truncated integer cents. The endpoint 404s for runs
+// with no usage yet (no gap-analysis row and no drafts).
+export interface RunCost {
+  tokens_in: number;
+  tokens_out: number;
+  thinking_tokens: number;
+  est_usd_cents: number;
 }
 
 export interface SseEvent {
