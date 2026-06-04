@@ -104,7 +104,7 @@ export function MultiSelectCell({
         aria-label={ariaLabel}
         className={cn(
           "font-sans text-[12.5px] text-left text-ink bg-transparent border border-transparent rounded-sm",
-          "px-[5px] py-0.5 -mx-[5px] -my-0.5 max-w-[150px] truncate cursor-pointer",
+          "px-[5px] py-0.5 -mx-[5px] -my-0.5 w-full truncate cursor-pointer",
           "hover:border-rule hover:bg-paper focus:border-accent focus:bg-paper focus:outline-none",
           pending && "text-accent font-medium",
         )}

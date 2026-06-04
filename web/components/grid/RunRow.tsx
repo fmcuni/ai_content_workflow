@@ -43,7 +43,7 @@ const EMPTY = "—";
 const PUBLISH_OPTIONS: readonly CellOption[] = [
   { value: "draft", label: "Draft" },
   { value: "future", label: "Scheduled" },
-  { value: "publish", label: "Live" },
+  { value: "publish", label: "Publish" },
 ];
 
 function authorName(view: RowView, id: number | null | undefined): string {

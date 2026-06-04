@@ -41,7 +41,7 @@ describe("publishLabel / isLivePublish", () => {
   it("labels the three statuses, defaulting null to Draft", () => {
     expect(publishLabel("draft")).toBe("Draft");
     expect(publishLabel("future")).toBe("Scheduled");
-    expect(publishLabel("publish")).toBe("Live");
+    expect(publishLabel("publish")).toBe("Publish");
     expect(publishLabel(null)).toBe("Draft");
   });
   it("flags only publish as live", () => {

@@ -53,8 +53,8 @@ export function IdentityCell({ run, child, expanded, onToggleExpand }: IdentityC
       </button>
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-          <span className="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.09em] text-ink-soft border border-rule rounded-sm px-1.5 py-px bg-paper-deep/60 whitespace-nowrap">
-            <span aria-hidden className="text-ink-faint">{type.glyph}</span>
+          <span className="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.09em] text-paper bg-ink rounded-sm px-1.5 py-0.5 whitespace-nowrap">
+            <span aria-hidden className="text-paper/70">{type.glyph}</span>
             {type.label}
           </span>
           <RunStatusBadge status={run.status as RunStatus} />
@@ -67,18 +67,27 @@ export function IdentityCell({ run, child, expanded, onToggleExpand }: IdentityC
             </span>
           ) : null}
         </div>
-        <Link
-          href={`/runs/${run.run_id}`}
-          title={run.topic}
-          className="block font-display text-[15.5px] leading-tight text-ink truncate max-w-[280px] hover:text-accent transition-colors"
-          style={{ fontVariationSettings: '"opsz" 28, "SOFT" 70' }}
-        >
-          {run.topic}
-        </Link>
+        <div className="flex items-baseline gap-1.5 max-w-[300px]">
+          <Link
+            href={`/runs/${run.run_id}`}
+            title={run.topic}
+            className="font-display text-[15.5px] leading-tight text-ink truncate min-w-0 hover:text-accent transition-colors"
+            style={{ fontVariationSettings: '"opsz" 28, "SOFT" 70' }}
+          >
+            {run.topic}
+          </Link>
+          {run.wp_pushed_post_id ? (
+            <span
+              className="shrink-0 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft border border-rule rounded-sm px-1 py-px bg-paper-deep/60 whitespace-nowrap"
+              title="Published WordPress post id"
+            >
+              WP #{run.wp_pushed_post_id}
+            </span>
+          ) : null}
+        </div>
         <div className="font-mono text-[10px] text-ink-faint tracking-[0.02em] mt-1">
           <span>{run.run_id}</span>
           <span> · {run.mode}</span>
-          {run.wp_pushed_post_id ? <span> · WP #{run.wp_pushed_post_id}</span> : null}
         </div>
         {isRewrite ? (
           <div className="font-mono text-[10px] mt-1 max-w-[280px] truncate">
@@ -94,19 +103,15 @@ export function IdentityCell({ run, child, expanded, onToggleExpand }: IdentityC
           </div>
         ) : null}
         {shown.length > 0 ? (
-          <ul className="flex flex-wrap gap-1 mt-1.5">
+          <ul className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5">
             {shown.map((kw) => (
-              <li
-                key={kw}
-                className="font-mono text-[9.5px] text-ink-soft border border-rule rounded-sm px-1.5 bg-paper-deep/40"
-              >
+              <li key={kw} className="font-mono text-[9.5px] text-ink-soft">
+                <span aria-hidden className="text-ink-faint">#</span>
                 {kw}
               </li>
             ))}
             {extra > 0 ? (
-              <li className="font-mono text-[9.5px] text-ink-soft border border-rule rounded-sm px-1.5 bg-paper-deep/40">
-                +{extra}
-              </li>
+              <li className="font-mono text-[9.5px] text-ink-faint">+{extra}</li>
             ) : null}
           </ul>
         ) : null}

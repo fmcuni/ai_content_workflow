@@ -11,7 +11,7 @@ export { decodeSlug, encodeSlug } from "@/lib/runs-grid/slug";
 const PUBLISH_LABEL: Record<string, string> = {
   draft: "Draft",
   future: "Scheduled",
-  publish: "Live",
+  publish: "Publish",
 };
 
 /** Human label for a WordPress publish status (defaults to Draft when unset). */

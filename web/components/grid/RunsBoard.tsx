@@ -217,7 +217,7 @@ export function RunsBoard() {
   const isError = runsQ.isError || batchesQ.isError;
   const hasAny = records.length > 0;
 
-  const thColRow = "sticky top-[26px] z-[5] bg-paper-deep text-left font-mono text-[10px] uppercase tracking-[0.08em] text-ink-soft font-medium px-3 pt-1 pb-2.5 whitespace-nowrap border-b-2 border-ink";
+  const thColRow = "sticky top-[26px] z-[5] bg-paper-deep text-left font-mono text-[10px] uppercase tracking-[0.08em] text-ink-soft font-medium px-3 pt-1 pb-2.5 whitespace-nowrap border-b-2 border-b-ink";
   const thGroupRow = "sticky top-0 z-[5] bg-paper-deep text-left font-mono text-[9.5px] uppercase tracking-[0.18em] text-ink-faint font-medium px-3 pt-2 pb-1 border-b border-rule";
   // The selection checkbox column is frozen at left:0 (32px wide); the identity
   // column freezes just to its right at left:32px.
@@ -267,12 +267,12 @@ export function RunsBoard() {
               {view.columns.map((c, i) => (
                 <th
                   key={c.key}
-                  className={cn(thColRow, (i === 0 || view.columns[i - 1].group !== c.group) && "border-l border-rule")}
+                  className={cn(thColRow, (i === 0 || view.columns[i - 1].group !== c.group) && "border-l border-l-rule")}
                 >
                   {c.label}
                 </th>
               ))}
-              <th className={cn(thColRow, "border-l border-rule")}>Action</th>
+              <th className={cn(thColRow, "border-l border-l-rule")}>Action</th>
             </tr>
           </thead>
           <tbody>
