@@ -83,6 +83,10 @@ class Run(Base):
         ForeignKey("content_tool.topic_candidates.candidate_id"),
     )
     target_audience: Mapped[str | None] = mapped_column(String)
+    # Auto-approve the HITL_1 outline gate; HITL_2 still waits for a human.
+    auto_accept_hitl1: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
 
 class GapAnalysisRow(Base):

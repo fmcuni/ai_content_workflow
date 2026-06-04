@@ -1,11 +1,10 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { PaperStamp } from "@/components/PaperStamp";
-import { RunStatusBadge } from "@/components/RunStatusBadge";
+import { DeskRow } from "@/components/desk/DeskRow";
 import { SectionHead } from "@/components/SectionHead";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,242 +15,74 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { api, topicBatchesApi } from "@/lib/api";
+import {
+  buildDeskItems,
+  filterByTab,
+  TABS,
+  type DeskItem,
+  type GateAction,
+  type TabKey,
+} from "@/lib/desk-items";
+import type { RunSummary } from "@/lib/types";
+import { hitl2Body, useDeskActions } from "@/lib/use-desk-actions";
 import { useRole } from "@/lib/use-role";
-import type { BatchStatus, RunStatus, RunSummary, TopicBatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const FILED_LIMIT = 15;
 
-function ledgerDate(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { day: "---", time: "--:--" };
-  return {
-    day: DAYS[d.getDay()],
-    time: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
-  };
-}
+// HITL_2 decisions that go back to the operator through the feedback dialog
+// (both want an optional note before they fire).
+type FeedbackMode = "request_changes" | "reject";
 
-type Lane = "desk" | "motion" | "filed";
-type Category = "rewrite" | "create" | "topic_gen";
-type StampTone = "neutral" | "accent" | "ok" | "warn" | "info" | "danger";
-
-// Category lives in a separate signal channel from status: a monochrome mono tag
-// + glyph, so the colored status stamp stays the only color-coded signal.
-const CATEGORY_META: Record<Category, { label: string; glyph: string }> = {
-  rewrite: { label: "Rewrite", glyph: "↻" },
-  create: { label: "Create", glyph: "✦" },
-  topic_gen: { label: "Topic gen", glyph: "❉" },
-};
-
-// Runs blocked on a human, vs. auto-running, vs. terminal. Anything not listed
-// in DESK/MOTION is treated as "filed".
-const RUN_DESK = new Set<RunStatus>(["hitl_1", "hitl_2", "changes_requested", "failed"]);
-const RUN_MOTION = new Set<RunStatus>(["pending", "fetching", "strategy", "production"]);
-const BATCH_DESK = new Set<BatchStatus>(["ready_for_review", "partially_promoted", "failed"]);
-const BATCH_MOTION = new Set<BatchStatus>(["pending", "generating", "analysing"]);
-
-const BATCH_META: Record<BatchStatus, { label: string; tone: StampTone; pulse?: boolean }> = {
-  pending: { label: "Queued", tone: "neutral" },
-  generating: { label: "Generating", tone: "info", pulse: true },
-  analysing: { label: "Analysing", tone: "info", pulse: true },
-  ready_for_review: { label: "Ready for review", tone: "accent" },
-  partially_promoted: { label: "Partly promoted", tone: "warn" },
-  done: { label: "Done", tone: "ok" },
-  failed: { label: "Failed", tone: "danger" },
-};
-
-interface DeskItem {
-  key: string;
-  id: string;
-  kind: "run" | "batch";
-  status: string;
-  lane: Lane;
-  category: Category;
-  categoryNote?: string;
-  title: string;
-  subtitle: string;
-  keywords?: string[];
-  meta?: string[];
-  rowHref: string;
-  action: string | null;
-  createdAt: string;
-  deletable: boolean;
-}
-
-function runAction(r: RunSummary): string | null {
-  switch (r.status) {
-    case "hitl_1": return "Review outline";
-    case "hitl_2": return "Review draft";
-    case "changes_requested": return "Open run";
-    case "failed": return "Inspect failure";
-    default: return null;
-  }
-}
-
-function runActionHref(r: RunSummary): string {
-  switch (r.status) {
-    case "hitl_1": return `/runs/${r.run_id}/hitl1`;
-    case "hitl_2": return `/runs/${r.run_id}/hitl2`;
-    default: return `/runs/${r.run_id}`;
-  }
-}
-
-function batchAction(b: TopicBatch): string | null {
-  switch (b.status) {
-    case "ready_for_review": return "Review topics";
-    case "partially_promoted": return "Finish promotion";
-    case "failed": return "Inspect failure";
-    default: return null;
-  }
-}
-
-function runToItem(r: RunSummary): DeskItem {
-  const category: Category = r.start_mode === "create" ? "create" : "rewrite";
-  const lane: Lane = RUN_DESK.has(r.status) ? "desk" : RUN_MOTION.has(r.status) ? "motion" : "filed";
-  const action = lane === "desk" ? runAction(r) : null;
-  const categoryNote =
-    category === "rewrite" && r.chosen_route
-      ? r.chosen_route === "full_rewrite"
-        ? "Full"
-        : "Small"
-      : undefined;
-  const subtitle =
-    category === "create"
-      ? r.target_audience
-        ? `New article · ${r.target_audience}`
-        : "New article"
-      : r.article_url;
-  // Task brief at a glance: voice, mode (rewrite only), advertiser + widget.
-  const meta: string[] = [];
-  if (r.persona) meta.push(`Voice · ${r.persona}`);
-  if (category === "rewrite") meta.push(`Mode · ${r.mode}`);
-  if (r.acf_adv_id != null) meta.push(`Adv ${r.acf_adv_id}`);
-  if (r.acf_widget_id != null) meta.push(`Widget ${r.acf_widget_id}`);
-  return {
-    key: `run:${r.run_id}`,
-    id: r.run_id,
-    kind: "run",
-    status: r.status,
-    lane,
-    category,
-    categoryNote,
-    title: r.topic,
-    subtitle,
-    keywords: r.keywords,
-    meta,
-    rowHref: action ? runActionHref(r) : `/runs/${r.run_id}`,
-    action,
-    createdAt: r.created_at,
-    // Every run is removable — deleting an in-motion run cancels its executor
-    // server-side first, so no lane is exempt.
-    deletable: true,
-  };
-}
-
-function batchToItem(b: TopicBatch): DeskItem {
-  const lane: Lane = BATCH_DESK.has(b.status) ? "desk" : BATCH_MOTION.has(b.status) ? "motion" : "filed";
-  const action = lane === "desk" ? batchAction(b) : null;
-  return {
-    key: `batch:${b.batch_id}`,
-    id: b.batch_id,
-    kind: "batch",
-    status: b.status,
-    lane,
-    category: "topic_gen",
-    title: b.research_theme,
-    subtitle: `${b.topic_count} topics · ${b.target_audience}`,
-    rowHref: `/topic-batches/${b.batch_id}`,
-    action,
-    createdAt: b.created_at,
-    deletable: true,
-  };
-}
-
-function StatusStamp({ item }: { item: DeskItem }) {
-  if (item.kind === "run") return <RunStatusBadge status={item.status as RunStatus} />;
-  const meta = BATCH_META[item.status as BatchStatus];
-  return <PaperStamp tone={meta.tone} pulse={meta.pulse}>{meta.label}</PaperStamp>;
-}
-
-function DeskRow({
-  item,
-  accent,
-  onDelete,
+function EditionTabs({
+  active,
+  counts,
+  deskCounts,
+  onChange,
 }: {
-  item: DeskItem;
-  accent?: boolean;
-  onDelete?: (item: DeskItem) => void;
+  active: TabKey;
+  counts: Record<TabKey, number>;
+  deskCounts: Record<TabKey, number>;
+  onChange: (tab: TabKey) => void;
 }) {
-  const { day, time } = ledgerDate(item.createdAt);
-  const cat = CATEGORY_META[item.category];
-  const canDelete = item.deletable && Boolean(onDelete);
   return (
-    <li className="relative border-b border-rule group">
-      <Link
-        href={item.rowHref}
-        className={cn(
-          "grid grid-cols-[64px_1fr_auto] gap-4 md:gap-6 py-4 items-center transition-colors hover:bg-paper-deep/60",
-          accent && "border-l-2 border-l-accent pl-4",
-          canDelete && "pr-10"
-        )}
-      >
-        <div>
-          <p className="font-mono text-[11px] text-ink-faint tracking-wider group-hover:text-accent transition-colors">{day}</p>
-          <p className="font-mono text-[13px] text-ink-soft tabular-nums">{time}</p>
-        </div>
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-            <span aria-hidden className="text-ink-soft mr-1">{cat.glyph}</span>
-            {cat.label}
-            {item.categoryNote ? <span className="text-ink-soft"> · {item.categoryNote}</span> : null}
-          </p>
-          <p
-            className="font-display text-[20px] leading-tight text-ink truncate mt-0.5"
-            style={{ fontVariationSettings: '"opsz" 36, "SOFT" 70' }}
+    <nav aria-label="Editions" className="flex flex-wrap items-stretch gap-0 border-b border-ink">
+      {TABS.map((t) => {
+        const selected = t.key === active;
+        const needs = deskCounts[t.key];
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            aria-pressed={selected}
+            className={cn(
+              "relative px-4 py-2.5 -mb-px font-mono text-[11px] uppercase tracking-[0.14em] transition-colors",
+              "border-b-2 flex items-center gap-2",
+              selected
+                ? "border-accent text-ink"
+                : "border-transparent text-ink-faint hover:text-ink",
+            )}
           >
-            {item.title}
-          </p>
-          <p className="font-sans text-[12px] text-ink-faint truncate mt-1">{item.subtitle}</p>
-          {item.meta && item.meta.length > 0 ? (
-            <p className="font-mono text-[10.5px] text-ink-soft tracking-[0.02em] mt-1 truncate">
-              {item.meta.join("  ·  ")}
-            </p>
-          ) : null}
-          {item.keywords && item.keywords.length > 0 ? (
-            <ul className="flex flex-wrap gap-1.5 mt-1.5">
-              {item.keywords.map((kw) => (
-                <li
-                  key={kw}
-                  className="font-mono text-[10px] tracking-[0.04em] text-ink-soft border border-rule rounded-sm px-1.5 py-0.5 bg-paper-deep/40"
-                >
-                  {kw}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-        <div className="flex flex-col items-end gap-1.5 text-right">
-          <StatusStamp item={item} />
-          {item.action ? (
-            <span className="font-sans text-[12px] font-medium text-accent group-hover:underline underline-offset-2 whitespace-nowrap">
-              {item.action} →
+            <span className="flex items-center gap-1.5">
+              {t.glyph ? <span aria-hidden className="text-ink-soft">{t.glyph}</span> : null}
+              {t.label}
             </span>
-          ) : null}
-        </div>
-      </Link>
-      {canDelete ? (
-        <button
-          type="button"
-          aria-label={`Remove ${item.title}`}
-          title={item.kind === "batch" ? "Remove topic batch" : "Remove run"}
-          onClick={() => onDelete!(item)}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 flex size-7 items-center justify-center rounded-full text-ink-faint opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-rose-50 hover:text-rose-600 transition-opacity"
-        >
-          <span aria-hidden className="text-[15px] leading-none">×</span>
-        </button>
-      ) : null}
-    </li>
+            <span className="tabular-nums text-ink-soft">{counts[t.key]}</span>
+            {needs > 0 ? (
+              <span
+                aria-label={`${needs} waiting on you`}
+                className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-accent text-paper text-[9px] tabular-nums leading-none"
+              >
+                {needs}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -260,13 +91,17 @@ function LaneSection({
   hint,
   items,
   accent,
+  onAction,
   onDelete,
+  pendingId,
 }: {
   title: string;
   hint: string;
   items: DeskItem[];
   accent?: boolean;
+  onAction?: (item: DeskItem, action: GateAction) => void;
   onDelete?: (item: DeskItem) => void;
+  pendingId?: string | null;
 }) {
   if (items.length === 0) return null;
   return (
@@ -279,7 +114,14 @@ function LaneSection({
       </div>
       <ul className="border-t border-rule">
         {items.map((it) => (
-          <DeskRow key={it.key} item={it} accent={accent} onDelete={onDelete} />
+          <DeskRow
+            key={it.key}
+            item={it}
+            accent={accent}
+            onAction={onAction}
+            onDelete={onDelete}
+            pendingId={pendingId}
+          />
         ))}
       </ul>
     </section>
@@ -302,9 +144,16 @@ function DeskClear() {
   );
 }
 
+const EMPTY_COUNTS: Record<TabKey, number> = { all: 0, rewrite: 0, create: 0, topic_gen: 0 };
+
 export default function Home() {
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<TabKey>("all");
   const [pendingDelete, setPendingDelete] = useState<DeskItem | null>(null);
+  const [publishTarget, setPublishTarget] = useState<{ item: DeskItem; run: RunSummary } | null>(null);
+  const [feedback, setFeedback] = useState<{ item: DeskItem; run: RunSummary; mode: FeedbackMode } | null>(null);
+  const [feedbackNote, setFeedbackNote] = useState("");
+
   // Deleting runs / topic batches is admin-only (server-authoritative).
   const { can } = useRole();
   const canDelete = can("delete_run");
@@ -321,14 +170,66 @@ export default function Home() {
     refetchInterval: 15_000,
   });
 
+  const gate = useDeskActions();
+
+  const runById = useMemo(() => {
+    const m = new Map<string, RunSummary>();
+    for (const r of runsQ.data ?? []) m.set(r.run_id, r);
+    return m;
+  }, [runsQ.data]);
+
+  const allItems = useMemo(
+    () => buildDeskItems(runsQ.data, batchesQ.data),
+    [runsQ.data, batchesQ.data],
+  );
+
+  const counts = useMemo(() => {
+    const c: Record<TabKey, number> = { ...EMPTY_COUNTS };
+    const d: Record<TabKey, number> = { ...EMPTY_COUNTS };
+    for (const it of allItems) {
+      c.all += 1;
+      c[it.category] += 1;
+      if (it.lane === "desk") {
+        d.all += 1;
+        d[it.category] += 1;
+      }
+    }
+    return { totals: c, desk: d };
+  }, [allItems]);
+
+  // Routes a row's inline gate action: one-click for low-stakes gates, a dialog
+  // for the outward / feedback-bearing ones. Publishing as a public WordPress
+  // post is the only path that always confirms (it goes live + is hard to undo).
+  function handleAction(item: DeskItem, action: GateAction) {
+    if (action === "approve_outline" || action === "restart") {
+      gate.run({ kind: action, runId: item.id, title: item.title });
+      return;
+    }
+    const run = runById.get(item.id);
+    if (!run) return;
+    if (action === "approve_publish") {
+      const status = run.wp_publish_status ?? "draft";
+      if (status === "publish") {
+        setPublishTarget({ item, run }); // goes live → confirm first
+      } else {
+        gate.run({ kind: "approve_publish", runId: run.run_id, title: item.title, body: hitl2Body(run, "approve") });
+      }
+      return;
+    }
+    if (action === "request_changes" || action === "reject") {
+      setFeedbackNote("");
+      setFeedback({ item, run, mode: action });
+    }
+  }
+
   const deleteItem = useMutation({
     mutationFn: (item: DeskItem) =>
       item.kind === "batch" ? topicBatchesApi.delete(item.id) : api.deleteRun(item.id),
     onSuccess: (_data, item) => {
       toast.success(item.kind === "batch" ? "Topic batch removed" : "Run removed");
       setPendingDelete(null);
-      queryClient.invalidateQueries({ queryKey: ["runs"] });
-      queryClient.invalidateQueries({ queryKey: ["topic-batches"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["topic-batches"] });
     },
     onError: (e: Error) => toast.error(`Couldn't remove — ${e.message}`),
   });
@@ -338,27 +239,49 @@ export default function Home() {
 
   let content: ReactNode = null;
   if (runsQ.data || batchesQ.data) {
-    const items = [
-      ...(runsQ.data ?? []).map(runToItem),
-      ...(batchesQ.data ?? []).map(batchToItem),
-    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
+    const items = filterByTab(allItems, tab);
     const desk = items.filter((i) => i.lane === "desk");
     const motion = items.filter((i) => i.lane === "motion");
-    const filed = items.filter((i) => i.lane === "filed").slice(0, 15);
+    const filed = items.filter((i) => i.lane === "filed").slice(0, FILED_LIMIT);
 
     content =
-      items.length === 0 ? (
+      allItems.length === 0 ? (
         <p className="font-display italic text-ink-faint text-[18px] mt-12">No stories on the wire.</p>
+      ) : items.length === 0 ? (
+        <p className="font-display italic text-ink-faint text-[16px] mt-10">
+          Nothing filed under this edition yet.
+        </p>
       ) : (
         <div className="space-y-10">
           {desk.length > 0 ? (
-            <LaneSection title="On your desk" hint="Waiting on you" items={desk} accent onDelete={onDelete} />
+            <LaneSection
+              title="On your desk"
+              hint="Waiting on you"
+              items={desk}
+              accent
+              onAction={handleAction}
+              onDelete={onDelete}
+              pendingId={gate.pendingId}
+            />
           ) : (
             <DeskClear />
           )}
-          <LaneSection title="In motion" hint="Running now" items={motion} onDelete={onDelete} />
-          <LaneSection title="Filed" hint="Recently completed" items={filed} onDelete={onDelete} />
+          <LaneSection
+            title="In motion"
+            hint="Running now"
+            items={motion}
+            onAction={handleAction}
+            onDelete={onDelete}
+            pendingId={gate.pendingId}
+          />
+          <LaneSection
+            title="Filed"
+            hint="Recently completed"
+            items={filed}
+            onAction={handleAction}
+            onDelete={onDelete}
+            pendingId={gate.pendingId}
+          />
         </div>
       );
   }
@@ -368,7 +291,7 @@ export default function Home() {
       <SectionHead
         kicker="The Desk · Live"
         hed="Front Page"
-        dek="Every rewrite, new article and topic batch in motion — sorted by what needs you first."
+        dek="Every rewrite, new article and topic batch in motion — act on what needs you without leaving the desk."
         actions={
           <Link href="/runs/new">
             <Button variant="secondary" size="sm">Start a new run →</Button>
@@ -376,12 +299,129 @@ export default function Home() {
         }
       />
 
-      {isLoading && <p className="text-ink-faint">Loading…</p>}
+      <div className="mt-2">
+        <EditionTabs active={tab} counts={counts.totals} deskCounts={counts.desk} onChange={setTab} />
+      </div>
 
+      {isLoading && <p className="text-ink-faint mt-8">Loading…</p>}
       {isError && <p className="text-accent-deep text-[13px] mt-6">Failed to load runs.</p>}
 
       <div className="mt-8">{content}</div>
 
+      {/* Publish-to-live confirm (only when the run publishes a public post). */}
+      <Dialog open={publishTarget !== null} onOpenChange={(open) => !open && setPublishTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve & publish live?</DialogTitle>
+            <DialogDescription>
+              {publishTarget ? (
+                <>
+                  &ldquo;<span className="text-ink">{publishTarget.item.title}</span>&rdquo; will be
+                  approved and published to WordPress as a{" "}
+                  <span className="text-ink font-medium">public, live post</span> using its persisted
+                  draft and last-saved metadata. This is hard to undo. To review the draft or the
+                  publish target first, open the run instead.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setPublishTarget(null)} disabled={gate.isPending}>
+              Cancel
+            </Button>
+            {publishTarget ? (
+              <Link
+                href={publishTarget.item.rowHref}
+                className="inline-flex items-center text-[13px] text-accent hover:underline underline-offset-2 mr-2"
+              >
+                Open run →
+              </Link>
+            ) : null}
+            <Button
+              onClick={() => {
+                if (!publishTarget) return;
+                gate.run({
+                  kind: "approve_publish",
+                  runId: publishTarget.run.run_id,
+                  title: publishTarget.item.title,
+                  body: hitl2Body(publishTarget.run, "approve"),
+                });
+                setPublishTarget(null);
+              }}
+              disabled={gate.isPending}
+            >
+              {gate.isPending ? "Publishing…" : "Publish live"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Request-changes / reject feedback. */}
+      <Dialog open={feedback !== null} onOpenChange={(open) => !open && setFeedback(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {feedback?.mode === "reject" ? "Reject this draft?" : "Request changes"}
+            </DialogTitle>
+            <DialogDescription>
+              {feedback?.mode === "reject" ? (
+                <>
+                  &ldquo;<span className="text-ink">{feedback?.item.title}</span>&rdquo; will be
+                  rejected and the run closed. Add an optional reason for the audit trail.
+                </>
+              ) : (
+                <>
+                  Send &ldquo;<span className="text-ink">{feedback?.item.title}</span>&rdquo; back for
+                  a revision pass. Your note steers the rewrite.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={feedbackNote}
+            onChange={(e) => setFeedbackNote(e.target.value)}
+            rows={4}
+            placeholder={
+              feedback?.mode === "reject"
+                ? "Optional — why this draft is being rejected."
+                : "What the desk wants changed on the next pass."
+            }
+            className="bg-paper"
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setFeedback(null)} disabled={gate.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant={feedback?.mode === "reject" ? "destructive" : "primary"}
+              onClick={() => {
+                if (!feedback) return;
+                gate.run({
+                  kind: feedback.mode,
+                  runId: feedback.run.run_id,
+                  title: feedback.item.title,
+                  body: hitl2Body(feedback.run, feedback.mode, feedbackNote),
+                });
+                setFeedback(null);
+              }}
+              disabled={
+                gate.isPending || (feedback?.mode === "request_changes" && !feedbackNote.trim())
+              }
+            >
+              {feedback?.mode === "reject"
+                ? gate.isPending
+                  ? "Rejecting…"
+                  : "Reject draft"
+                : gate.isPending
+                  ? "Sending…"
+                  : "Request changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirm. */}
       <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
         <DialogContent>
           <DialogHeader>

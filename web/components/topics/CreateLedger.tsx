@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
+import { AutoAcceptField } from "@/components/AutoAcceptField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,6 +49,7 @@ export function CreateLedger() {
   const router = useRouter();
   const [rows, setRows] = useState<CreateRow[]>(() => [blankRow(), blankRow(), blankRow()]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [autoAccept, setAutoAccept] = useState(false);
 
   const personasQ = useQuery({
     queryKey: ["personas-active"],
@@ -88,6 +90,7 @@ export function CreateLedger() {
             topic_category: null,
             editor_email: "",
             topic_candidate_id: null,
+            auto_accept_hitl1: autoAccept,
           };
           const res = await api.createRun(req);
           patchRow(r.uid, { status: "done", result: { run_id: res.run_id } });
@@ -182,6 +185,8 @@ export function CreateLedger() {
           </button>
         </div>
       </div>
+
+      <AutoAcceptField checked={autoAccept} onChange={setAutoAccept} />
 
       <div className="flex items-center justify-between gap-4 pt-2">
         <Link href="/" className="text-[12px] text-ink-soft hover:text-ink">

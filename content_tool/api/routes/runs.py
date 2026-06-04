@@ -124,6 +124,7 @@ async def _create_run_row(
         start_mode=payload.start_mode,
         topic_candidate_id=payload.topic_candidate_id,
         target_audience=payload.target_audience,
+        auto_accept_hitl1=payload.auto_accept_hitl1,
     )
     session.add(row)
     await session.flush()
@@ -191,6 +192,7 @@ async def list_runs(
                 "acf_adv_id": r.acf_adv_id,
                 "acf_widget_id": r.acf_widget_id,
                 "edit_note": r.edit_note,
+                "auto_accept_hitl1": r.auto_accept_hitl1,
             }
             for r in rows
         ]
@@ -247,6 +249,7 @@ async def get_run(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noq
                 str(row.topic_candidate_id) if row.topic_candidate_id else None
             ),
             "target_audience": row.target_audience,
+            "auto_accept_hitl1": row.auto_accept_hitl1,
             # Generic graph error
             "error": row.error,
         }

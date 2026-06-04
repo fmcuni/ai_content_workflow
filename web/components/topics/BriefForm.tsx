@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
+import { AutoAcceptField } from "@/components/AutoAcceptField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -42,6 +43,7 @@ export function BriefForm() {
   const [persona, setPersona] = useState(DEFAULT_PERSONA);
   const [acfAdvId, setAcfAdvId] = useState(0);
   const [acfWidgetId, setAcfWidgetId] = useState(0);
+  const [autoAccept, setAutoAccept] = useState(false);
 
   const personas = personasQ.data ?? [];
 
@@ -68,6 +70,7 @@ export function BriefForm() {
         persona_default: persona || DEFAULT_PERSONA,
         acf_adv_id_default: acfAdvId,
         acf_widget_id_default: acfWidgetId,
+        auto_accept_hitl1_default: autoAccept,
         editor_email: "",
       };
       return topicBatchesApi.create(payload);
@@ -228,6 +231,12 @@ export function BriefForm() {
             />
           </BriefField>
         </div>
+
+        <AutoAcceptField
+          checked={autoAccept}
+          onChange={setAutoAccept}
+          hint="Every run promoted from this batch auto-approves its HITL_1 outline / gap-analysis review and goes straight to drafting. Each draft still stops at HITL_2 before publishing. You can still flip it per run later."
+        />
 
         <div className="flex items-center justify-between gap-4 pt-3 border-t border-rule">
           <Link href="/" className="text-[12px] text-ink-soft hover:text-ink">

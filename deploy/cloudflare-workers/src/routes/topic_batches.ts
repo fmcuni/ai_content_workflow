@@ -55,6 +55,7 @@ interface TopicBatchIn {
   persona_default?: string | null;
   acf_adv_id_default?: number | null;
   acf_widget_id_default?: number | null;
+  auto_accept_hitl1_default?: boolean;
   editor_email?: string;
 }
 
@@ -131,6 +132,7 @@ interface TopicBatchOut {
   persona_default: string | null;
   acf_adv_id_default: number | null;
   acf_widget_id_default: number | null;
+  auto_accept_hitl1_default: boolean;
   cost_cents: number;
   last_error: string | null;
   candidates?: TopicCandidateOut[];
@@ -157,6 +159,7 @@ interface BatchRow {
   persona_default: string | null;
   acf_adv_id_default: number | null;
   acf_widget_id_default: number | null;
+  auto_accept_hitl1_default: boolean;
   cost_cents: number;
   last_error: string | null;
 }
@@ -193,7 +196,7 @@ const BATCH_COLUMNS = `
   batch_id, status, created_by, created_at, updated_at, research_theme,
   target_audience, topic_count, keywords_per_topic, must_cover, must_avoid,
   priority_focus, notes, persona_default, acf_adv_id_default,
-  acf_widget_id_default, cost_cents, last_error
+  acf_widget_id_default, auto_accept_hitl1_default, cost_cents, last_error
 `;
 
 const CANDIDATE_COLUMNS = `
@@ -226,6 +229,7 @@ function toBatchOut(row: BatchRow): TopicBatchOut {
     persona_default: row.persona_default,
     acf_adv_id_default: row.acf_adv_id_default,
     acf_widget_id_default: row.acf_widget_id_default,
+    auto_accept_hitl1_default: row.auto_accept_hitl1_default === true,
     cost_cents: row.cost_cents,
     last_error: row.last_error,
   };
@@ -359,14 +363,14 @@ topicBatchesRouter.post("/", async (c) => {
         batch_id, created_by, status, research_theme, target_audience,
         topic_count, keywords_per_topic, must_cover, must_avoid,
         priority_focus, notes, persona_default, acf_adv_id_default,
-        acf_widget_id_default
+        acf_widget_id_default, auto_accept_hitl1_default
       ) VALUES (
         ${batchId}, ${editorEmail}, 'pending', ${researchTheme},
         ${targetAudience}, ${topicCount}, ${keywordsPerTopic},
         ${toJsonb(sql, mustCover)}, ${toJsonb(sql, mustAvoid)},
         ${body.priority_focus ?? null}, ${body.notes ?? null},
         ${body.persona_default ?? null}, ${body.acf_adv_id_default ?? null},
-        ${body.acf_widget_id_default ?? null}
+        ${body.acf_widget_id_default ?? null}, ${body.auto_accept_hitl1_default === true}
       )
       RETURNING batch_id
     `;
@@ -732,12 +736,13 @@ topicBatchesRouter.post("/:id/promote", async (c) => {
           run_id, created_by, status, article_url, topic, keywords, mode,
           edit_note, acf_adv_id, acf_widget_id, persona, topic_category,
           today_date, start_mode, topic_candidate_id, target_audience,
-          triggered_by_evaluation_id
+          triggered_by_evaluation_id, auto_accept_hitl1
         ) VALUES (
           ${runId}, ${editorEmail}, 'pending', ${articleUrl}, ${cand.topic},
           ${toJsonb(sql, keywords)}, 'auto', ${editNote}, ${advId}, ${widgetId},
           ${persona}, ${null}, CURRENT_DATE, ${mode},
-          ${cand.candidate_id}, ${batch.target_audience}, ${null}
+          ${cand.candidate_id}, ${batch.target_audience}, ${null},
+          ${batch.auto_accept_hitl1_default === true}
         )
       `;
 

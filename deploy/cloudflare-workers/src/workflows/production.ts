@@ -98,6 +98,7 @@ interface RunRawRow {
   chosen_route: string | null;
   article_url: string | null;
   wp_pushed_post_id: number | null;
+  auto_accept_hitl1: boolean;
 }
 
 /**
@@ -122,6 +123,7 @@ interface RunLoadRow {
   chosen_route: string | null;
   article_url: string | null;
   wp_pushed_post_id: number | null;
+  auto_accept_hitl1: boolean;
 }
 
 interface OutlinePayloadRow {
@@ -243,7 +245,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           SELECT run_id, status, start_mode, mode, topic, keywords, persona,
                  topic_category, target_audience, edit_note,
                  acf_adv_id, acf_widget_id, today_date, chosen_route,
-                 article_url, wp_pushed_post_id
+                 article_url, wp_pushed_post_id, auto_accept_hitl1
           FROM content_tool.runs
           WHERE run_id = ${runId}::uuid
           LIMIT 1
@@ -291,20 +293,32 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     await this.emitStep(step, "emit-outline-done", runId, "strategy.outline.done", {});
 
     // --- 3. HITL_1 ---------------------------------------------------------
-    await this.gateStep(step, "gate-hitl1", runId, "hitl_1", "hitl.interrupted", {
-      next: ["production"],
-    });
-    const d1 = await step.waitForEvent<Hitl1Payload>("await-hitl1", {
-      type: "hitl_1",
-      timeout: HITL_TIMEOUT,
-    });
-    const cancelled = await step.do("apply-hitl1", async () =>
-      this.applyHitl1(runId, d1.payload),
-    );
-    if (cancelled) {
-      // Terminal: the operator cancelled at the outline gate.
-      await this.emitStep(step, "emit-completed-cancel", runId, "graph.completed", {});
-      return;
+    // Auto-accept skips the human outline gate and proceeds straight to drafting
+    // (HITL_2 still waits). We log the auto-approval so the desk can see the gate
+    // was not acted on manually.
+    if (run.auto_accept_hitl1) {
+      await this.emitStep(step, "emit-hitl1-auto", runId, "hitl.auto_approved", {
+        gate: "hitl_1",
+      });
+      await step.do("apply-hitl1-auto", async () =>
+        this.applyHitl1(runId, { decision: "approve" }),
+      );
+    } else {
+      await this.gateStep(step, "gate-hitl1", runId, "hitl_1", "hitl.interrupted", {
+        next: ["production"],
+      });
+      const d1 = await step.waitForEvent<Hitl1Payload>("await-hitl1", {
+        type: "hitl_1",
+        timeout: HITL_TIMEOUT,
+      });
+      const cancelled = await step.do("apply-hitl1", async () =>
+        this.applyHitl1(runId, d1.payload),
+      );
+      if (cancelled) {
+        // Terminal: the operator cancelled at the outline gate.
+        await this.emitStep(step, "emit-completed-cancel", runId, "graph.completed", {});
+        return;
+      }
     }
 
     // --- 4 + 5. production loop → HITL_2 → (revise | publish) --------------

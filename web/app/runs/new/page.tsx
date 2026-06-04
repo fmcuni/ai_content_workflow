@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { AutoAcceptField } from "@/components/AutoAcceptField";
 import { Button } from "@/components/ui/button";
 import { RoleButton } from "@/components/RoleGate";
 import { Input } from "@/components/ui/input";
@@ -98,6 +99,7 @@ function NewRunForm() {
   const [front, setFront] = useState<FrontKey>(() => parseFront(params.get("front")));
   const activeFront = FRONTS.find((f) => f.key === front) ?? FRONTS[0];
   const [rows, setRows] = useState<LedgerRow[]>(() => [blankRow(), blankRow(), blankRow()]);
+  const [autoAccept, setAutoAccept] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRaw, setBulkRaw] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -208,6 +210,7 @@ function NewRunForm() {
             acf_widget_id: r.acf_widget_id,
             topic_category: null,
             editor_email: "",
+            auto_accept_hitl1: autoAccept,
             triggered_by_evaluation_id: evaluationId ?? undefined,
           };
           const res = await api.createRun(req);
@@ -439,6 +442,8 @@ function NewRunForm() {
             </button>
           </div>
         </div>
+
+        <AutoAcceptField checked={autoAccept} onChange={setAutoAccept} />
 
         <div className="flex items-center justify-between gap-4 pt-2">
           <Link href="/" className="text-[12px] text-ink-soft hover:text-ink">

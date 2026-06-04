@@ -21,6 +21,9 @@ class CreateRunRequest(BaseModel):
     start_mode: Literal["refresh", "create"] = "refresh"
     topic_candidate_id: UUID | None = None
     target_audience: str | None = None
+    # Auto-approve the HITL_1 outline/gap-analysis gate and proceed straight to
+    # drafting. HITL_2 (draft -> publish) still waits for a human.
+    auto_accept_hitl1: bool = False
 
     @model_validator(mode="after")
     def _check_article_url_for_start_mode(self) -> Self:
@@ -382,6 +385,9 @@ class TopicBatchIn(BaseModel):
     persona_default: str | None = None
     acf_adv_id_default: int | None = None
     acf_widget_id_default: int | None = None
+    # Carried onto every run promoted from this batch: when true those runs
+    # auto-approve their HITL_1 outline gate.
+    auto_accept_hitl1_default: bool = False
     editor_email: str = Field(description="Identifies who triggered the batch")
 
 
@@ -430,6 +436,7 @@ class TopicBatchOut(BaseModel):
     persona_default: str | None = None
     acf_adv_id_default: int | None = None
     acf_widget_id_default: int | None = None
+    auto_accept_hitl1_default: bool = False
     cost_cents: int = 0
     last_error: str | None = None
     candidates: list[TopicCandidateOut] | None = None

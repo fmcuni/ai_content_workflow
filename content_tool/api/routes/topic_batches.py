@@ -270,6 +270,7 @@ def _batch_to_out(batch: TopicBatch) -> TopicBatchOut:
         persona_default=batch.persona_default,
         acf_adv_id_default=batch.acf_adv_id_default,
         acf_widget_id_default=batch.acf_widget_id_default,
+        auto_accept_hitl1_default=batch.auto_accept_hitl1_default,
         cost_cents=batch.cost_cents,
         last_error=batch.last_error,
     )
@@ -356,6 +357,7 @@ async def create_topic_batch(
             persona_default=payload.persona_default,
             acf_adv_id_default=payload.acf_adv_id_default,
             acf_widget_id_default=payload.acf_widget_id_default,
+            auto_accept_hitl1_default=payload.auto_accept_hitl1_default,
         )
         session.add(batch)
         await session.flush()
@@ -575,6 +577,7 @@ async def promote_candidates(
                 "topic_candidate_id": cand.candidate_id,
                 "target_audience": batch.target_audience,
                 "edit_note": (cand.operator_note or "").strip() or None,
+                "auto_accept_hitl1": batch.auto_accept_hitl1_default,
             }
             if item.mode == "refresh":
                 run_payload_kwargs["article_url"] = cand.existing_url

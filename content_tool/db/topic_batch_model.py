@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import TIMESTAMP, ForeignKey, Index, Integer, Text, text
+from sqlalchemy import TIMESTAMP, Boolean, ForeignKey, Index, Integer, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -51,6 +51,10 @@ class TopicBatch(Base):
     persona_default: Mapped[str | None] = mapped_column(Text)
     acf_adv_id_default: Mapped[int | None] = mapped_column(Integer)
     acf_widget_id_default: Mapped[int | None] = mapped_column(Integer)
+    # Carried onto every run promoted from this batch (see Run.auto_accept_hitl1).
+    auto_accept_hitl1_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     cost_cents: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )

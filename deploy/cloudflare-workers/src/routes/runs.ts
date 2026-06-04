@@ -79,6 +79,7 @@ interface CreateRunBody {
   topic_candidate_id?: string | null;
   target_audience?: string | null;
   triggered_by_evaluation_id?: string | null;
+  auto_accept_hitl1?: boolean;
 }
 
 interface ResumeBody {
@@ -166,6 +167,7 @@ interface RunSummary {
   start_mode: string;
   topic_candidate_id: string | null;
   target_audience: string | null;
+  auto_accept_hitl1: boolean;
   error: unknown;
 }
 
@@ -189,6 +191,7 @@ interface RunListRow {
   acf_adv_id: number;
   acf_widget_id: number;
   edit_note: string | null;
+  auto_accept_hitl1: boolean;
 }
 
 interface RunDetailRow extends RunListRow {
@@ -279,6 +282,7 @@ function toRunSummary(row: RunDetailRow): RunSummary {
     start_mode: row.start_mode,
     topic_candidate_id: row.topic_candidate_id,
     target_audience: row.target_audience,
+    auto_accept_hitl1: row.auto_accept_hitl1 === true,
     error: pgJson(row.error),
   };
 }
@@ -342,6 +346,7 @@ runsRouter.post("/", requireRole("editor"), async (c) => {
   const topicCandidateId = body.topic_candidate_id ?? null;
   const targetAudience = body.target_audience ?? null;
   const triggeredByEvaluationId = body.triggered_by_evaluation_id ?? null;
+  const autoAcceptHitl1 = body.auto_accept_hitl1 === true;
 
   const created = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<{ run_id: string; created_at: string; article_id: string | null }[]>`
@@ -349,12 +354,12 @@ runsRouter.post("/", requireRole("editor"), async (c) => {
         run_id, created_by, status, article_url, topic, keywords, mode,
         edit_note, acf_adv_id, acf_widget_id, persona, topic_category,
         today_date, start_mode, topic_candidate_id, target_audience,
-        triggered_by_evaluation_id
+        triggered_by_evaluation_id, auto_accept_hitl1
       ) VALUES (
         ${runId}, ${createdBy}, 'pending', ${articleUrl}, ${topic},
         ${toJsonb(sql, keywords)}, ${mode}, ${editNote}, ${acfAdvId}, ${acfWidgetId},
         ${persona}, ${topicCategory}, CURRENT_DATE, ${startMode},
-        ${topicCandidateId}, ${targetAudience}, ${triggeredByEvaluationId}
+        ${topicCandidateId}, ${targetAudience}, ${triggeredByEvaluationId}, ${autoAcceptHitl1}
       )
       RETURNING run_id, created_at, article_id
     `;
@@ -394,7 +399,7 @@ runsRouter.get("/", async (c) => {
       SELECT
         run_id, status, topic, article_url, mode, created_at, chosen_route,
         iteration_count, start_mode, target_audience, keywords, persona,
-        acf_adv_id, acf_widget_id, edit_note
+        acf_adv_id, acf_widget_id, edit_note, auto_accept_hitl1
       FROM content_tool.runs
       ${statusClause}
       ORDER BY created_at DESC
@@ -419,6 +424,7 @@ runsRouter.get("/", async (c) => {
       acf_adv_id: r.acf_adv_id,
       acf_widget_id: r.acf_widget_id,
       edit_note: r.edit_note,
+      auto_accept_hitl1: r.auto_accept_hitl1 === true,
     })),
   );
 });
@@ -439,7 +445,7 @@ runsRouter.get("/:id", async (c) => {
         wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
         wp_slug, wp_excerpt,
         wp_pushed_post_id, wp_pushed_at, wp_push_error, start_mode,
-        topic_candidate_id, target_audience, error
+        topic_candidate_id, target_audience, auto_accept_hitl1, error
       FROM content_tool.runs
       WHERE run_id = ${runId}
       LIMIT 1

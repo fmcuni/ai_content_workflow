@@ -315,49 +315,67 @@ class RunExecutor:
                 )
                 config = {"configurable": {"thread_id": str(run_id)}}
 
-                if resume:
-                    if update:
-                        await graph.aupdate_state(config, update)
-                    inputs = None
-                    pre_state = await graph.aget_state(config)
-                    pre_next = tuple(pre_state.next) if pre_state.next else ()
-                    if pre_next:
-                        running_status = _RUNNING_STATUS.get(pre_next, "production")
-                        await self._set_status(run_id, running_status)
-                    # else: graph already at terminal state; let the completion
-                    # branch below decide whether to mirror anything.
-                else:
-                    inputs = await _build_initial_state(self._sf, run_id)
-                    await self._set_status(run_id, "strategy")
+                # The stream is wrapped in a loop so an auto-accepted HITL_1 gate
+                # can approve in place and re-enter the graph WITHOUT pausing for
+                # a human. `resume_iter`/`pending_update` carry the per-iteration
+                # resume state; the initial values are the call's own args.
+                resume_iter = resume
+                pending_update = update
+                while True:
+                    if resume_iter:
+                        if pending_update:
+                            await graph.aupdate_state(config, pending_update)
+                        inputs = None
+                        pre_state = await graph.aget_state(config)
+                        pre_next = tuple(pre_state.next) if pre_state.next else ()
+                        if pre_next:
+                            running_status = _RUNNING_STATUS.get(pre_next, "production")
+                            await self._set_status(run_id, running_status)
+                        # else: graph already at terminal state; let the completion
+                        # branch below decide whether to mirror anything.
+                    else:
+                        inputs = await _build_initial_state(self._sf, run_id)
+                        await self._set_status(run_id, "strategy")
 
-                # subgraphs=True yields (namespace_tuple, {node_name: update})
-                # for every node in the strategy/production sub-graphs. Without
-                # it the root graph emits a single "production.done" for the
-                # entire 1-5min production stage and the live timeline appears
-                # frozen. Namespace is e.g. ("production:abc",) - strip the
-                # langgraph-generated id and keep just the parent label.
-                async for ns, chunk in graph.astream(
-                    inputs,
-                    config=config,
-                    stream_mode="updates",
-                    subgraphs=True,
-                ):
-                    prefix_parts = [n.split(":", 1)[0] for n in ns] if ns else []
-                    for node_name in chunk.keys():
-                        # langgraph emits "__interrupt__" as a synthetic node
-                        # at each interrupt boundary; not useful to surface.
-                        if node_name.startswith("__"):
+                    # subgraphs=True yields (namespace_tuple, {node_name: update})
+                    # for every node in the strategy/production sub-graphs. Without
+                    # it the root graph emits a single "production.done" for the
+                    # entire 1-5min production stage and the live timeline appears
+                    # frozen. Namespace is e.g. ("production:abc",) - strip the
+                    # langgraph-generated id and keep just the parent label.
+                    async for ns, chunk in graph.astream(
+                        inputs,
+                        config=config,
+                        stream_mode="updates",
+                        subgraphs=True,
+                    ):
+                        prefix_parts = [n.split(":", 1)[0] for n in ns] if ns else []
+                        for node_name in chunk.keys():
+                            # langgraph emits "__interrupt__" as a synthetic node
+                            # at each interrupt boundary; not useful to surface.
+                            if node_name.startswith("__"):
+                                continue
+                            label = ".".join([*prefix_parts, node_name, "done"])
+                            await self._emit(run_id, label, {})
+
+                    state = await graph.aget_state(config)
+                    if state.next:  # interrupted at HITL gate
+                        next_status = _NEXT_TO_STATUS.get(tuple(state.next))
+                        # Auto-accept the HITL_1 outline gate: approve in place and
+                        # re-enter the graph instead of pausing. HITL_2 still
+                        # pauses. The flag only matches the outline gate, so this
+                        # can run at most once and cannot loop.
+                        if next_status == "hitl_1" and await _load_auto_accept_hitl1(
+                            self._sf, run_id
+                        ):
+                            await self._emit(run_id, "hitl.auto_approved", {"gate": "hitl_1"})
+                            resume_iter = True
+                            pending_update = {"hitl_1_decision": "approve"}
                             continue
-                        label = ".".join([*prefix_parts, node_name, "done"])
-                        await self._emit(run_id, label, {})
-
-                state = await graph.aget_state(config)
-                if state.next:  # interrupted at HITL gate
-                    next_status = _NEXT_TO_STATUS.get(tuple(state.next))
-                    if next_status:
-                        await self._set_status(run_id, next_status)
-                    await self._emit(run_id, "hitl.interrupted", {"next": list(state.next)})
-                else:
+                        if next_status:
+                            await self._set_status(run_id, next_status)
+                        await self._emit(run_id, "hitl.interrupted", {"next": list(state.next)})
+                        break
                     # publish.py owns "published"/"failed". The only other
                     # terminal graph-state values worth mirroring are explicit
                     # rejection paths from n_publish (when hitl_2_decision is
@@ -368,6 +386,7 @@ class RunExecutor:
                     if final_status in ("rejected", "changes_requested"):
                         await self._set_status(run_id, final_status)
                     await self._emit(run_id, "graph.completed", {})
+                    break
         except Exception as e:
             # Persist so the UI surfaces the failure even when no SSE subscriber
             # was listening at the moment of the crash.
@@ -386,6 +405,19 @@ class RunExecutor:
             # Drain any events still queued so a finished/failed run's log is
             # complete even if the periodic drain hasn't fired yet.
             await self._event_log.flush()
+
+
+async def _load_auto_accept_hitl1(sf: async_sessionmaker[Any], run_id: UUID) -> bool:
+    """Whether this run should auto-approve its HITL_1 outline gate."""
+    from sqlalchemy import select
+
+    from content_tool.db.models import Run
+
+    async with sf() as session:
+        flag = (
+            await session.execute(select(Run.auto_accept_hitl1).where(Run.run_id == run_id))
+        ).scalar_one_or_none()
+        return bool(flag)
 
 
 async def _build_initial_state(sf: async_sessionmaker[Any], run_id: UUID) -> dict[str, Any]:

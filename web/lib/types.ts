@@ -42,6 +42,9 @@ export interface RunSummary {
   acf_adv_id?: number | null;
   acf_widget_id?: number | null;
   edit_note?: string | null;
+  // When true the run auto-approves the HITL_1 outline/gap-analysis gate and
+  // proceeds straight to drafting. HITL_2 (draft → publish) still waits.
+  auto_accept_hitl1?: boolean;
   // WordPress publish status + the operator's last-selected metadata. Surfaced
   // so the edit page can re-hydrate author / categories for create AND refresh
   // runs (a create run has no upstream post to read them back from).
@@ -73,6 +76,8 @@ export interface CreateRunRequest {
   start_mode?: StartMode;
   topic_candidate_id?: string | null;
   target_audience?: string | null;
+  // Auto-approve the HITL_1 outline gate on this run (see RunSummary).
+  auto_accept_hitl1?: boolean;
 }
 
 export type BatchStatus =
@@ -152,6 +157,9 @@ export interface TopicBatch {
   persona_default: string | null;
   acf_adv_id_default: number | null;
   acf_widget_id_default: number | null;
+  // Default carried to every run promoted from this batch: when true those runs
+  // auto-approve their HITL_1 outline gate.
+  auto_accept_hitl1_default?: boolean;
   cost_cents: number;
   last_error: string | null;
   candidates?: TopicCandidate[] | null;
@@ -169,6 +177,7 @@ export interface TopicBatchIn {
   persona_default?: string | null;
   acf_adv_id_default?: number | null;
   acf_widget_id_default?: number | null;
+  auto_accept_hitl1_default?: boolean;
   editor_email: string;
 }
 
