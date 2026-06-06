@@ -14,9 +14,22 @@
  * Partials are named like `_writer_brand_block` and included via
  * `{{include:_writer_brand_block}}`.
  *
- * Module-level cache: one `Map` per isolate. Workflow steps may run in fresh
- * isolates, so callers always pass `sql` and the function lazy-loads if empty.
- * Call `invalidate()` after editor writes to bust the cache.
+ * Per-voice scoping
+ * -----------------
+ * Each row is keyed by `(voice_slug, template_id)`. Agent and partial prompts
+ * are scoped to a voice (persona slug); the reserved sentinel `__shared__` holds
+ * the global judges and the canonical seed-of-record that every voice falls back
+ * to. A `voiceView(snap, voiceSlug)` flattens the full snapshot to one voice's
+ * resolvable `template_id -> row` map — the voice's own row wins, otherwise the
+ * `__shared__` row. Includes resolve *within that view* so a voice's agent
+ * prompt pulls in that voice's own partials (falling back to the shared partial
+ * when the voice has not customised it), keeping assembled prompts byte-identical
+ * to the pre-per-voice behaviour for a voice whose rows match `__shared__`.
+ *
+ * Module-level cache: one `Map` per isolate, keyed by `(voice_slug,
+ * template_id)`. Workflow steps may run in fresh isolates, so callers always
+ * pass `sql` and the function lazy-loads if empty. Call `invalidate()` after
+ * editor writes to bust the cache.
  */
 
 import type { Sql } from "postgres";
@@ -28,9 +41,23 @@ import type { PromptTemplateRow } from "../db/schema";
 export type { PromptTemplateRow };
 
 // ---------------------------------------------------------------------------
-// Module-level cache (per-isolate, lazy-loaded).
+// Reserved sentinel voice for global / seed-of-record rows (judges + canonical
+// agent/partial set). Mirrors the migration default and Python's SHARED_VOICE.
+// ---------------------------------------------------------------------------
+export const SHARED_VOICE = "__shared__";
+
+// ---------------------------------------------------------------------------
+// Module-level cache (per-isolate, lazy-loaded), keyed by `(voice_slug, id)`.
 // ---------------------------------------------------------------------------
 let _cache: Map<string, PromptTemplateRow> | null = null;
+
+/** Composite cache key — `voice_slug` and `template_id` joined by `::`. Neither
+ * a persona slug (`[a-z0-9-]+` / `__shared__`) nor a template_id
+ * (`[A-Za-z0-9_./-]+`) contains a colon, so the pair is unambiguous. The key is
+ * only used to de-dupe rows in the cache; `voiceView` reads row values, not keys. */
+function cacheKey(voiceSlug: string, templateId: string): string {
+  return `${voiceSlug}::${templateId}`;
+}
 
 // ---------------------------------------------------------------------------
 // Include regex — matches `{{include:NAME}}` where NAME is [A-Za-z0-9_./-]+
@@ -59,19 +86,44 @@ async function loadAll(sql: Sql): Promise<Map<string, PromptTemplateRow>> {
   `;
   const map = new Map<string, PromptTemplateRow>();
   for (const row of rows) {
-    map.set(row.template_id, row);
+    map.set(cacheKey(row.voice_slug, row.template_id), row);
   }
   return map;
 }
 
 // ---------------------------------------------------------------------------
-// snapshot: return cached Map, loading from DB if empty.
+// snapshot: return cached Map (keyed by `(voice_slug, id)`), loading from DB if
+// empty. Treat the returned Map as read-only — use `voiceView` to project it
+// onto one voice's resolvable `template_id -> row` map.
 // ---------------------------------------------------------------------------
 export async function snapshot(sql: Sql): Promise<Map<string, PromptTemplateRow>> {
   if (_cache === null) {
     _cache = await loadAll(sql);
   }
   return _cache;
+}
+
+// ---------------------------------------------------------------------------
+// voiceView: flatten the `(voice, id)`-keyed snapshot to one voice's
+// `template_id -> row` map. The voice's own row wins; otherwise the `__shared__`
+// row (judges + canonical seed). Mirrors Python `prompts.py::_voice_view` and
+// the runtime `_lookup_row` fallback chain. The resolved row's `voice_slug`
+// reveals whether it is voice-owned or a shared fallback.
+// ---------------------------------------------------------------------------
+export function voiceView(
+  snap: Map<string, PromptTemplateRow>,
+  voiceSlug: string,
+): Map<string, PromptTemplateRow> {
+  const view = new Map<string, PromptTemplateRow>();
+  for (const row of snap.values()) {
+    if (row.voice_slug !== voiceSlug && row.voice_slug !== SHARED_VOICE) continue;
+    const existing = view.get(row.template_id);
+    // Voice-owned always beats the shared fallback, regardless of iteration order.
+    if (existing === undefined || row.voice_slug === voiceSlug) {
+      view.set(row.template_id, row);
+    }
+  }
+  return view;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,12 +198,17 @@ function resolveBodyWithOverride(
 // ---------------------------------------------------------------------------
 
 /**
- * Raw, unresolved body for `templateId` (no include expansion).
- * Throws PromptTemplateNotFound if missing.
+ * Raw, unresolved body for `(voiceSlug, templateId)` (no include expansion).
+ * Follows the `voice -> __shared__` snapshot fallback. Throws
+ * PromptTemplateNotFound if neither the voice nor `__shared__` has the row.
  */
-export async function getBody(sql: Sql, templateId: string): Promise<string> {
-  const snap = await snapshot(sql);
-  const row = snap.get(templateId);
+export async function getBody(
+  sql: Sql,
+  templateId: string,
+  voiceSlug: string = SHARED_VOICE,
+): Promise<string> {
+  const view = voiceView(await snapshot(sql), voiceSlug);
+  const row = view.get(templateId);
   if (row === undefined) {
     throw new PromptTemplateNotFound(templateId);
   }
@@ -159,10 +216,15 @@ export async function getBody(sql: Sql, templateId: string): Promise<string> {
 }
 
 /**
- * Fully-resolved body for `templateId` (all includes inlined).
+ * Fully-resolved body for `(voiceSlug, templateId)` (all includes inlined).
+ * Includes resolve within `voiceSlug`, falling back to `__shared__` per row.
  */
-export async function getAssembled(sql: Sql, templateId: string): Promise<string> {
-  return assembleFromSnapshot(templateId, await snapshot(sql));
+export async function getAssembled(
+  sql: Sql,
+  templateId: string,
+  voiceSlug: string = SHARED_VOICE,
+): Promise<string> {
+  return assembleFromSnapshot(templateId, voiceView(await snapshot(sql), voiceSlug));
 }
 
 /**

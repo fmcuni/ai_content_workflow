@@ -23,6 +23,7 @@ function makeFakeSql(templateBody: string): Sql {
     if (text.includes("FROM content_tool.prompt_templates")) {
       return Promise.resolve([
         {
+          voice_slug: "__shared__",
           template_id: "topic_hot",
           category: "agent",
           filename: "topic_hot.md",
@@ -43,6 +44,7 @@ function baseInput(overrides: Partial<TopicHotInput> = {}): TopicHotInput {
   return {
     topic: "自願醫保扣稅攻略",
     keywords: ["VHIS", "扣稅"],
+    voiceSlug: "bowtie-editor",
     ...overrides,
   };
 }

@@ -17,15 +17,19 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_tool import source_policy_store
 from content_tool.api.editor_auth import require_editor
 from content_tool.db.models import SourcePolicyRecord, SourcePolicyVersion
 from content_tool.policy.source_policy import SourcePolicy
-from content_tool.source_policy_store import POLICY_ID
+from content_tool.source_policy_store import POLICY_ID, SHARED_VOICE
 
 router = APIRouter(prefix="/source-policy", tags=["source-policy"])
+
+# Default voice when the caller omits ``?voice=``. Each voice has its own policy
+# row; a voice with none falls back to the ``__shared__`` seed (SHARED_VOICE).
+DEFAULT_VOICE = "bowtie-editor"
 
 _MAX_POLICY_BYTES = 64 * 1024
 _LIST_FIELDS = (
@@ -75,9 +79,10 @@ def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
     return policy
 
 
-def _snapshot_payload(snap: source_policy_store.PolicySnapshot) -> dict[str, Any]:
+def _snapshot_payload(snap: source_policy_store.PolicySnapshot, voice: str) -> dict[str, Any]:
     return {
-        "policy_id": snap.policy_id,
+        "voice": voice,
+        "voice_slug": snap.voice_slug,
         "policy": snap.raw,
         "sha256": snap.sha256,
         "bytes": snap.bytes,
@@ -87,12 +92,18 @@ def _snapshot_payload(snap: source_policy_store.PolicySnapshot) -> dict[str, Any
 
 @router.get("")
 async def get_source_policy(
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """The live source policy + its rendered prompt block + sha256 token."""
+    """The voice's live source policy + its rendered prompt block + sha256 token.
+
+    Resolves ``voice -> __shared__ -> bundled YAML``; ``voice_slug`` in the
+    response reveals which row actually answered (a shared fallback for a voice
+    that has not customised its policy).
+    """
     async with sf() as session:
-        snap = await source_policy_store.snapshot(session)
-    return _snapshot_payload(snap)
+        snap = await source_policy_store.snapshot(voice_slug=voice, session=session)
+    return _snapshot_payload(snap, voice)
 
 
 class _PreviewRequest(BaseModel):
@@ -100,8 +111,16 @@ class _PreviewRequest(BaseModel):
 
 
 @router.post("/preview")
-async def preview_source_policy(body: _PreviewRequest) -> dict[str, Any]:
-    """Render the prompt block from a candidate policy without saving it."""
+async def preview_source_policy(
+    body: _PreviewRequest,
+    voice: str = Query(DEFAULT_VOICE),
+) -> dict[str, Any]:
+    """Render the prompt block from a candidate policy without saving it.
+
+    Stateless and voice-independent (it neither reads nor writes a DB row); the
+    ``voice`` query param is accepted only so every ``/source-policy*`` endpoint
+    shares one signature.
+    """
     policy = _validate_policy(body.policy)
     cleaned = source_policy_store.clean(policy)
     return {"policy": cleaned, "rendered": SourcePolicy(cleaned).to_prompt_block()}
@@ -115,18 +134,21 @@ class _SaveRequest(BaseModel):
 @router.put("")
 async def save_source_policy(
     body: _SaveRequest,
+    voice: str = Query(DEFAULT_VOICE),
     editor: str = Depends(require_editor),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """Validate + persist a structured policy edit, stamping a version row.
+    """Validate + persist a structured policy edit for ``voice``, stamping a version.
 
     HTTP 400 if the policy is malformed.
-    HTTP 409 if ``expected_sha256`` no longer matches the live row.
+    HTTP 409 if ``expected_sha256`` no longer matches the live (or fallback) row.
     HTTP 413 if the canonical body exceeds the 64 KiB cap.
 
-    The UPDATE and the version INSERT commit in one transaction; the row is
-    locked ``FOR UPDATE`` to serialise concurrent saves. After commit the
-    in-process cache is invalidated so this worker serves the new policy.
+    The UPSERT and the version INSERT commit in one transaction; the voice's row
+    is locked ``FOR UPDATE`` to serialise concurrent saves. When the voice has no
+    row yet (it had been resolving the ``__shared__`` fallback) the save creates
+    one. After commit the in-process cache is invalidated so this worker serves
+    the new policy.
     """
     cleaned = source_policy_store.clean(_validate_policy(body.policy))
     new_body = source_policy_store.canonical_json(cleaned)
@@ -141,16 +163,14 @@ async def save_source_policy(
         row = (
             await session.execute(
                 select(SourcePolicyRecord)
-                .where(SourcePolicyRecord.policy_id == POLICY_ID)
+                .where(SourcePolicyRecord.voice_slug == voice)
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        # Optimistic concurrency: compare against the live row's sha, or the
-        # bundled-config fallback sha when the row is absent (migration applied
-        # without the seed). A mismatch means another editor saved meanwhile.
-        current_sha = (
-            row.sha256 if row is not None else source_policy_store.fallback_snapshot().sha256
-        )
+        # Optimistic concurrency: compare against the voice's live row, else the
+        # baseline the GET would have shown — the shared seed row, or the bundled
+        # YAML fallback. A mismatch means another editor saved meanwhile.
+        current_sha = await _baseline_sha(session, voice, row)
         if current_sha != body.expected_sha256:
             raise HTTPException(
                 409,
@@ -163,7 +183,7 @@ async def save_source_policy(
         parent_sha = row.sha256 if row is not None else None
 
         if row is None:
-            row = SourcePolicyRecord(policy_id=POLICY_ID)
+            row = SourcePolicyRecord(voice_slug=voice)
             session.add(row)
         row.body = new_body
         row.sha256 = new_sha
@@ -171,6 +191,7 @@ async def save_source_policy(
         row.updated_by = editor
         version = SourcePolicyVersion(
             version_id=version_id,
+            voice_slug=voice,
             policy_id=POLICY_ID,
             sha256=new_sha,
             parent_sha256=parent_sha,
@@ -187,7 +208,7 @@ async def save_source_policy(
     source_policy_store.invalidate()
 
     return {
-        "policy_id": POLICY_ID,
+        "voice": voice,
         "policy": cleaned,
         "sha256": new_sha,
         "bytes": len(new_bytes),
@@ -198,18 +219,41 @@ async def save_source_policy(
     }
 
 
+async def _baseline_sha(
+    session: AsyncSession, voice: str, row: SourcePolicyRecord | None
+) -> str:
+    """sha256 the GET for ``voice`` would have returned (for the concurrency gate).
+
+    Mirrors the loader's ``voice -> __shared__ -> bundled YAML`` resolution
+    without touching the in-process cache: the voice's own row if present, else
+    the shared seed row, else the bundled-config fallback.
+    """
+    if row is not None:
+        return row.sha256
+    if voice != SHARED_VOICE:
+        shared = (
+            await session.execute(
+                select(SourcePolicyRecord).where(SourcePolicyRecord.voice_slug == SHARED_VOICE)
+            )
+        ).scalar_one_or_none()
+        if shared is not None:
+            return shared.sha256
+    return source_policy_store.fallback_snapshot(voice).sha256
+
+
 @router.get("/history")
 async def source_policy_history(
+    voice: str = Query(DEFAULT_VOICE),
     limit: int = Query(50, ge=1, le=200),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """Newest-first list of saves + reverts (bodies omitted to stay small)."""
+    """Newest-first saves + reverts for ``voice`` (bodies omitted to stay small)."""
     async with sf() as session:
         rows = (
             (
                 await session.execute(
                     select(SourcePolicyVersion)
-                    .where(SourcePolicyVersion.policy_id == POLICY_ID)
+                    .where(SourcePolicyVersion.voice_slug == voice)
                     .order_by(SourcePolicyVersion.saved_at.desc())
                     .limit(limit)
                 )
@@ -218,7 +262,7 @@ async def source_policy_history(
             .all()
         )
     return {
-        "policy_id": POLICY_ID,
+        "voice": voice,
         "versions": [
             {
                 "version_id": str(r.version_id),
@@ -237,15 +281,20 @@ async def source_policy_history(
 @router.get("/versions/{version_id}")
 async def source_policy_version(
     version_id: UUID,
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """One version's full policy + metadata (used by the revert preview)."""
+    """One version's full policy + metadata (used by the revert preview).
+
+    Scoped to ``voice`` so a stray UUID for a different voice returns 404 rather
+    than leaking another voice's policy body.
+    """
     async with sf() as session:
         row = (
             await session.execute(
                 select(SourcePolicyVersion).where(
                     SourcePolicyVersion.version_id == version_id,
-                    SourcePolicyVersion.policy_id == POLICY_ID,
+                    SourcePolicyVersion.voice_slug == voice,
                 )
             )
         ).scalar_one_or_none()
@@ -254,6 +303,7 @@ async def source_policy_version(
     raw = source_policy_store.clean(_loads(row.body))
     return {
         "version_id": str(row.version_id),
+        "voice": row.voice_slug,
         "policy_id": row.policy_id,
         "sha256": row.sha256,
         "parent_sha256": row.parent_sha256,
@@ -274,17 +324,18 @@ class _RevertRequest(BaseModel):
 @router.post("/revert")
 async def revert_source_policy(
     body: _RevertRequest,
+    voice: str = Query(DEFAULT_VOICE),
     editor: str = Depends(require_editor),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """Restore the live policy to the body of a past version (stamped as revert)."""
+    """Restore ``voice``'s live policy to a past version (stamped as revert)."""
     version_id = uuid4()
 
     async with sf() as session:
         row = (
             await session.execute(
                 select(SourcePolicyRecord)
-                .where(SourcePolicyRecord.policy_id == POLICY_ID)
+                .where(SourcePolicyRecord.voice_slug == voice)
                 .with_for_update()
             )
         ).scalar_one_or_none()
@@ -305,7 +356,7 @@ async def revert_source_policy(
             await session.execute(
                 select(SourcePolicyVersion).where(
                     SourcePolicyVersion.version_id == body.target_version_id,
-                    SourcePolicyVersion.policy_id == POLICY_ID,
+                    SourcePolicyVersion.voice_slug == voice,
                 )
             )
         ).scalar_one_or_none()
@@ -321,6 +372,7 @@ async def revert_source_policy(
         row.updated_by = editor
         version = SourcePolicyVersion(
             version_id=version_id,
+            voice_slug=voice,
             policy_id=POLICY_ID,
             sha256=new_sha,
             parent_sha256=current_sha,
@@ -337,7 +389,7 @@ async def revert_source_policy(
     source_policy_store.invalidate()
     cleaned = source_policy_store.clean(_loads(new_body))
     return {
-        "policy_id": POLICY_ID,
+        "voice": voice,
         "policy": cleaned,
         "sha256": new_sha,
         "bytes": len(new_bytes),

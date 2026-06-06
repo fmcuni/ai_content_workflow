@@ -81,8 +81,8 @@ interface GroundingWeb {
   title?: string;
 }
 
-async function buildSystemPrompt(sql: Sql): Promise<string> {
-  return getAssembled(sql, "topic_existing_search");
+async function buildSystemPrompt(sql: Sql, voiceSlug: string): Promise<string> {
+  return getAssembled(sql, "topic_existing_search", voiceSlug);
 }
 
 export function buildUserPrompt(opts: { topic: string; keywords: string[] }): string {
@@ -191,9 +191,9 @@ export async function runExistingArticleSearch(
   sql: Sql,
   gemini: GeminiClient,
   resolve: UrlResolveFn,
-  input: { topic: string; keywords: string[] },
+  input: { topic: string; keywords: string[]; voiceSlug: string },
 ): Promise<Stage1Result> {
-  const systemPrompt = await buildSystemPrompt(sql);
+  const systemPrompt = await buildSystemPrompt(sql, input.voiceSlug);
   const userPrompt = buildUserPrompt(input);
 
   const first = await searchOnce(gemini, resolve, systemPrompt, userPrompt, false);

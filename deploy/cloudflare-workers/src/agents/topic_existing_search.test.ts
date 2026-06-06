@@ -19,6 +19,7 @@ function makeFakeSql(): Sql {
     if (text.includes("FROM content_tool.prompt_templates")) {
       return Promise.resolve([
         {
+          voice_slug: "__shared__",
           template_id: "topic_existing_search",
           category: "agent",
           filename: "topic_existing_search.md",
@@ -67,6 +68,7 @@ describe("runExistingArticleSearch", () => {
     const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "t",
       keywords: ["k"],
+      voiceSlug: "bowtie-editor",
     });
 
     expect(articles.map((a) => a.url)).toEqual([
@@ -98,6 +100,7 @@ describe("runExistingArticleSearch", () => {
     const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "t",
       keywords: [],
+      voiceSlug: "bowtie-editor",
     });
 
     expect(articles.map((a) => a.url)).toEqual(["https://www.bowtie.com.hk/blog/foo"]);
@@ -115,6 +118,7 @@ describe("runExistingArticleSearch", () => {
     const { articles } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "t",
       keywords: [],
+      voiceSlug: "bowtie-editor",
     });
 
     expect(articles).toHaveLength(1);
@@ -131,6 +135,7 @@ describe("runExistingArticleSearch", () => {
     const { articles } = await runExistingArticleSearch(makeFakeSql(), gemini(chunks), resolver(map), {
       topic: "t",
       keywords: [],
+      voiceSlug: "bowtie-editor",
     });
 
     expect(articles).toHaveLength(MAX_CANDIDATES);
@@ -151,6 +156,7 @@ describe("runExistingArticleSearch", () => {
     const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), gemini(chunks), resolve, {
       topic: "t",
       keywords: [],
+      voiceSlug: "bowtie-editor",
     });
 
     expect(articles).toEqual([]);
@@ -165,6 +171,7 @@ describe("runExistingArticleSearch", () => {
     const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolver({}), {
       topic: "t",
       keywords: [],
+      voiceSlug: "bowtie-editor",
     });
     expect(articles).toEqual([]);
     expect(g.calls).toHaveLength(2); // first pass empty → one retry
@@ -188,6 +195,7 @@ describe("runExistingArticleSearch", () => {
     const { articles, diagnostics } = await runExistingArticleSearch(makeFakeSql(), g, resolve, {
       topic: "兒童夏日手足口病",
       keywords: [],
+      voiceSlug: "bowtie-editor",
     });
 
     expect(articles.map((a) => a.url)).toEqual(["https://www.bowtie.com.hk/blog/hfmd"]);

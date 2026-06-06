@@ -21,19 +21,16 @@ import type { Env } from "../index";
 import { withDb } from "../db/client";
 import { pgTimestampToIso } from "../db/serialize";
 import { getPromptGraph } from "../config/prompt_graph";
-import {
-  listTemplates,
-  getTemplate,
-  getTemplateHistory,
-  getVersion,
-} from "../db/prompts";
+import { getTemplateHistory, getVersion } from "../db/prompts";
 import type { PromptTemplateRow } from "../db/schema";
 import {
   snapshot,
+  voiceView,
   invalidate,
   resolveBody,
   assembleWithOverride,
   PromptTemplateNotFound,
+  SHARED_VOICE,
 } from "../prompts/store";
 import {
   EDITABLE_CATEGORIES,
@@ -62,6 +59,33 @@ const MIN_HISTORY_LIMIT = 1;
 const MAX_HISTORY_LIMIT = 200;
 
 const EXPECTED_SHA_LENGTH = 64;
+
+// Default voice for every template endpoint when the caller omits `?voice=`.
+// Mirrors the seeded persona slug; per-voice rows fall back to `__shared__`
+// (SHARED_VOICE) for any template the voice has not customised. Judges are
+// always global and resolve under `__shared__` regardless of `voice`.
+const DEFAULT_VOICE = "bowtie-editor";
+
+/** Read `?voice=`, mirroring FastAPI `voice: str = Query(DEFAULT_VOICE)`: an
+ * absent param defaults to `bowtie-editor`; an explicit empty `?voice=` is the
+ * empty string (no row → resolves to `__shared__`). */
+function resolveVoice(c: Context<{ Bindings: Env }>): string {
+  const v = c.req.query("voice");
+  return v === undefined ? DEFAULT_VOICE : v;
+}
+
+/** Sort comparator replicating the Python route ordering:
+ *   items.sort(key=lambda i: (i["category"] == "partial", i["template_id"]))
+ * Agents before partials; alphabetical within each group. */
+function compareTemplateItems(
+  a: { category: string; template_id: string },
+  b: { category: string; template_id: string },
+): number {
+  const aIsPartial = a.category === "partial" ? 1 : 0;
+  const bIsPartial = b.category === "partial" ? 1 : 0;
+  if (aIsPartial !== bIsPartial) return aIsPartial - bIsPartial;
+  return a.template_id < b.template_id ? -1 : a.template_id > b.template_id ? 1 : 0;
+}
 
 export const promptsRouter = new Hono<{ Bindings: Env }>();
 
@@ -95,21 +119,70 @@ promptsRouter.get("/graph", (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /templates
+// GET /templates?voice=<slug>
+//
+// One voice's editable prompts (agent + partial) plus the shared judges. Each
+// `templates` entry carries `voice_slug` (the resolved row's voice — voice-owned
+// vs `__shared__` fallback); each `judges` entry is `voice_slug: "__shared__"` +
+// `read_only: true`. Mirrors content_tool/api/routes/prompts.py::list_templates.
 // ---------------------------------------------------------------------------
+interface TemplateEntry {
+  template_id: string;
+  filename: string;
+  category: string;
+  sha256: string;
+  bytes: number;
+  voice_slug: string;
+}
+
 promptsRouter.get("/templates", async (c) => {
-  const templates = await withDb(c.env, c.executionCtx, (sql) => listTemplates(sql));
-  return c.json({ templates });
+  const voice = resolveVoice(c);
+  const { templates, judges } = await withDb(c.env, c.executionCtx, async (sql) => {
+    const view = voiceView(await snapshot(sql), voice);
+    const items: TemplateEntry[] = [];
+    const judgeItems: (TemplateEntry & { read_only: true })[] = [];
+    for (const [templateId, row] of view) {
+      const entry: TemplateEntry = {
+        template_id: templateId,
+        filename: row.filename,
+        category: row.category,
+        sha256: row.sha256,
+        bytes: row.bytes,
+        voice_slug: row.voice_slug,
+      };
+      if (EDITABLE_CATEGORIES.has(row.category)) {
+        items.push(entry);
+      } else if (row.category === "judge") {
+        judgeItems.push({ ...entry, read_only: true });
+      }
+    }
+    items.sort(compareTemplateItems);
+    judgeItems.sort((a, b) => (a.template_id < b.template_id ? -1 : a.template_id > b.template_id ? 1 : 0));
+    return { templates: items, judges: judgeItems };
+  });
+  return c.json({ voice, templates, judges });
 });
 
 // ---------------------------------------------------------------------------
-// GET /templates/:id
+// GET /templates/:id?voice=<slug>
 // ---------------------------------------------------------------------------
 promptsRouter.get("/templates/:id", async (c) => {
   const templateId = c.req.param("id");
-  const detail = await withDb(c.env, c.executionCtx, (sql) =>
-    getTemplate(sql, templateId),
-  );
+  const voice = resolveVoice(c);
+  const detail = await withDb(c.env, c.executionCtx, async (sql) => {
+    const view = voiceView(await snapshot(sql), voice);
+    const row = view.get(templateId);
+    if (row === undefined || !EDITABLE_CATEGORIES.has(row.category)) return null;
+    return {
+      template_id: templateId,
+      voice,
+      voice_slug: row.voice_slug,
+      filename: row.filename,
+      category: row.category,
+      template: row.body,
+      sha256: row.sha256,
+    };
+  });
   if (!detail) {
     return c.json({ detail: `unknown template_id '${templateId}'` }, 404);
   }
@@ -117,10 +190,11 @@ promptsRouter.get("/templates/:id", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /templates/:id/history?limit=50
+// GET /templates/:id/history?voice=<slug>&limit=50
 // ---------------------------------------------------------------------------
 promptsRouter.get("/templates/:id/history", async (c) => {
   const templateId = c.req.param("id");
+  const voice = resolveVoice(c);
 
   const rawLimit = c.req.query("limit");
   let limit = DEFAULT_HISTORY_LIMIT;
@@ -136,29 +210,27 @@ promptsRouter.get("/templates/:id/history", async (c) => {
   }
 
   const versions = await withDb(c.env, c.executionCtx, (sql) =>
-    getTemplateHistory(sql, templateId, limit),
+    getTemplateHistory(sql, templateId, voice, limit),
   );
   if (!versions) {
     return c.json({ detail: `unknown template_id '${templateId}'` }, 404);
   }
-  return c.json({ template_id: templateId, versions });
+  return c.json({ template_id: templateId, voice, versions });
 });
 
 // ---------------------------------------------------------------------------
-// GET /templates/:id/versions/:versionId
+// GET /templates/:id/versions/:versionId?voice=<slug>
 // ---------------------------------------------------------------------------
 promptsRouter.get("/templates/:id/versions/:versionId", async (c) => {
   const templateId = c.req.param("id");
   const versionId = c.req.param("versionId");
+  const voice = resolveVoice(c);
 
   const version = await withDb(c.env, c.executionCtx, (sql) =>
-    getVersion(sql, templateId, versionId),
+    getVersion(sql, templateId, voice, versionId),
   );
   if (!version) {
-    return c.json(
-      { detail: `version '${versionId}' not found for template '${templateId}'` },
-      404,
-    );
+    return c.json({ detail: `unknown version_id '${versionId}'` }, 404);
   }
   return c.json(version);
 });
@@ -204,18 +276,20 @@ promptsRouter.get("/user-example", async (c) => {
 // ---------------------------------------------------------------------------
 promptsRouter.get("/templates/:id/schema", async (c) => {
   const templateId = c.req.param("id");
+  const voice = resolveVoice(c);
   return withDb(c.env, c.executionCtx, async (sql) => {
-    const snap = await snapshot(sql);
-    const row = snap.get(templateId);
+    const view = voiceView(await snapshot(sql), voice);
+    const row = view.get(templateId);
     if (row === undefined || !EDITABLE_CATEGORIES.has(row.category)) {
       return c.json({ detail: `unknown template_id '${templateId}'` }, 404);
     }
     const required = [...(REQUIRED_PLACEHOLDERS[templateId] ?? [])].sort();
     const foundIncludes = findIncludes(row.body);
-    const partials = partialIds(snap);
+    const partials = partialIds(view);
     const unknownIncludes = foundIncludes.filter((n) => !partials.has(n)).sort();
     return c.json({
       template_id: templateId,
+      voice,
       required_placeholders: required,
       found_placeholders: findPlaceholders(row.body),
       found_includes: foundIncludes,
@@ -225,17 +299,18 @@ promptsRouter.get("/templates/:id/schema", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /templates/:id/consumers
+// GET /templates/:id/consumers?voice=<slug>
 // ---------------------------------------------------------------------------
 promptsRouter.get("/templates/:id/consumers", async (c) => {
   const templateId = c.req.param("id");
+  const voice = resolveVoice(c);
   return withDb(c.env, c.executionCtx, async (sql) => {
-    const snap = await snapshot(sql);
-    const row = snap.get(templateId);
+    const view = voiceView(await snapshot(sql), voice);
+    const row = view.get(templateId);
     if (row === undefined || !EDITABLE_CATEGORIES.has(row.category)) {
       return c.json({ detail: `unknown template_id '${templateId}'` }, 404);
     }
-    return c.json({ template_id: templateId, consumers: consumersOf(templateId, snap) });
+    return c.json({ template_id: templateId, voice, consumers: consumersOf(templateId, view) });
   });
 });
 
@@ -256,6 +331,7 @@ type SaveResult =
 
 promptsRouter.put("/templates/:id", async (c) => {
   const templateId = c.req.param("id");
+  const voice = resolveVoice(c);
   const editor = resolveEditor(c);
   const body = await c.req
     .json<{ template?: unknown; expected_sha256?: unknown }>()
@@ -281,7 +357,7 @@ promptsRouter.put("/templates/:id", async (c) => {
     sql.begin(async (tx): Promise<SaveResult> => {
       const rows = await tx<Pick<PromptTemplateRow, "category" | "sha256">[]>`
         SELECT category, sha256 FROM content_tool.prompt_templates
-        WHERE template_id = ${templateId}
+        WHERE voice_slug = ${voice} AND template_id = ${templateId}
         FOR UPDATE
       `;
       const row = rows[0];
@@ -301,8 +377,10 @@ promptsRouter.put("/templates/:id", async (c) => {
       if (missing.length > 0) {
         return { kind: "missing_placeholders", missing };
       }
+      // Includes may reference the voice's own partials OR the shared seed set.
       const partialRows = await tx<{ template_id: string }[]>`
-        SELECT template_id FROM content_tool.prompt_templates WHERE category = 'partial'
+        SELECT template_id FROM content_tool.prompt_templates
+        WHERE category = 'partial' AND voice_slug IN (${voice}, ${SHARED_VOICE})
       `;
       const partials = new Set(partialRows.map((r) => r.template_id));
       const badIncludes = findIncludes(template).filter((n) => !partials.has(n)).sort();
@@ -314,13 +392,13 @@ promptsRouter.put("/templates/:id", async (c) => {
         UPDATE content_tool.prompt_templates
         SET body = ${template}, sha256 = ${newSha}, bytes = ${newBytes},
             updated_by = ${editor}, updated_at = now()
-        WHERE template_id = ${templateId}
+        WHERE voice_slug = ${voice} AND template_id = ${templateId}
       `;
       const ins = await tx<{ saved_at: string }[]>`
         INSERT INTO content_tool.prompt_versions
-          (version_id, template_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+          (version_id, voice_slug, template_id, sha256, parent_sha256, body, bytes, saved_by, kind)
         VALUES
-          (${versionId}, ${templateId}, ${newSha}, ${currentSha}, ${template}, ${newBytes}, ${editor}, 'save')
+          (${versionId}, ${voice}, ${templateId}, ${newSha}, ${currentSha}, ${template}, ${newBytes}, ${editor}, 'save')
         RETURNING saved_at
       `;
       return { kind: "ok", savedAt: ins[0]?.saved_at ?? null };
@@ -372,6 +450,7 @@ promptsRouter.put("/templates/:id", async (c) => {
       invalidate();
       return c.json({
         template_id: templateId,
+        voice,
         sha256: newSha,
         bytes: newBytes,
         version_id: versionId,
@@ -390,6 +469,7 @@ promptsRouter.put("/templates/:id", async (c) => {
 // ---------------------------------------------------------------------------
 promptsRouter.post("/templates/:id/preview", async (c) => {
   const templateId = c.req.param("id");
+  const voice = resolveVoice(c);
   const body = await c.req
     .json<{ template?: unknown; route?: unknown; context?: unknown }>()
     .catch(() => null);
@@ -404,8 +484,8 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
       : {};
 
   return withDb(c.env, c.executionCtx, async (sql) => {
-    const snap = await snapshot(sql);
-    const row = snap.get(templateId);
+    const view = voiceView(await snapshot(sql), voice);
+    const row = view.get(templateId);
     if (row === undefined || !EDITABLE_CATEGORIES.has(row.category)) {
       return c.json({ detail: `unknown template_id '${templateId}'` }, 404);
     }
@@ -428,10 +508,10 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
       if (route === null) {
         return c.json({ detail: "route is required when previewing a partial" }, 400);
       }
-      if (!agentIds(snap).has(route)) {
+      if (!agentIds(view).has(route)) {
         return c.json({ detail: `unknown route '${route}'` }, 400);
       }
-      if (!partialsReferencedBy(route, snap).has(templateId)) {
+      if (!partialsReferencedBy(route, view).has(templateId)) {
         return c.json(
           { detail: `route '${route}' does not include partial '${templateId}'` },
           400,
@@ -439,7 +519,7 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
       }
       routeId = route;
       try {
-        assembled = assembleWithOverride(routeId, snap, {
+        assembled = assembleWithOverride(routeId, view, {
           overrideName: templateId,
           overrideBody: template,
         });
@@ -453,15 +533,15 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
         return c.json({ detail: "route must equal template_id for agent prompts" }, 400);
       }
       try {
-        assembled = resolveBody(template, snap);
+        assembled = resolveBody(template, view);
       } catch (e) {
         if (e instanceof PromptTemplateNotFound) return unknownIncludesError(e);
         throw e;
       }
     }
 
-    const resolved = await substitutePreview(sql, assembled, context, snap);
-    return c.json({ resolved, route: routeId });
+    const resolved = await substitutePreview(sql, assembled, context, view, voice);
+    return c.json({ resolved, route: routeId, voice });
   });
 });
 
@@ -478,6 +558,7 @@ type RevertResult =
 
 promptsRouter.post("/templates/:id/revert", async (c) => {
   const templateId = c.req.param("id");
+  const voice = resolveVoice(c);
   const editor = resolveEditor(c);
   const body = await c.req
     .json<{ target_version_id?: unknown; expected_sha256?: unknown }>()
@@ -501,7 +582,7 @@ promptsRouter.post("/templates/:id/revert", async (c) => {
     sql.begin(async (tx): Promise<RevertResult> => {
       const rows = await tx<Pick<PromptTemplateRow, "category" | "sha256">[]>`
         SELECT category, sha256 FROM content_tool.prompt_templates
-        WHERE template_id = ${templateId}
+        WHERE voice_slug = ${voice} AND template_id = ${templateId}
         FOR UPDATE
       `;
       const row = rows[0];
@@ -515,7 +596,9 @@ promptsRouter.post("/templates/:id/revert", async (c) => {
 
       const targetRows = await tx<{ body: string }[]>`
         SELECT body FROM content_tool.prompt_versions
-        WHERE version_id = ${targetVersionId} AND template_id = ${templateId}
+        WHERE version_id = ${targetVersionId}
+          AND voice_slug = ${voice}
+          AND template_id = ${templateId}
         LIMIT 1
       `;
       const target = targetRows[0];
@@ -534,13 +617,13 @@ promptsRouter.post("/templates/:id/revert", async (c) => {
         UPDATE content_tool.prompt_templates
         SET body = ${newText}, sha256 = ${newSha}, bytes = ${newBytes},
             updated_by = ${editor}, updated_at = now()
-        WHERE template_id = ${templateId}
+        WHERE voice_slug = ${voice} AND template_id = ${templateId}
       `;
       const ins = await tx<{ saved_at: string }[]>`
         INSERT INTO content_tool.prompt_versions
-          (version_id, template_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+          (version_id, voice_slug, template_id, sha256, parent_sha256, body, bytes, saved_by, kind)
         VALUES
-          (${versionId}, ${templateId}, ${newSha}, ${currentSha}, ${newText}, ${newBytes}, ${editor}, 'revert')
+          (${versionId}, ${voice}, ${templateId}, ${newSha}, ${currentSha}, ${newText}, ${newBytes}, ${editor}, 'revert')
         RETURNING saved_at
       `;
       return { kind: "ok", savedAt: ins[0]?.saved_at ?? null, newSha, newBytes };
@@ -569,6 +652,7 @@ promptsRouter.post("/templates/:id/revert", async (c) => {
       invalidate();
       return c.json({
         template_id: templateId,
+        voice,
         sha256: result.newSha,
         bytes: result.newBytes,
         version_id: versionId,

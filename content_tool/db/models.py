@@ -427,11 +427,17 @@ class PromptVersion(Base):
     __tablename__ = "prompt_versions"
     __table_args__ = (
         Index("prompt_versions_template_idx", "template_id", "saved_at"),
+        Index(
+            "prompt_versions_voice_idx", "voice_slug", "template_id", "saved_at"
+        ),
         {"schema": "content_tool"},
     )
 
     version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    voice_slug: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'__shared__'")
     )
     template_id: Mapped[str] = mapped_column(String, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
@@ -450,7 +456,10 @@ class PromptVersion(Base):
 class PromptTemplate(Base):
     """Live prompt-template body — the source of truth the runtime reads from.
 
-    One row per ``template_id`` (agent prompts, shared partials, eval judges).
+    One row per ``(voice_slug, template_id)`` (agent prompts, shared partials,
+    eval judges). ``voice_slug`` scopes ``agent``/``partial`` rows to a voice
+    (persona slug); the reserved sentinel ``'__shared__'`` holds the global
+    judges and the canonical seed-of-record set that every voice falls back to.
     The editor at ``/prompts`` updates ``body`` in place; ``prompt_versions``
     keeps the append-only history of every save/revert. ``sha256`` is the hash
     of ``body`` and powers the editor's optimistic-concurrency check.
@@ -459,9 +468,13 @@ class PromptTemplate(Base):
     __tablename__ = "prompt_templates"
     __table_args__ = (
         Index("prompt_templates_category_idx", "category"),
+        Index("prompt_templates_voice_idx", "voice_slug"),
         {"schema": "content_tool"},
     )
 
+    voice_slug: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=text("'__shared__'")
+    )
     template_id: Mapped[str] = mapped_column(String, primary_key=True)
     category: Mapped[str] = mapped_column(String, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
@@ -480,17 +493,18 @@ class SourcePolicyRecord(Base):
     """Live source-policy document — the runtime source of truth for the
     ``{source_policy_block}`` prompt text AND citation-domain evaluation.
 
-    One singleton row (``policy_id='default'``). ``body`` holds the canonical
-    compact JSON of the ``{deny, prefer, community_exception}`` structure;
-    ``sha256`` is the hash of ``body`` and powers the editor's
-    optimistic-concurrency check. ``source_policy_versions`` keeps the
-    append-only history of every save/revert.
+    One row per voice (``voice_slug`` = persona slug); the reserved sentinel
+    ``'__shared__'`` holds the seed-of-record that every voice falls back to.
+    ``body`` holds the canonical compact JSON of the
+    ``{deny, prefer, community_exception}`` structure; ``sha256`` is the hash
+    of ``body`` and powers the editor's optimistic-concurrency check.
+    ``source_policy_versions`` keeps the append-only history of every save/revert.
     """
 
     __tablename__ = "source_policy"
     __table_args__ = ({"schema": "content_tool"},)
 
-    policy_id: Mapped[str] = mapped_column(String, primary_key=True)
+    voice_slug: Mapped[str] = mapped_column(String, primary_key=True)
     body: Mapped[str] = mapped_column(String, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
     bytes: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -512,11 +526,15 @@ class SourcePolicyVersion(Base):
     __tablename__ = "source_policy_versions"
     __table_args__ = (
         Index("source_policy_versions_policy_idx", "policy_id", "saved_at"),
+        Index("source_policy_versions_voice_idx", "voice_slug", "saved_at"),
         {"schema": "content_tool"},
     )
 
     version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    voice_slug: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'__shared__'")
     )
     policy_id: Mapped[str] = mapped_column(String, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)

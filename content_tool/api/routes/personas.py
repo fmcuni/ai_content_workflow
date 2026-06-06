@@ -1,7 +1,12 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from content_tool import prompts_store, source_policy_store
 from content_tool.api.schemas import (
     PersonaIn,
     PersonaOut,
@@ -10,7 +15,10 @@ from content_tool.api.schemas import (
 )
 from content_tool.db.models import Persona, Run
 from content_tool.policy.personas import (
+    DuplicateSlugError,
+    count_active_personas,
     create_persona,
+    duplicate_persona,
     get_persona,
     list_personas,
     set_archived,
@@ -87,6 +95,42 @@ async def create_(
         return _to_out(row)
 
 
+class _DuplicateRequest(BaseModel):
+    slug: str
+    name: str
+
+
+@router.post("/{slug}/duplicate", response_model=PersonaOut, status_code=201)
+async def duplicate_(
+    slug: str,
+    payload: _DuplicateRequest,
+    sf: async_sessionmaker[Any] = Depends(get_session_factory),  # noqa: B008
+) -> PersonaOut:
+    """Create a new voice as a deep copy of ``slug``.
+
+    Clones the persona row plus the source voice's agent/partial prompt templates
+    and source policy (with seeded history rows) under the new slug, all in one
+    transaction. 404 if the source voice is unknown; 409 if the target slug
+    already exists. The prompt + policy caches are busted so the new voice's rows
+    are immediately visible to ``/prompts`` and ``/source-policy``.
+    """
+    async with sf() as session:
+        try:
+            row = await duplicate_persona(
+                session=session,
+                source_slug=slug,
+                new_slug=payload.slug,
+                new_name=payload.name,
+            )
+        except LookupError as e:
+            raise HTTPException(404, str(e)) from e
+        except (DuplicateSlugError, IntegrityError) as e:
+            raise HTTPException(409, f"slug '{payload.slug}' already exists") from e
+    prompts_store.invalidate()
+    source_policy_store.invalidate()
+    return _to_out(row)
+
+
 @router.put("/{slug}", response_model=PersonaOut)
 async def update_(
     slug: str,
@@ -104,12 +148,23 @@ async def update_(
 
 @router.post("/{slug}/archive", response_model=PersonaOut)
 async def archive_(slug: str, sf=Depends(get_session_factory)) -> PersonaOut:  # noqa: ANN001, B008
+    """Archive (soft-delete) a voice.
+
+    409 if it is the last non-archived voice — the app must always keep at least
+    one usable voice. Archiving an already-archived voice is a no-op and skips
+    the guard.
+    """
     async with sf() as session:
+        row = await get_persona(session=session, slug=slug)
+        if row is None:
+            raise HTTPException(404, "persona not found")
+        if not row.is_archived and await count_active_personas(session=session) <= 1:
+            raise HTTPException(409, "cannot archive the last remaining voice")
         try:
-            row = await set_archived(session=session, slug=slug, archived=True)
+            updated = await set_archived(session=session, slug=slug, archived=True)
         except LookupError as e:
             raise HTTPException(404, str(e)) from e
-        return _to_out(row)
+        return _to_out(updated)
 
 
 @router.post("/{slug}/restore", response_model=PersonaOut)

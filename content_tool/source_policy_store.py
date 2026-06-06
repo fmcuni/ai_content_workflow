@@ -1,14 +1,19 @@
 """DB-backed source-policy store — the runtime source of truth for the source policy.
 
-Mirrors :mod:`content_tool.prompts_store`: a singleton ``'default'`` row in
-``content_tool.source_policy`` holds the canonical compact JSON of the policy
-object (``{deny, prefer, community_exception}``). The runtime (writer prompt
-assembly + citation-domain evaluation) and the ``/prompts`` "Source Policy" tab
-both read from here, so an edit reaches Gemini and the citation evaluator
-without a redeploy.
+Mirrors :mod:`content_tool.prompts_store`: one row per voice in
+``content_tool.source_policy`` (PK ``voice_slug``) holds the canonical compact
+JSON of the policy object (``{deny, prefer, community_exception}``). The runtime
+(writer prompt assembly + citation-domain evaluation) and the ``/prompts``
+"Source Policy" tab both read from here, so an edit reaches Gemini and the
+citation evaluator without a redeploy.
 
-Falls back to ``config/source_policy.yaml`` when the row is absent (e.g. the
-migration has not been pushed yet) so the app still boots. The canonical
+Per-voice resolution follows a strict fallback chain so a voice created before a
+policy row existed (or any read during the deploy window) still resolves and the
+app keeps booting::
+
+    voice_slug  ->  '__shared__'  ->  config/source_policy.yaml
+
+The reserved sentinel ``__shared__`` holds the seed-of-record. The canonical
 serializer matches the TypeScript Workers serializer byte-for-byte, so the
 ``sha256`` optimistic-concurrency token and the rendered prompt block stay in
 parity across both backends reading the same DB row.
@@ -28,6 +33,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from content_tool.db.models import SourcePolicyRecord
 from content_tool.policy.source_policy import DEFAULT_POLICY_PATH, SourcePolicy
 
+# Reserved sentinel voice for the global / seed-of-record policy row. Mirrors the
+# migration default and the Workers ``SHARED_VOICE``.
+SHARED_VOICE = "__shared__"
+
+# Retained only as the ``policy_id`` *history label* written into
+# ``source_policy_versions`` (the live ``source_policy`` table no longer has a
+# ``policy_id`` column — PK is ``voice_slug``). Kept importable so the Phase-4
+# route module that still references it does not fail at import.
 POLICY_ID = "default"
 
 
@@ -93,9 +106,9 @@ def sha256_hex(text: str) -> str:
 
 @dataclass(frozen=True)
 class PolicySnapshot:
-    """Immutable snapshot of the live source-policy row."""
+    """Immutable snapshot of one voice's live source-policy row."""
 
-    policy_id: str
+    voice_slug: str
     raw: dict[str, Any]
     body: str
     sha256: str
@@ -107,11 +120,17 @@ class PolicySnapshot:
 # drops the snapshot after an editor save so this process serves the new policy
 # immediately. Per-process cache — acceptable for a single FastAPI process.
 _session_factory: async_sessionmaker[AsyncSession] | None = None
-_cache: PolicySnapshot | None = None
+# Per-voice cache, keyed by the requested voice_slug (a voice that fell back to
+# the shared row is cached under its own key so the next read is still one hop).
+_cache: dict[str, PolicySnapshot] | None = None
 
 
-def configure(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Register the session factory used by the ``*_standalone`` helpers."""
+def configure(session_factory: async_sessionmaker[AsyncSession] | None) -> None:
+    """Register the session factory used by the ``*_standalone`` helpers.
+
+    Pass ``None`` to de-register (e.g. test teardown after the engine is
+    disposed) so a stale/disposed factory is never reused.
+    """
     global _session_factory
     _session_factory = session_factory
 
@@ -127,8 +146,8 @@ def invalidate() -> None:
     clear_cache()
 
 
-def fallback_snapshot() -> PolicySnapshot:
-    """Snapshot built from the bundled YAML when the DB row is absent."""
+def fallback_snapshot(voice_slug: str = SHARED_VOICE) -> PolicySnapshot:
+    """Snapshot built from the bundled YAML when no DB row resolves."""
     try:
         with open(DEFAULT_POLICY_PATH, encoding="utf-8") as f:
             raw_obj = yaml.safe_load(f)
@@ -138,7 +157,7 @@ def fallback_snapshot() -> PolicySnapshot:
     cleaned = clean(raw)
     body = json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"))
     return PolicySnapshot(
-        policy_id=POLICY_ID,
+        voice_slug=voice_slug,
         raw=cleaned,
         body=body,
         sha256=sha256_hex(body),
@@ -150,7 +169,7 @@ def snapshot_from_row(row: SourcePolicyRecord) -> PolicySnapshot:
     parsed = json.loads(row.body)
     raw: dict[str, Any] = cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else {}
     return PolicySnapshot(
-        policy_id=row.policy_id,
+        voice_slug=row.voice_slug,
         raw=clean(raw),
         body=row.body,
         sha256=row.sha256,
@@ -158,43 +177,56 @@ def snapshot_from_row(row: SourcePolicyRecord) -> PolicySnapshot:
     )
 
 
-async def _load(session: AsyncSession) -> PolicySnapshot:
+async def _load_one(session: AsyncSession, voice_slug: str) -> PolicySnapshot | None:
+    """Load exactly one voice's policy row, or ``None`` if it has none."""
     row = (
         await session.execute(
-            select(SourcePolicyRecord).where(SourcePolicyRecord.policy_id == POLICY_ID)
+            select(SourcePolicyRecord).where(SourcePolicyRecord.voice_slug == voice_slug)
         )
     ).scalar_one_or_none()
-    if row is None:
-        return fallback_snapshot()
-    return snapshot_from_row(row)
+    return snapshot_from_row(row) if row is not None else None
 
 
-async def snapshot(session: AsyncSession) -> PolicySnapshot:
-    """Return the live policy snapshot, loading + caching on first use."""
+async def _resolve(session: AsyncSession, voice_slug: str) -> PolicySnapshot:
+    """Resolve a voice's policy via ``voice -> __shared__ -> YAML``."""
+    snap = await _load_one(session, voice_slug)
+    if snap is None and voice_slug != SHARED_VOICE:
+        snap = await _load_one(session, SHARED_VOICE)
+    if snap is None:
+        return fallback_snapshot(voice_slug)
+    return snap
+
+
+async def snapshot(*, voice_slug: str = SHARED_VOICE, session: AsyncSession) -> PolicySnapshot:
+    """Return ``voice_slug``'s policy snapshot, loading + caching on first use."""
     global _cache
     if _cache is None:
-        _cache = await _load(session)
-    return _cache
+        _cache = {}
+    if voice_slug not in _cache:
+        _cache[voice_slug] = await _resolve(session, voice_slug)
+    return _cache[voice_slug]
 
 
-async def _snapshot_standalone() -> PolicySnapshot:
+async def _snapshot_standalone(voice_slug: str = SHARED_VOICE) -> PolicySnapshot:
     global _cache
-    if _cache is not None:
-        return _cache
+    if _cache is None:
+        _cache = {}
+    if voice_slug in _cache:
+        return _cache[voice_slug]
     if _session_factory is None:
         raise RuntimeError(
             "source_policy_store is not configured; call configure(session_factory) at startup"
         )
     async with _session_factory() as session:
-        _cache = await _load(session)
-    return _cache
+        _cache[voice_slug] = await _resolve(session, voice_slug)
+    return _cache[voice_slug]
 
 
-async def get_policy(*, session: AsyncSession) -> SourcePolicy:
-    """The live :class:`SourcePolicy` (caller holds a session)."""
-    return SourcePolicy((await snapshot(session)).raw)
+async def get_policy(*, voice_slug: str = SHARED_VOICE, session: AsyncSession) -> SourcePolicy:
+    """The live :class:`SourcePolicy` for ``voice_slug`` (caller holds a session)."""
+    return SourcePolicy((await snapshot(voice_slug=voice_slug, session=session)).raw)
 
 
-async def get_policy_standalone() -> SourcePolicy:
-    """The live :class:`SourcePolicy` (no caller session — opens from factory)."""
-    return SourcePolicy((await _snapshot_standalone()).raw)
+async def get_policy_standalone(voice_slug: str = SHARED_VOICE) -> SourcePolicy:
+    """The live :class:`SourcePolicy` for ``voice_slug`` (opens from factory)."""
+    return SourcePolicy((await _snapshot_standalone(voice_slug)).raw)

@@ -26,6 +26,9 @@ export interface ResolveCitationsInput {
   markupRaw: string;
   groundingChunks: readonly GroundingChunk[];
   topicCategory: string | null;
+  /** The run's voice (persona slug); evaluates citations against its policy,
+   * matching the per-voice {source_policy_block} the writer was given. */
+  voiceSlug: string;
 }
 
 export interface ResolveCitationsResult {
@@ -174,9 +177,9 @@ export async function resolveCitations(
   sql: Sql,
   input: ResolveCitationsInput,
 ): Promise<ResolveCitationsResult> {
-  const { draftId, markupRaw, groundingChunks, topicCategory } = input;
+  const { draftId, markupRaw, groundingChunks, topicCategory, voiceSlug } = input;
 
-  const policy = await getPolicy(sql);
+  const policy = await getPolicy(sql, voiceSlug);
   const records = await resolveAllChunks(sql, groundingChunks, topicCategory, policy);
 
   const displayed: { domain: string; finalUrl: string }[] = [];

@@ -34,6 +34,8 @@ const DEGRADED_NOTE_SUFFIX =
 export interface TopicDedupInput {
   topic: string;
   keywords: string[];
+  /** The batch/candidate voice (persona slug); resolves both stages' prompts. */
+  voiceSlug: string;
   onThought?: ThoughtCallback;
 }
 
@@ -44,8 +46,8 @@ export interface TopicDedupTokens {
   latencyMs: number;
 }
 
-async function buildSystemPrompt(sql: Sql): Promise<string> {
-  return getAssembled(sql, "topic_dedup");
+async function buildSystemPrompt(sql: Sql, voiceSlug: string): Promise<string> {
+  return getAssembled(sql, "topic_dedup", voiceSlug);
 }
 
 function renderCandidates(candidates: ExistingArticle[]): string {
@@ -133,10 +135,11 @@ export async function runTopicDedup(
   const stage1 = await runExistingArticleSearch(sql, gemini, resolve, {
     topic: input.topic,
     keywords: input.keywords,
+    voiceSlug: input.voiceSlug,
   });
   const candidates = stage1.articles;
 
-  const systemPrompt = await buildSystemPrompt(sql);
+  const systemPrompt = await buildSystemPrompt(sql, input.voiceSlug);
   const userPrompt = buildUserPrompt(
     { topic: input.topic, keywords: input.keywords },
     candidates,

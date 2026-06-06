@@ -79,6 +79,7 @@ function makeFakeSql(templateBody: string): {
     if (text.includes("FROM content_tool.prompt_templates")) {
       return Promise.resolve([
         {
+          voice_slug: "__shared__",
           template_id: "gap_analysis",
           category: "agent",
           filename: "gap_analysis.md",
@@ -107,6 +108,7 @@ function makeFakeSql(templateBody: string): {
 function baseInput(overrides: Partial<GapAnalysisInput> = {}): GapAnalysisInput {
   return {
     runId: "11111111-1111-1111-1111-111111111111",
+    voiceSlug: "bowtie-editor",
     topic: "自願醫保",
     keywords: ["VHIS", "扣稅"],
     articleUrl: "https://bowtie.example/article",

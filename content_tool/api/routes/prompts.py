@@ -29,13 +29,19 @@ from content_tool.db.models import (
     Run,
 )
 from content_tool.policy.personas import load_persona_from_yaml
-from content_tool.prompts_store import TemplateRow
+from content_tool.prompts_store import SHARED_VOICE, TemplateRow
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
+# Default voice for every template endpoint when the caller omits ``?voice=``.
+# Mirrors the seeded persona slug; the per-voice rows fall back to ``__shared__``
+# (SHARED_VOICE) for any template the voice has not customised.
+DEFAULT_VOICE = "bowtie-editor"
+
 # Categories the prompt editor surfaces and manages. Judge templates live in the
 # same ``prompt_templates`` table (seeded for the eval harness) but are not
-# editable here, so reads/saves for a judge id resolve to 404 as before.
+# editable here, so reads/saves for a judge id resolve to 404 as before. Judges
+# are always global — they ignore ``voice`` and resolve under ``__shared__``.
 _EDITABLE_CATEGORIES = frozenset({"agent", "partial"})
 
 # Required `{placeholder}` set per template — the writer/audit/outline/etc.
@@ -76,42 +82,64 @@ def _get_session_factory(request: Request) -> async_sessionmaker[Any]:
     return request.app.state.session_factory  # type: ignore[no-any-return]
 
 
-async def _load_snapshot(sf: async_sessionmaker[Any]) -> dict[str, TemplateRow]:
+async def _load_snapshot(sf: async_sessionmaker[Any]) -> dict[tuple[str, str], TemplateRow]:
     """Cached in-process snapshot of every ``prompt_templates`` row.
 
     Opens one session for the first (cache-miss) read; warm reads are served
     from the process cache that :func:`prompts_store.invalidate` busts on save.
+    The dict is keyed by ``(voice_slug, template_id)`` — use :func:`_voice_view`
+    to flatten it to one voice's resolvable templates.
     """
     async with sf() as session:
         return await prompts_store.snapshot(session)
 
 
-def _editable_or_404(snap: dict[str, TemplateRow], template_id: str) -> TemplateRow:
-    row = snap.get(template_id)
+def _voice_view(
+    snap: dict[tuple[str, str], TemplateRow], voice_slug: str
+) -> dict[str, TemplateRow]:
+    """Flatten the ``(voice, id)``-keyed snapshot to one voice's ``id -> row`` map.
+
+    Each template_id resolves the same way the runtime loader does — the voice's
+    own row wins, otherwise the ``__shared__`` row (judges + canonical seed). The
+    resolved row's ``voice_slug`` tells the caller whether it is voice-owned or a
+    shared fallback. Downstream helpers operate on this per-voice view exactly as
+    they did on the old flat snapshot.
+    """
+    ids = {tid for (vs, tid) in snap if vs == voice_slug or vs == SHARED_VOICE}
+    view: dict[str, TemplateRow] = {}
+    for tid in ids:
+        row = snap.get((voice_slug, tid)) or snap.get((SHARED_VOICE, tid))
+        if row is not None:
+            view[tid] = row
+    return view
+
+
+def _editable_or_404(view: dict[str, TemplateRow], template_id: str) -> TemplateRow:
+    row = view.get(template_id)
     if row is None or row.category not in _EDITABLE_CATEGORIES:
         raise HTTPException(404, f"unknown template_id '{template_id}'")
     return row
 
 
-def _agent_ids(snap: dict[str, TemplateRow]) -> set[str]:
-    return {tid for tid, row in snap.items() if row.category == "agent"}
+def _agent_ids(view: dict[str, TemplateRow]) -> set[str]:
+    return {tid for tid, row in view.items() if row.category == "agent"}
 
 
-def _partial_ids(snap: dict[str, TemplateRow]) -> set[str]:
-    return {tid for tid, row in snap.items() if row.category == "partial"}
+def _partial_ids(view: dict[str, TemplateRow]) -> set[str]:
+    return {tid for tid, row in view.items() if row.category == "partial"}
 
 
-def _consumers_of(template_id: str, snap: dict[str, TemplateRow]) -> list[str]:
+def _consumers_of(template_id: str, view: dict[str, TemplateRow]) -> list[str]:
     """Agent templates whose body contains `{{include:<template_id>}}`.
 
     For agent templates the answer is just `[template_id]` — the editor
     previews the agent prompt against itself.
     """
-    if snap[template_id].category == "agent":
+    if view[template_id].category == "agent":
         return [template_id]
     hits: list[str] = []
-    for agent_id in _agent_ids(snap):
-        body = snap[agent_id].body
+    for agent_id in _agent_ids(view):
+        body = view[agent_id].body
         for match in _INCLUDE_RE.finditer(body):
             if match.group(1) == template_id:
                 hits.append(agent_id)
@@ -119,8 +147,8 @@ def _consumers_of(template_id: str, snap: dict[str, TemplateRow]) -> list[str]:
     return sorted(hits)
 
 
-def _partials_referenced_by(route_id: str, snap: dict[str, TemplateRow]) -> set[str]:
-    return {m.group(1) for m in _INCLUDE_RE.finditer(snap[route_id].body)}
+def _partials_referenced_by(route_id: str, view: dict[str, TemplateRow]) -> set[str]:
+    return {m.group(1) for m in _INCLUDE_RE.finditer(view[route_id].body)}
 
 
 @router.get("/graph")
@@ -133,40 +161,51 @@ async def graph(mode: str = Query("refresh")) -> dict:
 
 @router.get("/templates")
 async def list_templates(
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """List every editable prompt — agent prompts + shared partials.
+    """List one voice's editable prompts (agent + partial) plus the shared judges.
 
-    sha256 lets the editor detect server-side changes between load and save
-    (optimistic concurrency).
+    ``templates`` holds the agent prompts + partials resolved for ``voice`` (the
+    voice's own row, or the ``__shared__`` fallback — see ``voice_slug`` on each
+    entry); ``judges`` is the global, read-only eval set. sha256 lets the editor
+    detect server-side changes between load and save (optimistic concurrency).
     """
     snap = await _load_snapshot(sf)
+    view = _voice_view(snap, voice)
     items: list[dict[str, Any]] = []
-    for template_id, row in snap.items():
-        if row.category not in _EDITABLE_CATEGORIES:
-            continue
-        items.append(
-            {
-                "template_id": template_id,
-                "filename": row.filename,
-                "category": row.category,
-                "sha256": row.sha256,
-                "bytes": row.bytes,
-            }
-        )
+    judges: list[dict[str, Any]] = []
+    for template_id, row in view.items():
+        entry = {
+            "template_id": template_id,
+            "filename": row.filename,
+            "category": row.category,
+            "sha256": row.sha256,
+            "bytes": row.bytes,
+            "voice_slug": row.voice_slug,
+        }
+        if row.category in _EDITABLE_CATEGORIES:
+            items.append(entry)
+        elif row.category == "judge":
+            judges.append({**entry, "read_only": True})
     items.sort(key=lambda i: (i["category"] == "partial", i["template_id"]))
-    return {"templates": items}
+    judges.sort(key=lambda i: i["template_id"])
+    return {"voice": voice, "templates": items, "judges": judges}
 
 
 @router.get("/templates/{template_id}")
 async def template(
     template_id: str,
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict:
     snap = await _load_snapshot(sf)
-    row = _editable_or_404(snap, template_id)
+    view = _voice_view(snap, voice)
+    row = _editable_or_404(view, template_id)
     return {
         "template_id": template_id,
+        "voice": voice,
+        "voice_slug": row.voice_slug,
         "filename": row.filename,
         "category": row.category,
         "template": row.body,
@@ -177,6 +216,7 @@ async def template(
 @router.get("/templates/{template_id}/schema")
 async def template_schema(
     template_id: str,
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
     """Return required placeholders + the include directives this template
@@ -184,15 +224,17 @@ async def template_schema(
     the validation chips; includes drive the preview tabs.
     """
     snap = await _load_snapshot(sf)
-    row = _editable_or_404(snap, template_id)
+    view = _voice_view(snap, voice)
+    row = _editable_or_404(view, template_id)
     body = row.body
     required = sorted(_REQUIRED_PLACEHOLDERS.get(template_id, set()))
     found_placeholders = sorted({m.group(1) for m in _PLACEHOLDER_RE.finditer(body)})
     found_includes = sorted({m.group(1) for m in _INCLUDE_RE.finditer(body)})
-    partial_ids = _partial_ids(snap)
+    partial_ids = _partial_ids(view)
     unknown_includes = sorted(name for name in found_includes if name not in partial_ids)
     return {
         "template_id": template_id,
+        "voice": voice,
         "required_placeholders": required,
         "found_placeholders": found_placeholders,
         "found_includes": found_includes,
@@ -203,11 +245,17 @@ async def template_schema(
 @router.get("/templates/{template_id}/consumers")
 async def template_consumers(
     template_id: str,
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
     snap = await _load_snapshot(sf)
-    _editable_or_404(snap, template_id)
-    return {"template_id": template_id, "consumers": _consumers_of(template_id, snap)}
+    view = _voice_view(snap, voice)
+    _editable_or_404(view, template_id)
+    return {
+        "template_id": template_id,
+        "voice": voice,
+        "consumers": _consumers_of(template_id, view),
+    }
 
 
 class _SaveTemplateRequest(BaseModel):
@@ -219,14 +267,16 @@ class _SaveTemplateRequest(BaseModel):
 async def save_template(
     template_id: str,
     body: _SaveTemplateRequest,
+    voice: str = Query(DEFAULT_VOICE),
     editor: str = Depends(_require_editor),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """Validate + persist a template edit, stamping an immutable version row.
+    """Validate + persist a template edit for ``voice``, stamping a version row.
 
     HTTP 401 if no ``X-Editor-Email`` (production only).
     HTTP 403 if the editor isn't in the allowlist (production only).
-    HTTP 404 if ``template_id`` is not an editable agent/partial template.
+    HTTP 404 if ``(voice, template_id)`` is not an editable agent/partial row —
+    judges and any template the voice does not own are not writable here.
     HTTP 409 if expected_sha256 no longer matches the row (another editor saved
     between load and save).
     HTTP 413 if the new body exceeds the 64 KiB cap.
@@ -236,8 +286,8 @@ async def save_template(
     The ``prompt_templates`` UPDATE and the ``prompt_versions`` INSERT commit in
     a single transaction so history can never advertise a save that didn't land
     (or vice versa). The row is locked ``FOR UPDATE`` to serialise concurrent
-    saves of the same template. After commit the in-process cache is invalidated
-    so this worker serves the new body immediately.
+    saves of the same ``(voice, template)``. After commit the in-process cache is
+    invalidated so this worker serves the new body immediately.
     """
     new_bytes = body.template.encode("utf-8")
     new_sha = _sha256(body.template)
@@ -247,7 +297,10 @@ async def save_template(
         row = (
             await session.execute(
                 select(PromptTemplate)
-                .where(PromptTemplate.template_id == template_id)
+                .where(
+                    PromptTemplate.voice_slug == voice,
+                    PromptTemplate.template_id == template_id,
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()
@@ -288,7 +341,8 @@ async def save_template(
             (
                 await session.execute(
                     select(PromptTemplate.template_id).where(
-                        PromptTemplate.category == "partial"
+                        PromptTemplate.category == "partial",
+                        PromptTemplate.voice_slug.in_([voice, SHARED_VOICE]),
                     )
                 )
             )
@@ -316,6 +370,7 @@ async def save_template(
         row.updated_by = editor
         version = PromptVersion(
             version_id=version_id,
+            voice_slug=voice,
             template_id=template_id,
             sha256=new_sha,
             parent_sha256=current_sha,
@@ -333,6 +388,7 @@ async def save_template(
 
     return {
         "template_id": template_id,
+        "voice": voice,
         "sha256": new_sha,
         "bytes": len(new_bytes),
         "version_id": str(version_id),
@@ -344,10 +400,11 @@ async def save_template(
 @router.get("/templates/{template_id}/history")
 async def template_history(
     template_id: str,
+    voice: str = Query(DEFAULT_VOICE),
     limit: int = Query(50, ge=1, le=200),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """Newest-first list of saves + reverts for this template.
+    """Newest-first list of saves + reverts for this ``(voice, template)``.
 
     ``body`` is omitted to keep the payload small — fetch a single version
     via ``GET .../versions/{version_id}`` when the user opens the preview
@@ -355,12 +412,15 @@ async def template_history(
     """
     async with sf() as session:
         snap = await prompts_store.snapshot(session)
-        _editable_or_404(snap, template_id)
+        _editable_or_404(_voice_view(snap, voice), template_id)
         rows = (
             (
                 await session.execute(
                     select(PromptVersion)
-                    .where(PromptVersion.template_id == template_id)
+                    .where(
+                        PromptVersion.voice_slug == voice,
+                        PromptVersion.template_id == template_id,
+                    )
                     .order_by(PromptVersion.saved_at.desc())
                     .limit(limit)
                 )
@@ -370,6 +430,7 @@ async def template_history(
         )
     return {
         "template_id": template_id,
+        "voice": voice,
         "versions": [
             {
                 "version_id": str(r.version_id),
@@ -389,21 +450,23 @@ async def template_history(
 async def template_version(
     template_id: str,
     version_id: UUID,
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
     """Return one version's full body + metadata.
 
     Used by the revert flow to preview before confirming, and by any future
-    diff UI. Scoped to ``template_id`` so a stray UUID for a different
-    template returns 404 instead of leaking another template's body.
+    diff UI. Scoped to ``(voice, template_id)`` so a stray UUID for a different
+    voice/template returns 404 instead of leaking another body.
     """
     async with sf() as session:
         snap = await prompts_store.snapshot(session)
-        _editable_or_404(snap, template_id)
+        _editable_or_404(_voice_view(snap, voice), template_id)
         row = (
             await session.execute(
                 select(PromptVersion).where(
                     PromptVersion.version_id == version_id,
+                    PromptVersion.voice_slug == voice,
                     PromptVersion.template_id == template_id,
                 )
             )
@@ -432,10 +495,11 @@ class _RevertRequest(BaseModel):
 async def revert_template(
     template_id: str,
     body: _RevertRequest,
+    voice: str = Query(DEFAULT_VOICE),
     editor: str = Depends(_require_editor),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
-    """Replace the live template body with the body of a past version.
+    """Replace ``voice``'s live template body with the body of a past version.
 
     Subject to the same optimistic-concurrency gate as PUT — the row's sha must
     still match ``expected_sha256`` — and stamped as a ``kind='revert'`` row so
@@ -447,7 +511,10 @@ async def revert_template(
         row = (
             await session.execute(
                 select(PromptTemplate)
-                .where(PromptTemplate.template_id == template_id)
+                .where(
+                    PromptTemplate.voice_slug == voice,
+                    PromptTemplate.template_id == template_id,
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()
@@ -469,6 +536,7 @@ async def revert_template(
             await session.execute(
                 select(PromptVersion).where(
                     PromptVersion.version_id == body.target_version_id,
+                    PromptVersion.voice_slug == voice,
                     PromptVersion.template_id == template_id,
                 )
             )
@@ -490,6 +558,7 @@ async def revert_template(
         row.updated_by = editor
         version = PromptVersion(
             version_id=version_id,
+            voice_slug=voice,
             template_id=template_id,
             sha256=new_sha,
             parent_sha256=current_sha,
@@ -507,6 +576,7 @@ async def revert_template(
 
     return {
         "template_id": template_id,
+        "voice": voice,
         "sha256": new_sha,
         "bytes": len(new_bytes),
         "version_id": str(version_id),
@@ -526,43 +596,50 @@ class _PreviewRequest(BaseModel):
 async def preview_template(
     template_id: str,
     body: _PreviewRequest,
+    voice: str = Query(DEFAULT_VOICE),
     sf: async_sessionmaker[Any] = Depends(_get_session_factory),  # noqa: B008
 ) -> dict[str, Any]:
     """Render the fully assembled system prompt this template participates in.
 
     For an agent prompt, the request `template` IS the prompt body and any
-    `route` must match `template_id`; includes resolve from the DB snapshot.
-    For a partial, `route` picks which consumer to preview against — the agent
-    body is read from the snapshot and `{{include:<partial>}}` is replaced with
-    the request body before the rest of the partials resolve from the DB.
+    `route` must match `template_id`; includes resolve from the DB snapshot
+    within ``voice`` (with the ``__shared__`` fallback). For a partial, `route`
+    picks which consumer to preview against — the agent body is read from the
+    voice's snapshot and `{{include:<partial>}}` is replaced with the request
+    body before the rest of the partials resolve from the DB.
 
-    Placeholders are substituted with live defaults (today's date, the
-    `bowtie-editor` persona, the active source_policy) unless the request
-    overrides them via `context`.
+    Placeholders are substituted with live defaults (today's date, the voice's
+    persona, the voice's source_policy) unless the request overrides them via
+    `context`.
     """
     snap = await _load_snapshot(sf)
-    row = _editable_or_404(snap, template_id)
+    view = _voice_view(snap, voice)
+    row = _editable_or_404(view, template_id)
 
     if row.category == "partial":
         if body.route is None:
             raise HTTPException(400, "route is required when previewing a partial")
-        if body.route not in _agent_ids(snap):
+        if body.route not in _agent_ids(view):
             raise HTTPException(400, f"unknown route '{body.route}'")
-        if template_id not in _partials_referenced_by(body.route, snap):
+        if template_id not in _partials_referenced_by(body.route, view):
             raise HTTPException(
                 400,
                 f"route '{body.route}' does not include partial '{template_id}'",
             )
         route_id = body.route
         assembled = prompts_store.assemble_with_override(
-            route_id, snap, override_name=template_id, override_body=body.template
+            route_id,
+            snap,
+            override_name=template_id,
+            override_body=body.template,
+            voice_slug=voice,
         )
     else:
         route_id = body.route or template_id
         if route_id != template_id:
             raise HTTPException(400, "route must equal template_id for agent prompts")
         try:
-            assembled = prompts_store.resolve_body(body.template, snap)
+            assembled = prompts_store.resolve_body(body.template, snap, voice_slug=voice)
         except prompts_store.PromptTemplateNotFound as e:
             raise HTTPException(
                 400,
@@ -574,40 +651,54 @@ async def preview_template(
             ) from e
 
     async with sf() as session:
-        source_policy = await source_policy_store.get_policy(session=session)
+        source_policy = await source_policy_store.get_policy(voice_slug=voice, session=session)
     resolved = _substitute_placeholders(
         assembled,
         overrides=body.context,
-        snap=snap,
+        view=view,
+        voice=voice,
         source_policy_default=source_policy.to_prompt_block(),
     )
-    return {"resolved": resolved, "route": route_id}
+    return {"resolved": resolved, "route": route_id, "voice": voice}
+
+
+def _default_persona_block(voice: str) -> str:
+    """Best-effort persona block for the preview, from the voice's YAML config.
+
+    Falls back to the default voice, then a placeholder, when a voice has no
+    bundled YAML (e.g. a duplicated voice exists only in the DB). The persona
+    block is preview-cosmetic — runtime assembly reads the persona from the DB.
+    """
+    for slug in dict.fromkeys((voice, DEFAULT_VOICE)):
+        try:
+            return load_persona_from_yaml(slug).to_prompt_block(None)
+        except FileNotFoundError:
+            continue
+    return "（preview: persona block not configured）"  # noqa: RUF001
 
 
 def _substitute_placeholders(
     text: str,
     *,
     overrides: dict[str, str],
-    snap: dict[str, TemplateRow],
+    view: dict[str, TemplateRow],
+    voice: str = DEFAULT_VOICE,
     source_policy_default: str = "",
 ) -> str:
     """Fill `{name}` placeholders with overrides or sensible defaults.
 
     Defaults mirror the live values the writer/audit/outline loaders compute
     at runtime so the preview reflects what Gemini actually sees. The persona
-    and source-policy blocks come from their YAML configs; `create_mode_block`
-    comes from the DB-backed ``outline_create_mode`` template.
+    block comes from the voice's YAML config, the source-policy block from the
+    voice's policy, and `create_mode_block` from the voice's DB-backed
+    ``outline_create_mode`` template (with the ``__shared__`` fallback).
     """
     today_iso = overrides.get("today_date", date.today().isoformat())
 
     if "persona_block" in overrides:
         persona_block = overrides["persona_block"]
     else:
-        try:
-            persona = load_persona_from_yaml("bowtie-editor")
-            persona_block = persona.to_prompt_block(None)
-        except FileNotFoundError:
-            persona_block = "（preview: persona block not configured）"  # noqa: RUF001
+        persona_block = _default_persona_block(voice)
 
     if "source_policy_block" in overrides:
         source_policy_block = overrides["source_policy_block"]
@@ -617,7 +708,7 @@ def _substitute_placeholders(
     if "create_mode_block" in overrides:
         create_mode_block = overrides["create_mode_block"]
     else:
-        cm = snap.get("outline_create_mode")
+        cm = view.get("outline_create_mode")
         create_mode_block = cm.body.rstrip() if cm is not None else ""
 
     out = (

@@ -651,6 +651,10 @@ export interface PromptTemplate {
   filename?: string;
   category?: PromptTemplateCategory;
   sha256?: string;
+  // Echoed by the per-voice detail route: `voice` is the requested voice;
+  // `voice_slug` is the voice that owns the resolved row (selected vs shared).
+  voice?: string;
+  voice_slug?: string;
 }
 
 export type PromptTemplateCategory = "agent" | "partial";
@@ -661,10 +665,32 @@ export interface PromptTemplateListItem {
   category: PromptTemplateCategory;
   sha256: string;
   bytes: number;
+  // The voice that owns the resolved row: the selected voice when it has
+  // customised the template, or "__shared__" when the row is the shared
+  // fallback the voice inherits.
+  voice_slug: string;
+}
+
+// Judges are global and read-only — they always resolve under "__shared__".
+export interface JudgeTemplateListItem {
+  template_id: string;
+  filename: string;
+  category: "judge";
+  sha256: string;
+  bytes: number;
+  voice_slug: string;
+  read_only: true;
+}
+
+export interface PromptTemplateListResponse {
+  voice: string;
+  templates: PromptTemplateListItem[];
+  judges: JudgeTemplateListItem[];
 }
 
 export interface PromptTemplateSchema {
   template_id: string;
+  voice?: string;
   required_placeholders: string[];
   found_placeholders: string[];
   found_includes: string[];
@@ -673,11 +699,13 @@ export interface PromptTemplateSchema {
 
 export interface PromptTemplateConsumers {
   template_id: string;
+  voice?: string;
   consumers: string[];
 }
 
 export interface PromptSaveResponse {
   template_id: string;
+  voice?: string;
   sha256: string;
   bytes: number;
   version_id?: string;
@@ -688,6 +716,7 @@ export interface PromptSaveResponse {
 export interface PromptPreviewResponse {
   resolved: string;
   route: string;
+  voice?: string;
 }
 
 export type PromptVersionKind = "save" | "revert";
@@ -709,6 +738,7 @@ export interface PromptVersionDetail extends PromptVersionSummary {
 
 export interface PromptVersionsResponse {
   template_id: string;
+  voice?: string;
   versions: PromptVersionSummary[];
 }
 
@@ -730,8 +760,12 @@ export interface SourcePolicyDoc {
   community_exception: { topic_categories: string[]; allowed_domains: string[] };
 }
 
+// Per-voice as of the per-voice-prompt-library migration: `policy_id` is gone,
+// replaced by `voice` (the requested voice) + `voice_slug` (the voice that owns
+// the resolved row — selected voice, "__shared__" seed, or YAML fallback).
 export interface SourcePolicyResponse {
-  policy_id: string;
+  voice: string;
+  voice_slug: string;
   policy: SourcePolicyDoc;
   sha256: string;
   bytes: number;
@@ -743,18 +777,26 @@ export interface SourcePolicyPreviewResponse {
   rendered: string;
 }
 
-export interface SourcePolicySaveResponse extends SourcePolicyResponse {
+// Save/revert echo the requested `voice` (not `voice_slug` — the row now exists
+// for that voice) plus the new version metadata.
+export interface SourcePolicySaveResponse {
+  voice: string;
+  policy: SourcePolicyDoc;
+  sha256: string;
+  bytes: number;
+  rendered: string;
   version_id: string;
   saved_at: string;
   saved_by: string;
 }
 
 export interface SourcePolicyVersionsResponse {
-  policy_id: string;
+  voice: string;
   versions: PromptVersionSummary[];
 }
 
 export interface SourcePolicyVersionDetail extends PromptVersionSummary {
+  voice: string;
   policy_id: string;
   policy: SourcePolicyDoc;
   rendered: string;

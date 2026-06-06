@@ -16,7 +16,7 @@ from content_tool import prompts_store
 
 @pytest.fixture(autouse=True)
 def stub_assembled_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _stub(template_id: str) -> str:
+    async def _stub(template_id: str, *, voice_slug: str = "__shared__") -> str:
         return f"[unit-test stub prompt for {template_id}]"
 
     monkeypatch.setattr(prompts_store, "get_assembled_standalone", _stub)

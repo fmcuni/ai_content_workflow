@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool import source_policy_store
 from content_tool.agents.url_resolver import UrlResolver
-from content_tool.db.models import Citation, Draft
+from content_tool.db.models import Citation, Draft, Run
 
 
 def _build_sources_md(allowed: list[tuple[str, str]]) -> str:
@@ -30,7 +30,14 @@ async def run_resolve_citations(
     draft = (
         await session.execute(select(Draft).where(Draft.draft_id == draft_id))
     ).scalar_one()
-    policy = await source_policy_store.get_policy(session=session)
+    # Evaluate citation domains against the run's voice policy, matching the
+    # per-voice {source_policy_block} the writer was given for this run.
+    voice_slug = (
+        await session.execute(
+            select(Run.persona).where(Run.run_id == draft.run_id)
+        )
+    ).scalar_one()
+    policy = await source_policy_store.get_policy(voice_slug=voice_slug, session=session)
     resolver = UrlResolver(session=session, client=client)
 
     allowed_for_display: list[tuple[str, str]] = []

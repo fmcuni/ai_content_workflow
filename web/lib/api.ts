@@ -6,7 +6,7 @@ import type {
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
   PersonaPatch, PersonaUsage,
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
-  PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListItem,
+  PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListResponse,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
   RefreshEvaluation, Render, RepublishResponse, RunCost, RunEventLog, RunSummary,
   RunWpMetaPatch, ScanResponse,
@@ -237,6 +237,14 @@ export const personasApi = {
   get: (slug: string) => http<Persona>(`${PERSONAS_BASE}/${slug}`),
   create: (body: PersonaIn) =>
     http<Persona>(PERSONAS_BASE, { method: "POST", body: JSON.stringify(body) }),
+  // Deep-copy an existing voice into a new slug/name: clones the persona row +
+  // the source voice's agent/partial prompt templates + source policy in one
+  // transaction. 404 unknown source; 409 if the target slug already exists.
+  duplicate: (sourceSlug: string, body: { slug: string; name: string }) =>
+    http<Persona>(`${PERSONAS_BASE}/${sourceSlug}/duplicate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   update: (slug: string, patch: PersonaPatch) =>
     http<Persona>(`${PERSONAS_BASE}/${slug}`, { method: "PUT", body: JSON.stringify(patch) }),
   archive: (slug: string) =>
@@ -293,44 +301,64 @@ export const topicBatchesApi = {
     http<{ ok: boolean }>(`${TOPIC_BATCHES_BASE}/${batchId}`, { method: "DELETE" }),
 };
 
+// The prompt library + source policy are scoped per voice (persona slug). Every
+// template/policy call carries `?voice=<slug>`; an absent param defaults to
+// bowtie-editor server-side. Callers always pass the selected voice so query
+// keys stay voice-scoped and switching voice refetches.
+function voiceQuery(voice: string, extra?: Record<string, string | number>): string {
+  const qs = new URLSearchParams();
+  qs.set("voice", voice);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) qs.set(k, String(v));
+  }
+  return `?${qs.toString()}`;
+}
+
 export const promptsApi = {
   graph: (mode: GraphMode = "refresh") =>
     http<PromptGraph>(`${PROMPTS_BASE}/graph?mode=${mode}`),
-  template: (id: string) => http<PromptTemplate>(`${PROMPTS_BASE}/templates/${id}`),
+  template: (id: string, voice: string) =>
+    http<PromptTemplate>(`${PROMPTS_BASE}/templates/${id}${voiceQuery(voice)}`),
   userExample: (runId: string, agent: string) =>
     http<UserPromptExample>(`${PROMPTS_BASE}/user-example?run_id=${runId}&agent=${agent}`),
-  listTemplates: () =>
-    http<{ templates: PromptTemplateListItem[] }>(`${PROMPTS_BASE}/templates`),
-  templateSchema: (id: string) =>
-    http<PromptTemplateSchema>(`${PROMPTS_BASE}/templates/${id}/schema`),
-  templateConsumers: (id: string) =>
-    http<PromptTemplateConsumers>(`${PROMPTS_BASE}/templates/${id}/consumers`),
-  saveTemplate: (id: string, body: { template: string; expected_sha256: string }) =>
-    http<PromptSaveResponse>(`${PROMPTS_BASE}/templates/${id}`, {
+  listTemplates: (voice: string) =>
+    http<PromptTemplateListResponse>(`${PROMPTS_BASE}/templates${voiceQuery(voice)}`),
+  templateSchema: (id: string, voice: string) =>
+    http<PromptTemplateSchema>(`${PROMPTS_BASE}/templates/${id}/schema${voiceQuery(voice)}`),
+  templateConsumers: (id: string, voice: string) =>
+    http<PromptTemplateConsumers>(`${PROMPTS_BASE}/templates/${id}/consumers${voiceQuery(voice)}`),
+  saveTemplate: (
+    id: string,
+    voice: string,
+    body: { template: string; expected_sha256: string },
+  ) =>
+    http<PromptSaveResponse>(`${PROMPTS_BASE}/templates/${id}${voiceQuery(voice)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
   previewTemplate: (
     id: string,
+    voice: string,
     body: { template: string; route?: string; context?: Record<string, string> },
   ) =>
-    http<PromptPreviewResponse>(`${PROMPTS_BASE}/templates/${id}/preview`, {
+    http<PromptPreviewResponse>(`${PROMPTS_BASE}/templates/${id}/preview${voiceQuery(voice)}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  templateHistory: (id: string, limit = 50) =>
+  templateHistory: (id: string, voice: string, limit = 50) =>
     http<PromptVersionsResponse>(
-      `${PROMPTS_BASE}/templates/${id}/history?limit=${limit}`,
+      `${PROMPTS_BASE}/templates/${id}/history${voiceQuery(voice, { limit })}`,
     ),
-  templateVersion: (id: string, versionId: string) =>
+  templateVersion: (id: string, voice: string, versionId: string) =>
     http<PromptVersionDetail>(
-      `${PROMPTS_BASE}/templates/${id}/versions/${versionId}`,
+      `${PROMPTS_BASE}/templates/${id}/versions/${versionId}${voiceQuery(voice)}`,
     ),
   revertTemplate: (
     id: string,
+    voice: string,
     body: { target_version_id: string; expected_sha256: string },
   ) =>
-    http<PromptRevertResponse>(`${PROMPTS_BASE}/templates/${id}/revert`, {
+    http<PromptRevertResponse>(`${PROMPTS_BASE}/templates/${id}/revert${voiceQuery(voice)}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -339,23 +367,28 @@ export const promptsApi = {
 const SOURCE_POLICY_BASE = "/api/source-policy";
 
 export const sourcePolicyApi = {
-  get: () => http<SourcePolicyResponse>(SOURCE_POLICY_BASE),
-  preview: (policy: SourcePolicyDoc) =>
-    http<SourcePolicyPreviewResponse>(`${SOURCE_POLICY_BASE}/preview`, {
+  get: (voice: string) =>
+    http<SourcePolicyResponse>(`${SOURCE_POLICY_BASE}${voiceQuery(voice)}`),
+  preview: (voice: string, policy: SourcePolicyDoc) =>
+    http<SourcePolicyPreviewResponse>(`${SOURCE_POLICY_BASE}/preview${voiceQuery(voice)}`, {
       method: "POST",
       body: JSON.stringify({ policy }),
     }),
-  save: (body: { policy: SourcePolicyDoc; expected_sha256: string }) =>
-    http<SourcePolicySaveResponse>(SOURCE_POLICY_BASE, {
+  save: (voice: string, body: { policy: SourcePolicyDoc; expected_sha256: string }) =>
+    http<SourcePolicySaveResponse>(`${SOURCE_POLICY_BASE}${voiceQuery(voice)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  history: (limit = 50) =>
-    http<SourcePolicyVersionsResponse>(`${SOURCE_POLICY_BASE}/history?limit=${limit}`),
-  version: (versionId: string) =>
-    http<SourcePolicyVersionDetail>(`${SOURCE_POLICY_BASE}/versions/${versionId}`),
-  revert: (body: { target_version_id: string; expected_sha256: string }) =>
-    http<SourcePolicyRevertResponse>(`${SOURCE_POLICY_BASE}/revert`, {
+  history: (voice: string, limit = 50) =>
+    http<SourcePolicyVersionsResponse>(
+      `${SOURCE_POLICY_BASE}/history${voiceQuery(voice, { limit })}`,
+    ),
+  version: (voice: string, versionId: string) =>
+    http<SourcePolicyVersionDetail>(
+      `${SOURCE_POLICY_BASE}/versions/${versionId}${voiceQuery(voice)}`,
+    ),
+  revert: (voice: string, body: { target_version_id: string; expected_sha256: string }) =>
+    http<SourcePolicyRevertResponse>(`${SOURCE_POLICY_BASE}/revert${voiceQuery(voice)}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

@@ -106,15 +106,21 @@ function ChipList({
   );
 }
 
-export function SourcePolicyEditor() {
+interface SourcePolicyEditorProps {
+  /** Voice (persona slug) whose policy to edit. The policy is per-voice; a voice
+   * without its own row resolves the shared seed (then bundled YAML) server-side. */
+  voice: string;
+}
+
+export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
   const queryClient = useQueryClient();
   const q = useQuery({
-    queryKey: ["source-policy"],
-    queryFn: () => sourcePolicyApi.get(),
+    queryKey: ["source-policy", voice],
+    queryFn: () => sourcePolicyApi.get(voice),
   });
   const historyQ = useQuery({
-    queryKey: ["source-policy", "history"],
-    queryFn: () => sourcePolicyApi.history(),
+    queryKey: ["source-policy", voice, "history"],
+    queryFn: () => sourcePolicyApi.history(voice),
   });
 
   const [doc, setDoc] = useState<SourcePolicyDoc>(EMPTY_DOC);
@@ -127,9 +133,12 @@ export function SourcePolicyEditor() {
   const { can } = useRole();
   const canEditPolicy = can("edit_source_policy");
 
-  // Seed local state from the server once (and after a save/revert reload).
+  // Seed local state from the server once (and after a save/revert reload, or a
+  // voice switch). Syncing the editor buffer to the freshly fetched server copy
+  // is the intended use here — see the matching pattern in the prompt editor.
   useEffect(() => {
     if (q.data) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDoc(q.data.policy);
       setBaseline(q.data.policy);
       setSha(q.data.sha256);
@@ -148,17 +157,17 @@ export function SourcePolicyEditor() {
     if (!isDirty) return;
     const handle = setTimeout(() => {
       sourcePolicyApi
-        .preview(doc)
+        .preview(voice, doc)
         .then((r) => setRendered(r.rendered))
         .catch(() => undefined);
     }, 400);
     return () => clearTimeout(handle);
-  }, [doc, isDirty]);
+  }, [doc, isDirty, voice]);
 
   const saveMut = useMutation({
     mutationFn: () => {
       if (sha === null) throw new Error("policy not loaded yet");
-      return sourcePolicyApi.save({ policy: doc, expected_sha256: sha });
+      return sourcePolicyApi.save(voice, { policy: doc, expected_sha256: sha });
     },
     onSuccess: (res) => {
       setError(null);
@@ -166,7 +175,7 @@ export function SourcePolicyEditor() {
       setDoc(res.policy);
       setSha(res.sha256);
       setRendered(res.rendered);
-      void queryClient.invalidateQueries({ queryKey: ["source-policy"] });
+      void queryClient.invalidateQueries({ queryKey: ["source-policy", voice] });
     },
     onError: (e: unknown) => {
       const msg = e instanceof Error ? e.message : String(e);
@@ -181,7 +190,7 @@ export function SourcePolicyEditor() {
   const revertMut = useMutation({
     mutationFn: (versionId: string) => {
       if (sha === null) throw new Error("policy not loaded yet");
-      return sourcePolicyApi.revert({ target_version_id: versionId, expected_sha256: sha });
+      return sourcePolicyApi.revert(voice, { target_version_id: versionId, expected_sha256: sha });
     },
     onSuccess: (res) => {
       setError(null);
@@ -189,7 +198,7 @@ export function SourcePolicyEditor() {
       setDoc(res.policy);
       setSha(res.sha256);
       setRendered(res.rendered);
-      void queryClient.invalidateQueries({ queryKey: ["source-policy"] });
+      void queryClient.invalidateQueries({ queryKey: ["source-policy", voice] });
     },
     onError: (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
   });

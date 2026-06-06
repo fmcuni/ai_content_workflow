@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { SectionHead } from "@/components/SectionHead";
 import { ComposeDrawer } from "@/components/voices/ComposeDrawer";
+import { DuplicateVoiceDialog } from "@/components/voices/DuplicateVoiceDialog";
 import { Rolodex } from "@/components/voices/Rolodex";
 import { StyleCard } from "@/components/voices/StyleCard";
 import { PressWorkflow } from "@/components/voices/PressWorkflow";
@@ -20,9 +21,11 @@ export default function VoicesPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [graphMode, setGraphMode] = useState<GraphMode>("refresh");
+  // New voices are created by DUPLICATING an existing one; ComposeDrawer is now
+  // edit-only. The two flows are distinct dialogs.
   const [composeMode, setComposeMode] = useState<
     | null
-    | { kind: "create" }
+    | { kind: "duplicate" }
     | { kind: "edit"; slug: string }
   >(null);
 
@@ -61,7 +64,7 @@ export default function VoicesPage() {
             selectedSlug={activeSlug}
             onSelect={setSelectedSlug}
             canManage={canManage}
-            onNewVoice={() => setComposeMode({ kind: "create" })}
+            onNewVoice={() => setComposeMode({ kind: "duplicate" })}
           />
         )}
         <label className="text-[12px] text-ink-faint inline-flex items-center gap-2">
@@ -96,29 +99,44 @@ export default function VoicesPage() {
             graph={graph.data}
             mode={graphMode}
             onModeChange={setGraphMode}
-            renderInspector={(node) => <PromptInspector node={node} mode={graphMode} />}
+            renderInspector={(node) => (
+              <PromptInspector node={node} mode={graphMode} voice={activeSlug ?? "bowtie-editor"} />
+            )}
           />
         )}
       </section>
 
-      {composeMode && personas.data && canManage && (
-        <ComposeDrawer
-          mode={
-            composeMode.kind === "create"
-              ? { kind: "create" }
-              : (() => {
-                  const found = personas.data.find((p) => p.slug === composeMode.slug);
-                  if (!found) return { kind: "create" } as const;
-                  return { kind: "edit", persona: found } as const;
-                })()
-          }
+      {composeMode?.kind === "duplicate" && personas.data && canManage && (
+        <DuplicateVoiceDialog
+          candidates={personas.data.filter((p) => !p.is_archived)}
+          defaultSourceSlug={activeSlug ?? undefined}
           onClose={() => setComposeMode(null)}
-          onSaved={(slug) => {
+          onDuplicated={(slug) => {
             setComposeMode(null);
             setSelectedSlug(slug);
           }}
         />
       )}
+
+      {composeMode?.kind === "edit" && personas.data && canManage && (() => {
+        const found = personas.data.find((p) => p.slug === composeMode.slug);
+        if (!found) return null;
+        // The app must always keep one usable voice — block archiving the last
+        // non-archived one (the server returns 409 either way).
+        const activeCount = personas.data.filter((p) => !p.is_archived).length;
+        const isLastVoice = !found.is_archived && activeCount <= 1;
+        return (
+          <ComposeDrawer
+            mode={{ kind: "edit", persona: found }}
+            isLastVoice={isLastVoice}
+            onClose={() => setComposeMode(null)}
+            onSaved={(slug) => {
+              setComposeMode(null);
+              setSelectedSlug(slug);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

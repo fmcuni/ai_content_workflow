@@ -149,6 +149,16 @@ async def pg_session_factory(
     """
     engine = make_engine(postgres_url)
     sf = make_session_factory(engine)
+    # Replicate the prod startup step (api/main.py, scripts/refresh_scan.py):
+    # configure the session-less stores so the standalone loader paths
+    # (e.g. refresh evaluator -> get_assembled_standalone) read from this test
+    # DB instead of raising "not configured" / relying on leaked global cache.
+    from content_tool import prompts_store, source_policy_store
+
+    prompts_store.configure(sf)
+    prompts_store.clear_cache()
+    source_policy_store.configure(sf)
+    source_policy_store.clear_cache()
     try:
         yield sf
     finally:
@@ -168,6 +178,12 @@ async def pg_session_factory(
             )
             await cleanup.commit()
         await engine.dispose()
+        # De-configure so the now-disposed engine is never reused by a later
+        # standalone read; the next DB test reconfigures with its own engine.
+        prompts_store.configure(None)
+        prompts_store.clear_cache()
+        source_policy_store.configure(None)
+        source_policy_store.clear_cache()
 
 
 @pytest_asyncio.fixture

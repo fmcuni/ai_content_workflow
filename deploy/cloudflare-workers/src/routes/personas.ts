@@ -8,10 +8,14 @@ import {
   createPersona,
   updatePersona,
   setArchived,
+  countActivePersonas,
+  duplicatePersona,
   PG_UNIQUE_VIOLATION,
   type CreatePersonaInput,
   type UpdatePersonaInput,
 } from "../db/personas";
+import { invalidate as invalidatePrompts } from "../prompts/store";
+import { invalidate as invalidateSourcePolicy } from "../source_policy/store";
 
 const personasRouter = new Hono<{ Bindings: Env }>();
 
@@ -130,6 +134,45 @@ personasRouter.post("/", async (c) => {
   }
 });
 
+// POST /personas/:slug/duplicate — create a new voice as a deep copy of :slug.
+// Clones the persona row + the source voice's resolved agent/partial prompt
+// templates + source policy (with seeded history rows) under the new slug, all
+// in one transaction. 404 if the source voice is unknown; 409 if the target
+// slug already exists. The prompt + policy caches are busted so the new voice's
+// rows are immediately visible to /prompts and /source-policy.
+//
+// Registered BEFORE /:slug so Hono's matcher does not let a catch-all shadow it.
+personasRouter.post("/:slug/duplicate", async (c) => {
+  const sourceSlug = c.req.param("slug");
+  const body = await c.req.json<{ slug?: unknown; name?: unknown }>().catch(() => null);
+  if (body === null || typeof body.slug !== "string" || typeof body.name !== "string") {
+    return c.json({ detail: "slug and name are required" }, 422);
+  }
+  const newSlug = body.slug;
+  const newName = body.name;
+  const ctx = c.executionCtx as ExecutionContext;
+  try {
+    const result = await withDb(c.env, ctx, (sql) =>
+      duplicatePersona(sql, sourceSlug, newSlug, newName),
+    );
+    if (result.kind === "source_not_found") {
+      return c.json({ detail: `persona '${sourceSlug}' not found` }, 404);
+    }
+    if (result.kind === "dup_slug") {
+      return c.json({ detail: `slug '${newSlug}' already exists` }, 409);
+    }
+    invalidatePrompts();
+    invalidateSourcePolicy();
+    return c.json(result.record, 201);
+  } catch (err) {
+    // Race: the target slug was inserted between the pre-check and our INSERT.
+    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
+      return c.json({ detail: `slug '${newSlug}' already exists` }, 409);
+    }
+    throw err;
+  }
+});
+
 // PUT /personas/:slug — partial update (only provided fields change).
 // 404 when the slug does not resolve (mirrors the Python LookupError → 404).
 personasRouter.put("/:slug", async (c) => {
@@ -162,14 +205,30 @@ personasRouter.put("/:slug", async (c) => {
 });
 
 // POST /personas/:slug/archive — soft-delete (is_archived = true).
+//
+// 409 if it is the last non-archived voice — the app must always keep at least
+// one usable voice. Archiving an already-archived voice is a no-op and skips the
+// guard. Mirrors content_tool/api/routes/personas.py::archive_.
 personasRouter.post("/:slug/archive", async (c) => {
   const slug = c.req.param("slug");
   const ctx = c.executionCtx as ExecutionContext;
-  const persona = await withDb(c.env, ctx, (sql) => setArchived(sql, slug, true));
-  if (persona === null) {
+  const result = await withDb(c.env, ctx, async (sql) => {
+    const current = await getPersonaBySlug(sql, slug);
+    if (current === null) return { kind: "not_found" as const };
+    if (!current.is_archived && (await countActivePersonas(sql)) <= 1) {
+      return { kind: "last_voice" as const };
+    }
+    const updated = await setArchived(sql, slug, true);
+    if (updated === null) return { kind: "not_found" as const };
+    return { kind: "ok" as const, persona: updated };
+  });
+  if (result.kind === "not_found") {
     return c.json({ detail: "persona not found" }, 404);
   }
-  return c.json(persona);
+  if (result.kind === "last_voice") {
+    return c.json({ detail: "cannot archive the last remaining voice" }, 409);
+  }
+  return c.json(result.persona);
 });
 
 // POST /personas/:slug/restore — un-archive (is_archived = false).

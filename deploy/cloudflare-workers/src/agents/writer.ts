@@ -122,9 +122,11 @@ async function buildSystemPrompt(
   personaName: string,
   contextText: string,
 ): Promise<string> {
-  const template = await getAssembled(sql, `writer_${route}`);
+  // `personaName` is the run's voice (persona slug): both the prompt template
+  // and the source policy resolve under it (falling back to __shared__).
+  const template = await getAssembled(sql, `writer_${route}`, personaName);
   const persona = await loadPersona(sql, personaName);
-  const policy = await getPolicy(sql);
+  const policy = await getPolicy(sql, personaName);
   return template
     .replace("{persona_block}", toPromptBlock(persona, contextText))
     .replace("{today_date}", todayIso())

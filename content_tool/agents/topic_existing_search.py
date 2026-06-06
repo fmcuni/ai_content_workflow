@@ -88,8 +88,10 @@ class Stage1Result:
     diagnostics: Stage1Diagnostics
 
 
-async def build_system_prompt() -> str:
-    return await prompts_store.get_assembled_standalone("topic_existing_search")
+async def build_system_prompt(voice_slug: str = "bowtie-editor") -> str:
+    return await prompts_store.get_assembled_standalone(
+        "topic_existing_search", voice_slug=voice_slug
+    )
 
 
 def build_user_prompt(input_: TopicDedupInput) -> str:
@@ -184,6 +186,7 @@ async def run_existing_article_search(
     gemini: GeminiClient,
     resolve: UrlResolveFn,
     input: TopicDedupInput,
+    voice_slug: str = "bowtie-editor",
 ) -> Stage1Result:
     """Grounded search → resolved real bowtie article URLs (deduped, capped).
 
@@ -200,7 +203,7 @@ async def run_existing_article_search(
     path. The decisive (second) pass's diagnostics are returned, flagged
     ``second_pass=True``.
     """
-    system_prompt = await build_system_prompt()
+    system_prompt = await build_system_prompt(voice_slug)
     user_prompt = build_user_prompt(input)
 
     first = await _search_once(

@@ -18,6 +18,8 @@ import { OUTLINE_SCHEMA, type Outline } from "./schemas";
 export interface OutlineInput {
   runId: string;
   startMode: "create" | "refresh";
+  /** The run's voice (persona slug); resolves the prompt template under it. */
+  voiceSlug: string;
   topic: string;
   keywords: string[];
   targetAudience?: string | null;
@@ -57,13 +59,14 @@ async function buildSystemPrompt(
   sql: Sql,
   startMode: "create" | "refresh",
   todayDate: string,
+  voiceSlug: string,
 ): Promise<string> {
   const block =
     startMode === "create"
-      ? (await getAssembled(sql, "outline_create_mode")).replace(/\n+$/, "")
+      ? (await getAssembled(sql, "outline_create_mode", voiceSlug)).replace(/\n+$/, "")
       : "";
 
-  const template = await getAssembled(sql, "outline");
+  const template = await getAssembled(sql, "outline", voiceSlug);
 
   return substitute(template, {
     today_date: todayDate,
@@ -138,7 +141,12 @@ export async function runOutline(
   gemini: GeminiClient,
   input: OutlineInput,
 ): Promise<{ outline: Outline; tokens: OutlineTokens }> {
-  const systemPrompt = await buildSystemPrompt(sql, input.startMode, input.todayDate);
+  const systemPrompt = await buildSystemPrompt(
+    sql,
+    input.startMode,
+    input.todayDate,
+    input.voiceSlug,
+  );
 
   let userPrompt: string;
   if (input.startMode === "create") {

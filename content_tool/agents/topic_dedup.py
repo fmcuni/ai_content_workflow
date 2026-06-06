@@ -40,8 +40,8 @@ class TopicDedupResult:
     stage1: Stage1Diagnostics
 
 
-async def build_system_prompt() -> str:
-    return await prompts_store.get_assembled_standalone("topic_dedup")
+async def build_system_prompt(voice_slug: str = "bowtie-editor") -> str:
+    return await prompts_store.get_assembled_standalone("topic_dedup", voice_slug=voice_slug)
 
 
 def _render_candidates(candidates: list[ExistingArticle]) -> str:
@@ -116,19 +116,22 @@ async def run_topic_dedup(
     gemini: GeminiClient,
     resolve: UrlResolveFn,
     input: TopicDedupInput,
+    voice_slug: str = "bowtie-editor",
 ) -> TopicDedupResult:
     """Two-stage dedup verdict for one candidate.
 
     ``resolve`` backs the stage-1 URL resolver (vertexaisearch redirect →
     real URL, cached in ``url_resolution_cache``). Returns the verdict together
     with the stage-1 :class:`Stage1Diagnostics` (persisted for observability).
+    Both stages resolve their prompt under ``voice_slug`` (the batch/candidate
+    voice).
     """
     stage1 = await run_existing_article_search(
-        gemini=gemini, resolve=resolve, input=input
+        gemini=gemini, resolve=resolve, input=input, voice_slug=voice_slug
     )
     candidates = stage1.articles
 
-    system_prompt = await build_system_prompt()
+    system_prompt = await build_system_prompt(voice_slug)
     user_prompt = build_user_prompt(input, candidates)
     result = await gemini.generate(
         agent="topic_dedup",

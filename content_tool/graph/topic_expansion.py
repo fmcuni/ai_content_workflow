@@ -65,6 +65,19 @@ CONCURRENCY_CAP = 3
 _MAX_ATTEMPTS = 3
 _BASE_BACKOFF_S = 1.0
 
+# Terminal fallback when neither the candidate nor the batch names a voice. The
+# topic agents resolve their prompt under this voice (Phase 0 resolution rule:
+# candidate.persona_slug || batch.persona_default || DEFAULT_VOICE).
+DEFAULT_VOICE = "bowtie-editor"
+
+
+def _resolve_voice(*candidates: str | None) -> str:
+    """First non-empty voice slug, else ``DEFAULT_VOICE``."""
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return DEFAULT_VOICE
+
 
 class TopicExpansionState(TypedDict, total=False):
     """Top-level state carried through the topic-expansion subgraph.
@@ -182,10 +195,18 @@ def build_topic_expansion_graph(
         batch_id = UUID(state["batch_id"])
         async with session_factory() as session:
             await _set_batch_status(session, batch_id, "generating")
+            persona_default = (
+                await session.execute(
+                    select(TopicBatch.persona_default).where(
+                        TopicBatch.batch_id == batch_id
+                    )
+                )
+            ).scalar_one_or_none()
+        voice_slug = _resolve_voice(persona_default)
         gen_input = TopicGenInput.model_validate(state["input"])
         try:
             output = await _retry_with_backoff(
-                lambda: run_topic_gen(gemini=gemini, input=gen_input),
+                lambda: run_topic_gen(gemini=gemini, input=gen_input, voice_slug=voice_slug),
                 label="topic_gen",
             )
         except Exception as exc:
@@ -254,7 +275,17 @@ def build_topic_expansion_graph(
                 ).scalar_one()
                 topic = cand_obj.topic
                 keywords = list(cand_obj.keywords)
+                persona_slug = cand_obj.persona_slug
+                persona_default = (
+                    await session.execute(
+                        select(TopicBatch.persona_default).where(
+                            TopicBatch.batch_id == cand_obj.batch_id
+                        )
+                    )
+                ).scalar_one_or_none()
 
+            # Phase 0 resolution rule: candidate.persona_slug || batch default || fallback.
+            voice_slug = _resolve_voice(persona_slug, persona_default)
             dedup_input = TopicDedupInput(topic=topic, keywords=keywords)
             hot_input = TopicHotInput(topic=topic, keywords=keywords)
 
@@ -268,7 +299,10 @@ def build_topic_expansion_graph(
                     async with session_factory() as dedup_session:
                         resolver = UrlResolver(session=dedup_session)
                         out = await run_topic_dedup(
-                            gemini=gemini, resolve=resolver.resolve, input=dedup_input
+                            gemini=gemini,
+                            resolve=resolver.resolve,
+                            input=dedup_input,
+                            voice_slug=voice_slug,
                         )
                         await dedup_session.commit()
                         return out
@@ -277,7 +311,9 @@ def build_topic_expansion_graph(
 
             async def _do_hot() -> TopicHotOutput:
                 return await _retry_with_backoff(
-                    lambda: run_topic_hot(gemini=gemini, input=hot_input),
+                    lambda: run_topic_hot(
+                        gemini=gemini, input=hot_input, voice_slug=voice_slug
+                    ),
                     label="topic_hot",
                 )
 

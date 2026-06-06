@@ -1,6 +1,7 @@
-import type { PersonaRow } from "./schema";
+import type { PersonaRow, PromptTemplateRow, SourcePolicyRow } from "./schema";
 import type { getSql } from "./client";
 import { pgTimestampToIso, toJsonb } from "./serialize";
+import { POLICY_ID, SHARED_VOICE } from "../source_policy/store";
 
 // Shape returned to callers — timestamps are already normalised to ISO strings.
 export interface PersonaRecord {
@@ -268,4 +269,141 @@ export async function setArchived(
   `;
   const row = rows[0];
   return row !== undefined ? normaliseRow(row) : null;
+}
+
+/** Number of non-archived personas (voices). Mirrors `count_active_personas`. */
+export async function countActivePersonas(
+  sql: ReturnType<typeof getSql>,
+): Promise<number> {
+  const rows = await sql<{ n: string | number }[]>`
+    SELECT COUNT(*) AS n
+    FROM content_tool.personas
+    WHERE is_archived = false
+  `;
+  const n = rows[0]?.n ?? 0;
+  return typeof n === "string" ? Number(n) : n;
+}
+
+/** Discriminated result of a duplicate attempt — mirrors the Python route's
+ * LookupError (404) / DuplicateSlugError (409) / success (201) branches. */
+export type DuplicateResult =
+  | { kind: "ok"; record: PersonaRecord }
+  | { kind: "source_not_found" }
+  | { kind: "dup_slug" };
+
+/**
+ * Deep-copy a voice into `newSlug`: the persona row + the source voice's
+ * resolved agent/partial prompt templates (source voice wins over `__shared__`)
+ * + its source policy, seeding initial prompt_versions / source_policy_versions
+ * rows — all in one transaction. Mirrors
+ * `content_tool/policy/personas.py::duplicate_persona`.
+ *
+ * Cloned prompt/policy bodies are byte-identical to the source's resolved set,
+ * so the new voice starts with the same assembled prompts (and sha256 tokens).
+ */
+export async function duplicatePersona(
+  sql: ReturnType<typeof getSql>,
+  sourceSlug: string,
+  newSlug: string,
+  newName: string,
+): Promise<DuplicateResult> {
+  // No created_by is threaded from the route (matches Python: created_by=None);
+  // version rows are stamped with a synthetic actor.
+  const actor = "system:duplicate";
+
+  return sql.begin(async (tx): Promise<DuplicateResult> => {
+    const srcRows = await tx<PersonaRow[]>`
+      SELECT
+        persona_id, slug, name,
+        voice_rules, banned_terms, required_phrasings,
+        disclaimer_templates, tone_examples, glossary,
+        is_archived, created_at, updated_at, created_by, updated_by
+      FROM content_tool.personas
+      WHERE slug = ${sourceSlug}
+      LIMIT 1
+    `;
+    const src = srcRows[0];
+    if (src === undefined) return { kind: "source_not_found" };
+
+    const existing = await tx<{ slug: string }[]>`
+      SELECT slug FROM content_tool.personas WHERE slug = ${newSlug} LIMIT 1
+    `;
+    if (existing[0] !== undefined) return { kind: "dup_slug" };
+
+    // 1. Clone the persona row (fresh jsonb containers, never aliasing source).
+    const cloneRows = await tx<PersonaRow[]>`
+      INSERT INTO content_tool.personas (
+        slug, name, voice_rules, banned_terms, required_phrasings,
+        disclaimer_templates, tone_examples, glossary
+      ) VALUES (
+        ${newSlug},
+        ${newName},
+        ${toJsonb(sql, src.voice_rules)},
+        ${toJsonb(sql, src.banned_terms)},
+        ${toJsonb(sql, src.required_phrasings)},
+        ${toJsonb(sql, src.disclaimer_templates)},
+        ${toJsonb(sql, src.tone_examples)},
+        ${toJsonb(sql, src.glossary ?? [])}
+      )
+      RETURNING ${tx(PERSONA_COLUMNS as unknown as string[])}
+    `;
+
+    // 2. Resolve the source voice's agent/partial set: its own row wins, the
+    //    `__shared__` seed fills any gap (the runtime fallback chain). Judges
+    //    stay global (`__shared__`) and are never copied per voice.
+    const templateRows = await tx<PromptTemplateRow[]>`
+      SELECT voice_slug, template_id, category, filename, body, sha256, bytes
+      FROM content_tool.prompt_templates
+      WHERE voice_slug IN (${SHARED_VOICE}, ${sourceSlug})
+        AND category IN ('agent', 'partial')
+    `;
+    const resolved = new Map<string, PromptTemplateRow>();
+    for (const r of templateRows) {
+      const winner = resolved.get(r.template_id);
+      if (winner === undefined || r.voice_slug === sourceSlug) {
+        resolved.set(r.template_id, r);
+      }
+    }
+    for (const r of resolved.values()) {
+      await tx`
+        INSERT INTO content_tool.prompt_templates
+          (voice_slug, template_id, category, filename, body, sha256, bytes, updated_by)
+        VALUES
+          (${newSlug}, ${r.template_id}, ${r.category}, ${r.filename}, ${r.body}, ${r.sha256}, ${r.bytes}, ${null})
+      `;
+      await tx`
+        INSERT INTO content_tool.prompt_versions
+          (version_id, voice_slug, template_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+        VALUES
+          (${crypto.randomUUID()}, ${newSlug}, ${r.template_id}, ${r.sha256}, ${null}, ${r.body}, ${r.bytes}, ${actor}, 'save')
+      `;
+    }
+
+    // 3. Resolve + clone the source voice's source policy (its own row wins).
+    const policyRows = await tx<SourcePolicyRow[]>`
+      SELECT voice_slug, body, sha256, bytes
+      FROM content_tool.source_policy
+      WHERE voice_slug IN (${SHARED_VOICE}, ${sourceSlug})
+    `;
+    let policy: SourcePolicyRow | undefined;
+    for (const r of policyRows) {
+      if (policy === undefined || r.voice_slug === sourceSlug) policy = r;
+    }
+    if (policy !== undefined) {
+      await tx`
+        INSERT INTO content_tool.source_policy
+          (voice_slug, body, sha256, bytes, updated_by)
+        VALUES
+          (${newSlug}, ${policy.body}, ${policy.sha256}, ${policy.bytes}, ${null})
+      `;
+      await tx`
+        INSERT INTO content_tool.source_policy_versions
+          (version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+        VALUES
+          (${crypto.randomUUID()}, ${newSlug}, ${POLICY_ID}, ${policy.sha256}, ${null}, ${policy.body}, ${policy.bytes}, ${actor}, 'save')
+      `;
+    }
+
+    return { kind: "ok", record: normaliseRow(cloneRows[0]!) };
+  });
 }

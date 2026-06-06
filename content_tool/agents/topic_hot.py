@@ -11,8 +11,8 @@ from content_tool.gemini.client import GeminiClient
 from content_tool.models.topic_batch import TopicHotInput, TopicHotOutput
 
 
-async def build_system_prompt() -> str:
-    return await prompts_store.get_assembled_standalone("topic_hot")
+async def build_system_prompt(voice_slug: str = "bowtie-editor") -> str:
+    return await prompts_store.get_assembled_standalone("topic_hot", voice_slug=voice_slug)
 
 
 def build_user_prompt(input_: TopicHotInput) -> str:
@@ -29,9 +29,10 @@ async def run_topic_hot(
     *,
     gemini: GeminiClient,
     input: TopicHotInput,
+    voice_slug: str = "bowtie-editor",
 ) -> TopicHotOutput:
     """Single Gemini call. Returns the hot-topic verdict for one candidate."""
-    system_prompt = await build_system_prompt()
+    system_prompt = await build_system_prompt(voice_slug)
     user_prompt = build_user_prompt(input)
     result = await gemini.generate(
         agent="topic_hot",

@@ -1,11 +1,13 @@
 // Source-policy routes — TypeScript port of content_tool/api/routes/source_policy.py.
 //
 // Mounted at /source-policy in src/index.ts. Paths here are RELATIVE to that mount.
+// Every endpoint takes `?voice=<slug>` (default bowtie-editor); each voice has
+// its own policy row, falling back to the `__shared__` seed (then bundled YAML).
 //
-//   GET  /                     — live policy + rendered prompt block + sha256
+//   GET  /                     — voice's live policy + rendered block + sha256
 //   POST /preview              — render the block from a candidate policy (no save)
 //   PUT  /                     — save a structured edit (optimistic-concurrency, versioned)
-//   GET  /history              — version history, newest-first, body omitted
+//   GET  /history              — version history for the voice, newest-first, body omitted
 //   GET  /versions/:versionId  — one version with its full policy
 //   POST /revert               — restore a past version (versioned)
 
@@ -25,6 +27,8 @@ import {
   invalidate,
   fallbackSnapshot,
   POLICY_ID,
+  SHARED_VOICE,
+  type PolicySnapshot,
 } from "../source_policy/store";
 import type { SourcePolicyRow, SourcePolicyVersionRow } from "../db/schema";
 
@@ -33,6 +37,10 @@ const EXPECTED_SHA_LENGTH = 64;
 const DEFAULT_HISTORY_LIMIT = 50;
 const MIN_HISTORY_LIMIT = 1;
 const MAX_HISTORY_LIMIT = 200;
+
+// Default voice when the caller omits `?voice=`. Each voice has its own policy
+// row; a voice with none falls back to the `__shared__` seed (SHARED_VOICE).
+const DEFAULT_VOICE = "bowtie-editor";
 
 const LIST_FIELDS: ReadonlyArray<readonly [string, string]> = [
   ["deny", "domains"],
@@ -48,6 +56,12 @@ export const sourcePolicyRouter = new Hono<{ Bindings: Env }>();
 function resolveEditor(c: Context<{ Bindings: Env }>): string {
   const email = (c.req.header("X-Editor-Email") ?? "").trim().toLowerCase();
   return email.length > 0 ? email : "dev@local";
+}
+
+/** Read `?voice=`, mirroring FastAPI `voice: str = Query(DEFAULT_VOICE)`. */
+function resolveVoice(c: Context<{ Bindings: Env }>): string {
+  const v = c.req.query("voice");
+  return v === undefined ? DEFAULT_VOICE : v;
 }
 
 /**
@@ -76,14 +90,10 @@ function validatePolicy(policy: Record<string, unknown>): string | null {
   return null;
 }
 
-function snapshotPayload(snap: {
-  policyId: string;
-  raw: unknown;
-  sha256: string;
-  bytes: number;
-}): Record<string, unknown> {
+function snapshotPayload(snap: PolicySnapshot, voice: string): Record<string, unknown> {
   return {
-    policy_id: snap.policyId,
+    voice,
+    voice_slug: snap.voiceSlug,
     policy: snap.raw,
     sha256: snap.sha256,
     bytes: snap.bytes,
@@ -92,15 +102,19 @@ function snapshotPayload(snap: {
 }
 
 // ---------------------------------------------------------------------------
-// GET / — live policy
+// GET /?voice=<slug> — the voice's live policy.
 // ---------------------------------------------------------------------------
 sourcePolicyRouter.get("/", async (c) => {
-  const snap = await withDb(c.env, c.executionCtx, (sql) => snapshot(sql));
-  return c.json(snapshotPayload(snap));
+  const voice = resolveVoice(c);
+  const snap = await withDb(c.env, c.executionCtx, (sql) => snapshot(sql, voice));
+  return c.json(snapshotPayload(snap, voice));
 });
 
 // ---------------------------------------------------------------------------
 // POST /preview — render the block from a candidate policy without saving.
+//
+// Stateless + voice-independent; the `voice` query param is accepted only so
+// every /source-policy* endpoint shares one signature.
 // ---------------------------------------------------------------------------
 sourcePolicyRouter.post("/preview", async (c) => {
   const body = await c.req.json<{ policy?: unknown }>().catch(() => null);
@@ -117,13 +131,18 @@ sourcePolicyRouter.post("/preview", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// PUT / — save a structured edit (optimistic concurrency, versioned).
+// PUT /?voice=<slug> — save a structured edit (optimistic concurrency, versioned).
+//
+// Upserts the voice's row (creating it when the voice had been resolving the
+// shared fallback). The concurrency baseline sha is the resolved
+// `voice -> __shared__ -> YAML` value the GET would have shown.
 // ---------------------------------------------------------------------------
 type SaveResult =
   | { kind: "ok"; savedAt: string | null }
   | { kind: "stale"; currentSha: string };
 
 sourcePolicyRouter.put("/", async (c) => {
+  const voice = resolveVoice(c);
   const editor = resolveEditor(c);
   const body = await c.req
     .json<{ policy?: unknown; expected_sha256?: unknown }>()
@@ -154,17 +173,34 @@ sourcePolicyRouter.put("/", async (c) => {
   const newSha = await sha256Hex(newBody);
   const expectedSha = body.expected_sha256;
   const versionId = crypto.randomUUID();
-  const fallbackSha = (await fallbackSnapshot()).sha256;
+  const fallbackSha = (await fallbackSnapshot(voice)).sha256;
 
   const result = await withDb(c.env, c.executionCtx, (sql) =>
     sql.begin(async (tx): Promise<SaveResult> => {
       const rows = await tx<Pick<SourcePolicyRow, "sha256">[]>`
         SELECT sha256 FROM content_tool.source_policy
-        WHERE policy_id = ${POLICY_ID}
+        WHERE voice_slug = ${voice}
         FOR UPDATE
       `;
       const row = rows[0];
-      const currentSha = row !== undefined ? row.sha256 : fallbackSha;
+      // Optimistic concurrency: compare against the voice's live row, else the
+      // baseline the GET would have shown — the shared seed row, or the bundled
+      // YAML fallback (mirrors Python `_baseline_sha`).
+      let currentSha: string;
+      if (row !== undefined) {
+        currentSha = row.sha256;
+      } else {
+        let sharedSha: string | null = null;
+        if (voice !== SHARED_VOICE) {
+          const sharedRows = await tx<Pick<SourcePolicyRow, "sha256">[]>`
+            SELECT sha256 FROM content_tool.source_policy
+            WHERE voice_slug = ${SHARED_VOICE}
+            LIMIT 1
+          `;
+          sharedSha = sharedRows[0]?.sha256 ?? null;
+        }
+        currentSha = sharedSha ?? fallbackSha;
+      }
       if (currentSha !== expectedSha) {
         return { kind: "stale", currentSha };
       }
@@ -172,17 +208,17 @@ sourcePolicyRouter.put("/", async (c) => {
 
       await tx`
         INSERT INTO content_tool.source_policy
-          (policy_id, body, sha256, bytes, updated_by, updated_at)
-        VALUES (${POLICY_ID}, ${newBody}, ${newSha}, ${newBytes}, ${editor}, now())
-        ON CONFLICT (policy_id) DO UPDATE SET
+          (voice_slug, body, sha256, bytes, updated_by, updated_at)
+        VALUES (${voice}, ${newBody}, ${newSha}, ${newBytes}, ${editor}, now())
+        ON CONFLICT (voice_slug) DO UPDATE SET
           body = ${newBody}, sha256 = ${newSha}, bytes = ${newBytes},
           updated_by = ${editor}, updated_at = now()
       `;
       const ins = await tx<{ saved_at: string }[]>`
         INSERT INTO content_tool.source_policy_versions
-          (version_id, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+          (version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind)
         VALUES
-          (${versionId}, ${POLICY_ID}, ${newSha}, ${parentSha}, ${newBody}, ${newBytes}, ${editor}, 'save')
+          (${versionId}, ${voice}, ${POLICY_ID}, ${newSha}, ${parentSha}, ${newBody}, ${newBytes}, ${editor}, 'save')
         RETURNING saved_at
       `;
       return { kind: "ok", savedAt: ins[0]?.saved_at ?? null };
@@ -203,7 +239,7 @@ sourcePolicyRouter.put("/", async (c) => {
   }
   invalidate();
   return c.json({
-    policy_id: POLICY_ID,
+    voice,
     policy: cleaned,
     sha256: newSha,
     bytes: newBytes,
@@ -215,9 +251,10 @@ sourcePolicyRouter.put("/", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /history?limit=50
+// GET /history?voice=<slug>&limit=50
 // ---------------------------------------------------------------------------
 sourcePolicyRouter.get("/history", async (c) => {
+  const voice = resolveVoice(c);
   const rawLimit = c.req.query("limit");
   let limit = DEFAULT_HISTORY_LIMIT;
   if (rawLimit !== undefined) {
@@ -232,9 +269,9 @@ sourcePolicyRouter.get("/history", async (c) => {
   }
   const versions = await withDb(c.env, c.executionCtx, async (sql) => {
     const rows = await sql<Omit<SourcePolicyVersionRow, "body">[]>`
-      SELECT version_id, policy_id, sha256, parent_sha256, bytes, saved_by, saved_at, kind
+      SELECT version_id, voice_slug, policy_id, sha256, parent_sha256, bytes, saved_by, saved_at, kind
       FROM content_tool.source_policy_versions
-      WHERE policy_id = ${POLICY_ID}
+      WHERE voice_slug = ${voice}
       ORDER BY saved_at DESC
       LIMIT ${limit}
     `;
@@ -248,19 +285,20 @@ sourcePolicyRouter.get("/history", async (c) => {
       kind: r.kind,
     }));
   });
-  return c.json({ policy_id: POLICY_ID, versions });
+  return c.json({ voice, versions });
 });
 
 // ---------------------------------------------------------------------------
-// GET /versions/:versionId
+// GET /versions/:versionId?voice=<slug>
 // ---------------------------------------------------------------------------
 sourcePolicyRouter.get("/versions/:versionId", async (c) => {
   const versionId = c.req.param("versionId");
+  const voice = resolveVoice(c);
   const row = await withDb(c.env, c.executionCtx, async (sql) => {
     const rows = await sql<SourcePolicyVersionRow[]>`
-      SELECT version_id, policy_id, sha256, parent_sha256, body, bytes, saved_by, saved_at, kind
+      SELECT version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, saved_at, kind
       FROM content_tool.source_policy_versions
-      WHERE version_id = ${versionId} AND policy_id = ${POLICY_ID}
+      WHERE version_id = ${versionId} AND voice_slug = ${voice}
       LIMIT 1
     `;
     return rows[0] ?? null;
@@ -271,6 +309,7 @@ sourcePolicyRouter.get("/versions/:versionId", async (c) => {
   const cleaned = cleanPolicy(JSON.parse(row.body));
   return c.json({
     version_id: row.version_id,
+    voice: row.voice_slug,
     policy_id: row.policy_id,
     sha256: row.sha256,
     parent_sha256: row.parent_sha256,
@@ -284,7 +323,7 @@ sourcePolicyRouter.get("/versions/:versionId", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /revert — restore a past version (versioned, same concurrency gate).
+// POST /revert?voice=<slug> — restore a past version (versioned, same gate).
 // ---------------------------------------------------------------------------
 type RevertResult =
   | { kind: "ok"; savedAt: string | null; newSha: string; newBytes: number; body: string }
@@ -293,6 +332,7 @@ type RevertResult =
   | { kind: "unknown_version" };
 
 sourcePolicyRouter.post("/revert", async (c) => {
+  const voice = resolveVoice(c);
   const editor = resolveEditor(c);
   const body = await c.req
     .json<{ target_version_id?: unknown; expected_sha256?: unknown }>()
@@ -316,7 +356,7 @@ sourcePolicyRouter.post("/revert", async (c) => {
     sql.begin(async (tx): Promise<RevertResult> => {
       const rows = await tx<Pick<SourcePolicyRow, "sha256">[]>`
         SELECT sha256 FROM content_tool.source_policy
-        WHERE policy_id = ${POLICY_ID}
+        WHERE voice_slug = ${voice}
         FOR UPDATE
       `;
       const row = rows[0];
@@ -329,7 +369,7 @@ sourcePolicyRouter.post("/revert", async (c) => {
       }
       const targetRows = await tx<{ body: string }[]>`
         SELECT body FROM content_tool.source_policy_versions
-        WHERE version_id = ${targetVersionId} AND policy_id = ${POLICY_ID}
+        WHERE version_id = ${targetVersionId} AND voice_slug = ${voice}
         LIMIT 1
       `;
       const target = targetRows[0];
@@ -343,13 +383,13 @@ sourcePolicyRouter.post("/revert", async (c) => {
         UPDATE content_tool.source_policy
         SET body = ${newBody}, sha256 = ${newSha}, bytes = ${newBytes},
             updated_by = ${editor}, updated_at = now()
-        WHERE policy_id = ${POLICY_ID}
+        WHERE voice_slug = ${voice}
       `;
       const ins = await tx<{ saved_at: string }[]>`
         INSERT INTO content_tool.source_policy_versions
-          (version_id, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+          (version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind)
         VALUES
-          (${versionId}, ${POLICY_ID}, ${newSha}, ${currentSha}, ${newBody}, ${newBytes}, ${editor}, 'revert')
+          (${versionId}, ${voice}, ${POLICY_ID}, ${newSha}, ${currentSha}, ${newBody}, ${newBytes}, ${editor}, 'revert')
         RETURNING saved_at
       `;
       return { kind: "ok", savedAt: ins[0]?.saved_at ?? null, newSha, newBytes, body: newBody };
@@ -376,7 +416,7 @@ sourcePolicyRouter.post("/revert", async (c) => {
       invalidate();
       const cleaned = cleanPolicy(JSON.parse(result.body));
       return c.json({
-        policy_id: POLICY_ID,
+        voice,
         policy: cleaned,
         sha256: result.newSha,
         bytes: result.newBytes,

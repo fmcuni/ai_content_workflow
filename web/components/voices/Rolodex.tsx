@@ -63,7 +63,7 @@ export function Rolodex({
           >
             ＋ New voice
           </p>
-          <p className="mt-1 font-mono text-[10px] tracking-wider uppercase">draft a new voice</p>
+          <p className="mt-1 font-mono text-[10px] tracking-wider uppercase">duplicate a voice</p>
         </button>
       )}
     </div>

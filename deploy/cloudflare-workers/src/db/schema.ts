@@ -23,6 +23,10 @@ export interface PersonaRow {
 }
 
 export interface PromptTemplateRow {
+  // Composite PK with template_id (migration 20260604172254). The reserved
+  // sentinel '__shared__' holds the global judges + the canonical seed-of-record
+  // that every voice falls back to for an uncustomised template.
+  voice_slug: string;
   template_id: string;
   category: string;
   filename: string;
@@ -39,6 +43,7 @@ export interface PromptTemplateRow {
 // `prompt_id` column. All fields below are confirmed against the baseline SQL.
 export interface PromptVersionRow {
   version_id: string; // uuid, PRIMARY KEY
+  voice_slug: string; // editing voice (migration 20260604172254)
   template_id: string;
   sha256: string;
   parent_sha256: string | null;
@@ -49,10 +54,12 @@ export interface PromptVersionRow {
   kind: string; // default 'save'
 }
 
-// content_tool.source_policy — singleton editable source policy (one row,
-// policy_id='default'). `body` is the canonical compact JSON of the policy.
+// content_tool.source_policy — per-voice editable source policy (one row per
+// voice; PK voice_slug, migration 20260604172254 dropped the policy_id column).
+// The reserved sentinel '__shared__' holds the seed-of-record. `body` is the
+// canonical compact JSON of the policy.
 export interface SourcePolicyRow {
-  policy_id: string; // PRIMARY KEY (always 'default')
+  voice_slug: string; // PRIMARY KEY
   body: string;
   sha256: string;
   bytes: number;
@@ -60,9 +67,11 @@ export interface SourcePolicyRow {
   updated_by: string | null;
 }
 
-// content_tool.source_policy_versions — append-only save/revert history.
+// content_tool.source_policy_versions — append-only save/revert history. Scoped
+// by voice_slug; policy_id is retained as a static history label ('default').
 export interface SourcePolicyVersionRow {
   version_id: string; // uuid, PRIMARY KEY
+  voice_slug: string;
   policy_id: string;
   sha256: string;
   parent_sha256: string | null;

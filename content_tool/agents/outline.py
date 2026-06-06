@@ -16,9 +16,10 @@ async def build_system_prompt(
     today: date,
     start_mode: Literal["refresh", "create"] = "refresh",
     *,
+    voice_slug: str = "bowtie-editor",
     session: AsyncSession,
 ) -> str:
-    """Render the outline system prompt.
+    """Render the outline system prompt for ``voice_slug`` (the run's voice).
 
     ``start_mode == "create"``: slot the create-mode body into the
     ``{create_mode_block}`` placeholder so the LLM gets the create-mode brief
@@ -27,13 +28,22 @@ async def build_system_prompt(
     ``start_mode == "refresh"`` (default): the placeholder is replaced with
     an empty string and only the refresh-mode body applies — identical to
     the pre-Task-4 behaviour.
+
+    Both the ``outline`` and ``outline_create_mode`` templates resolve under
+    ``voice_slug`` (falling back to __shared__ / bundled file).
     """
     block = (
-        (await prompts_store.get_assembled("outline_create_mode", session=session)).rstrip()
+        (
+            await prompts_store.get_assembled(
+                "outline_create_mode", voice_slug=voice_slug, session=session
+            )
+        ).rstrip()
         if start_mode == "create"
         else ""
     )
-    template = await prompts_store.get_assembled("outline", session=session)
+    template = await prompts_store.get_assembled(
+        "outline", voice_slug=voice_slug, session=session
+    )
     return template.replace("{today_date}", today.isoformat()).replace(
         "{create_mode_block}", block
     )
@@ -103,7 +113,9 @@ async def run_outline(
         "create" if run.start_mode == "create" else "refresh"
     )
 
-    sys_prompt = await build_system_prompt(today, start_mode, session=session)
+    sys_prompt = await build_system_prompt(
+        today, start_mode, voice_slug=run.persona, session=session
+    )
 
     if start_mode == "create":
         user_prompt = build_user_prompt_create_mode(

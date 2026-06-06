@@ -17,8 +17,8 @@ def _format_list_block(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
-async def build_system_prompt() -> str:
-    return await prompts_store.get_assembled_standalone("topic_gen")
+async def build_system_prompt(voice_slug: str = "bowtie-editor") -> str:
+    return await prompts_store.get_assembled_standalone("topic_gen", voice_slug=voice_slug)
 
 
 def build_user_prompt(input_: TopicGenInput) -> str:
@@ -39,9 +39,10 @@ async def run_topic_gen(
     *,
     gemini: GeminiClient,
     input: TopicGenInput,
+    voice_slug: str = "bowtie-editor",
 ) -> TopicGenOutput:
     """Single Gemini call. Returns validated topic candidates."""
-    system_prompt = await build_system_prompt()
+    system_prompt = await build_system_prompt(voice_slug)
     user_prompt = build_user_prompt(input)
     result = await gemini.generate(
         agent="topic_gen",

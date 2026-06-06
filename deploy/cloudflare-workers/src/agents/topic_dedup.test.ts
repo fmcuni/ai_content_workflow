@@ -50,6 +50,7 @@ function makeFakeSql(): Sql {
     if (text.includes("FROM content_tool.prompt_templates")) {
       return Promise.resolve([
         {
+          voice_slug: "__shared__",
           template_id: "topic_dedup",
           category: "agent",
           filename: "topic_dedup.md",
@@ -60,6 +61,7 @@ function makeFakeSql(): Sql {
           updated_by: null,
         },
         {
+          voice_slug: "__shared__",
           template_id: "topic_existing_search",
           category: "agent",
           filename: "topic_existing_search.md",
@@ -84,7 +86,12 @@ function fakeGemini(grounding = GROUNDING): FakeGeminiClient {
 }
 
 function baseInput(overrides: Partial<TopicDedupInput> = {}): TopicDedupInput {
-  return { topic: "自願醫保扣稅攻略", keywords: ["VHIS", "扣稅"], ...overrides };
+  return {
+    topic: "自願醫保扣稅攻略",
+    keywords: ["VHIS", "扣稅"],
+    voiceSlug: "bowtie-editor",
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------

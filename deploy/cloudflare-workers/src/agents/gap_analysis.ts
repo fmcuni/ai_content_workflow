@@ -19,6 +19,8 @@ import { GAP_ANALYSIS_SCHEMA, type GapAnalysis } from "./schemas";
 
 export interface GapAnalysisInput {
   runId: string;
+  /** The run's voice (persona slug); resolves the prompt template under it. */
+  voiceSlug: string;
   topic: string;
   keywords: string[];
   articleUrl: string;
@@ -51,8 +53,12 @@ export interface GapAnalysisTokens {
 // Fetch the assembled "gap_analysis" template and substitute {today_date}.
 // ---------------------------------------------------------------------------
 
-async function buildSystemPrompt(sql: Sql, todayDate: string): Promise<string> {
-  const template = await getAssembled(sql, "gap_analysis");
+async function buildSystemPrompt(
+  sql: Sql,
+  todayDate: string,
+  voiceSlug: string,
+): Promise<string> {
+  const template = await getAssembled(sql, "gap_analysis", voiceSlug);
   return substitute(template, { today_date: todayDate });
 }
 
@@ -103,7 +109,7 @@ export async function runGapAnalysis(
   gemini: GeminiClient,
   input: GapAnalysisInput,
 ): Promise<{ gapAnalysis: GapAnalysis; tokens: GapAnalysisTokens }> {
-  const systemPrompt = await buildSystemPrompt(sql, input.todayDate);
+  const systemPrompt = await buildSystemPrompt(sql, input.todayDate, input.voiceSlug);
   const userPrompt = buildUserPrompt({
     topic: input.topic,
     keywords: input.keywords,

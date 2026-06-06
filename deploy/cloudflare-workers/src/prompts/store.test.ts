@@ -9,7 +9,9 @@ import {
   resolveBody,
   assembleFromSnapshot,
   assembleWithOverride,
+  voiceView,
   substitute,
+  SHARED_VOICE,
   PromptTemplateNotFound,
 } from "./store";
 import type { PromptTemplateRow } from "./store";
@@ -19,9 +21,20 @@ import type { PromptTemplateRow } from "./store";
 // ---------------------------------------------------------------------------
 
 function row(template_id: string, body: string): PromptTemplateRow {
+  return vrow(SHARED_VOICE, template_id, body);
+}
+
+/** A row for a specific voice + category (defaults to partial). */
+function vrow(
+  voice_slug: string,
+  template_id: string,
+  body: string,
+  category: string = "partial",
+): PromptTemplateRow {
   return {
+    voice_slug,
     template_id,
-    category: "partial",
+    category,
     filename: `${template_id}.md`,
     body,
     sha256: "deadbeef",
@@ -29,6 +42,15 @@ function row(template_id: string, body: string): PromptTemplateRow {
     updated_at: "2026-05-31T00:00:00Z",
     updated_by: null,
   };
+}
+
+/** Build a `(voice, id)`-keyed snapshot the way the store's cache does. The
+ * exact key string is irrelevant to `voiceView` (it iterates values), so a
+ * readable composite is used here. */
+function snapshotOf(rows: PromptTemplateRow[]): Map<string, PromptTemplateRow> {
+  const map = new Map<string, PromptTemplateRow>();
+  for (const r of rows) map.set(`${r.voice_slug}::${r.template_id}`, r);
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,5 +153,108 @@ describe("substitute", () => {
       topic: "insurance",
     });
     expect(result).toBe("Hello Franco, your topic is insurance and {unknown}.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// voiceView — per-voice resolution + voice -> __shared__ fallback
+// ---------------------------------------------------------------------------
+
+describe("voiceView", () => {
+  it("resolves a voice's own row over the __shared__ fallback", () => {
+    // Arrange: voice owns `audit`; only __shared__ owns `_partial`.
+    const snap = snapshotOf([
+      vrow(SHARED_VOICE, "audit", "shared audit", "agent"),
+      vrow("voice-a", "audit", "voice-a audit", "agent"),
+      vrow(SHARED_VOICE, "_partial", "shared partial"),
+    ]);
+
+    // Act
+    const view = voiceView(snap, "voice-a");
+
+    // Assert — own row wins for `audit`; `_partial` falls back to __shared__.
+    expect(view.get("audit")?.body).toBe("voice-a audit");
+    expect(view.get("audit")?.voice_slug).toBe("voice-a");
+    expect(view.get("_partial")?.body).toBe("shared partial");
+    expect(view.get("_partial")?.voice_slug).toBe(SHARED_VOICE);
+  });
+
+  it("is order-independent — the voice row wins even when listed before shared", () => {
+    const snap = snapshotOf([
+      vrow("voice-a", "audit", "voice-a audit", "agent"),
+      vrow(SHARED_VOICE, "audit", "shared audit", "agent"),
+    ]);
+    expect(voiceView(snap, "voice-a").get("audit")?.body).toBe("voice-a audit");
+  });
+
+  it("excludes rows owned by other voices", () => {
+    const snap = snapshotOf([
+      vrow(SHARED_VOICE, "audit", "shared audit", "agent"),
+      vrow("voice-b", "secret", "voice-b only", "agent"),
+    ]);
+    const view = voiceView(snap, "voice-a");
+    expect(view.has("secret")).toBe(false);
+    expect(view.has("audit")).toBe(true);
+  });
+
+  it("surfaces shared judges to every voice (judges are global)", () => {
+    const snap = snapshotOf([
+      vrow(SHARED_VOICE, "writer_judge", "judge body", "judge"),
+      vrow("voice-a", "writer_create", "voice writer", "agent"),
+    ]);
+    const view = voiceView(snap, "voice-a");
+    const judge = view.get("writer_judge");
+    expect(judge?.category).toBe("judge");
+    expect(judge?.voice_slug).toBe(SHARED_VOICE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-voice assembly — includes resolve within the voice, falling back to shared
+// ---------------------------------------------------------------------------
+
+describe("assembleFromSnapshot (per-voice view)", () => {
+  it("inlines the voice's own partial over the shared one", () => {
+    const snap = snapshotOf([
+      vrow(SHARED_VOICE, "writer", "Intro\n{{include:_brand}}\n", "agent"),
+      vrow(SHARED_VOICE, "_brand", "shared brand\n"),
+      vrow("voice-a", "_brand", "voice-a brand\n"),
+    ]);
+
+    const view = voiceView(snap, "voice-a");
+    // The agent body falls back to __shared__, but its `_brand` include resolves
+    // to the voice's own partial.
+    expect(assembleFromSnapshot("writer", view)).toBe("Intro\nvoice-a brand\n");
+  });
+
+  it("falls back to the shared partial when the voice has not customised it", () => {
+    const snap = snapshotOf([
+      vrow(SHARED_VOICE, "writer", "Intro\n{{include:_brand}}\n", "agent"),
+      vrow(SHARED_VOICE, "_brand", "shared brand\n"),
+    ]);
+    const view = voiceView(snap, "voice-a");
+    expect(assembleFromSnapshot("writer", view)).toBe("Intro\nshared brand\n");
+  });
+
+  it("byte-identical for a voice whose rows mirror __shared__", () => {
+    const sharedSnap = snapshotOf([
+      vrow(SHARED_VOICE, "writer", "Intro\n{{include:_brand}}\nOutro\n", "agent"),
+      vrow(SHARED_VOICE, "_brand", "brand\n"),
+    ]);
+    // A duplicated voice carries byte-identical copies under its own slug.
+    const dupSnap = snapshotOf([
+      vrow(SHARED_VOICE, "writer", "Intro\n{{include:_brand}}\nOutro\n", "agent"),
+      vrow(SHARED_VOICE, "_brand", "brand\n"),
+      vrow("voice-a", "writer", "Intro\n{{include:_brand}}\nOutro\n", "agent"),
+      vrow("voice-a", "_brand", "brand\n"),
+    ]);
+    const sharedOut = assembleFromSnapshot("writer", voiceView(sharedSnap, SHARED_VOICE));
+    const voiceOut = assembleFromSnapshot("writer", voiceView(dupSnap, "voice-a"));
+    expect(voiceOut).toBe(sharedOut);
+  });
+
+  it("throws when neither the voice nor __shared__ has the template", () => {
+    const view = voiceView(snapshotOf([vrow(SHARED_VOICE, "other", "x", "agent")]), "voice-a");
+    expect(() => assembleFromSnapshot("missing", view)).toThrow(PromptTemplateNotFound);
   });
 });

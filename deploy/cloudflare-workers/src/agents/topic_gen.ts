@@ -28,6 +28,8 @@ export interface TopicGenInput {
   mustAvoid: string[];
   priorityFocus?: string | null;
   notes?: string | null;
+  /** The batch's voice (persona slug); resolves the prompt under it. */
+  voiceSlug: string;
   onThought?: ThoughtCallback;
 }
 
@@ -46,8 +48,8 @@ export interface TopicGenTokens {
 // System prompt assembly — mirrors Python `build_system_prompt`.
 // ---------------------------------------------------------------------------
 
-async function buildSystemPrompt(sql: Sql): Promise<string> {
-  return getAssembled(sql, "topic_gen");
+async function buildSystemPrompt(sql: Sql, voiceSlug: string): Promise<string> {
+  return getAssembled(sql, "topic_gen", voiceSlug);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +104,7 @@ export async function runTopicGen(
   gemini: GeminiClient,
   input: TopicGenInput,
 ): Promise<{ output: TopicGenOutput; tokens: TopicGenTokens }> {
-  const systemPrompt = await buildSystemPrompt(sql);
+  const systemPrompt = await buildSystemPrompt(sql, input.voiceSlug);
   const userPrompt = buildUserPrompt({
     researchTheme: input.researchTheme,
     targetAudience: input.targetAudience,

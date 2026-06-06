@@ -278,6 +278,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           await runOutline(sql, gemini, {
             runId,
             startMode: "create",
+            voiceSlug: run.persona,
             topic: run.topic,
             keywords,
             targetAudience: run.target_audience,
@@ -438,6 +439,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         const gemini = this.geminiClient(runId);
         await runGapAnalysis(sql, gemini, {
           runId,
+          voiceSlug: run.persona,
           topic: run.topic,
           keywords,
           articleUrl,
@@ -463,6 +465,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         await runOutline(sql, gemini, {
           runId,
           startMode: "refresh",
+          voiceSlug: run.persona,
           topic: run.topic,
           keywords,
           targetAudience: run.target_audience,
@@ -586,6 +589,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
             markupRaw: draft.markup_raw,
             groundingChunks,
             topicCategory: run.topic_category,
+            voiceSlug: run.persona,
           });
           await sql`
             UPDATE content_tool.drafts

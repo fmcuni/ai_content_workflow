@@ -136,8 +136,9 @@ app.put("/prompts/templates/:id", requireRole("admin"));
 app.post("/prompts/templates/:id/revert", requireRole("admin"));
 app.post("/prompts/templates/:id/preview", requireRole("editor"));
 
-// personas: create / edit / archive / restore → admin (config change).
+// personas: create / duplicate / edit / archive / restore → admin (config change).
 app.post("/personas", requireRole("admin"));
+app.post("/personas/:slug/duplicate", requireRole("admin"));
 app.put("/personas/:slug", requireRole("admin"));
 app.post("/personas/:slug/archive", requireRole("admin"));
 app.post("/personas/:slug/restore", requireRole("admin"));

@@ -172,12 +172,13 @@ async def test_put_template_round_trip(
     assert r.status_code == 200, r.text
     assert r.json()["sha256"] == _sha256(new_body)
 
-    # DB row reflects the new content
+    # DB row reflects the new content (the default voice the API edits)
     async with pg_session_factory() as s:
         row = (
             await s.execute(
                 select(PromptTemplate).where(
-                    PromptTemplate.template_id == "_writer_brand_block"
+                    PromptTemplate.voice_slug == "bowtie-editor",
+                    PromptTemplate.template_id == "_writer_brand_block",
                 )
             )
         ).scalar_one()
@@ -501,7 +502,10 @@ async def test_revert_restores_previous_body(
     async with pg_session_factory() as s:
         row = (
             await s.execute(
-                select(PromptTemplate).where(PromptTemplate.template_id == "_writer_seo")
+                select(PromptTemplate).where(
+                    PromptTemplate.voice_slug == "bowtie-editor",
+                    PromptTemplate.template_id == "_writer_seo",
+                )
             )
         ).scalar_one()
     assert row.body == body_a
@@ -549,3 +553,165 @@ async def test_revert_unknown_version_404(
         },
     )
     assert rev.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Per-voice scoping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_templates_default_voice_and_shared_judges(api_client: AsyncClient):
+    """Default voice (bowtie-editor) lists its agent/partial set; judges are a
+    separate read-only group resolved under __shared__."""
+    r = await api_client.get("/prompts/templates", params={"voice": "bowtie-editor"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["voice"] == "bowtie-editor"
+    # Every editable item resolves to a real row; bowtie-editor owns the full
+    # backfilled set, so each entry is voice-owned (not a shared fallback).
+    by_id = {i["template_id"]: i for i in body["templates"]}
+    assert by_id["writer_small_refresh"]["voice_slug"] == "bowtie-editor"
+    assert all(i["category"] in {"agent", "partial"} for i in body["templates"])
+    # Judges are global + read-only.
+    assert body["judges"], "expected shared judges in their own group"
+    judge_ids = {j["template_id"] for j in body["judges"]}
+    assert "judge_brand_voice" in judge_ids
+    assert all(j["read_only"] is True for j in body["judges"])
+    assert all(j["voice_slug"] == "__shared__" for j in body["judges"])
+
+
+@pytest.mark.asyncio
+async def test_get_template_shared_voice_is_seed_of_record(api_client: AsyncClient):
+    """The __shared__ voice exposes the canonical seed-of-record rows."""
+    r = await api_client.get(
+        "/prompts/templates/writer_small_refresh", params={"voice": "__shared__"}
+    )
+    assert r.status_code == 200
+    assert r.json()["voice_slug"] == "__shared__"
+
+
+@pytest.mark.asyncio
+async def test_put_judge_is_read_only_404(api_client: AsyncClient):
+    """Judges ignore voice and are never editable here — PUT 404s for any voice."""
+    for voice in ("bowtie-editor", "__shared__"):
+        r = await api_client.put(
+            "/prompts/templates/judge_brand_voice",
+            params={"voice": voice},
+            json={"template": "x", "expected_sha256": "0" * 64},
+        )
+        assert r.status_code == 404, (voice, r.text)
+
+
+@pytest.mark.asyncio
+async def test_edit_is_isolated_between_voices(
+    api_client: AsyncClient,
+    restore_template,
+    clean_prompt_versions,
+    duplicated_voice: str,
+):
+    """Editing a template under one voice must not touch another voice's row."""
+    await restore_template("_writer_seo", "bowtie-editor")
+    editor_before = (
+        await api_client.get(
+            "/prompts/templates/_writer_seo", params={"voice": "bowtie-editor"}
+        )
+    ).json()
+
+    g = await api_client.get(
+        "/prompts/templates/_writer_seo", params={"voice": duplicated_voice}
+    )
+    assert g.status_code == 200
+    assert g.json()["voice_slug"] == duplicated_voice  # the clone owns its own row
+    new_body = g.json()["template"] + "\n# dup-voice-only\n"
+    r = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        params={"voice": duplicated_voice},
+        json={"template": new_body, "expected_sha256": g.json()["sha256"]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["voice"] == duplicated_voice
+
+    # The duplicate voice changed; bowtie-editor's row is untouched.
+    dup_after = (
+        await api_client.get(
+            "/prompts/templates/_writer_seo", params={"voice": duplicated_voice}
+        )
+    ).json()
+    editor_after = (
+        await api_client.get(
+            "/prompts/templates/_writer_seo", params={"voice": "bowtie-editor"}
+        )
+    ).json()
+    assert dup_after["template"] == new_body
+    assert editor_after["sha256"] == editor_before["sha256"]
+    assert editor_after["template"] == editor_before["template"]
+
+
+@pytest.mark.asyncio
+async def test_history_and_stale_sha_scoped_per_voice(
+    api_client: AsyncClient,
+    restore_template,
+    clean_prompt_versions,
+    duplicated_voice: str,
+):
+    """History + the optimistic-concurrency token are per (voice, template)."""
+    await restore_template("_writer_seo", "bowtie-editor")
+    g = await api_client.get(
+        "/prompts/templates/_writer_seo", params={"voice": duplicated_voice}
+    )
+    dup_sha = g.json()["sha256"]
+    save = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        params={"voice": duplicated_voice},
+        json={"template": g.json()["template"] + "\n# v\n", "expected_sha256": dup_sha},
+    )
+    assert save.status_code == 200, save.text
+
+    # History under the duplicate voice records the save (newest, chained off the
+    # pre-save sha) on top of the seed version the duplicate endpoint stamped;
+    # bowtie-editor's history for the same template stays empty (clean fixture).
+    dup_hist = (
+        await api_client.get(
+            "/prompts/templates/_writer_seo/history", params={"voice": duplicated_voice}
+        )
+    ).json()
+    assert dup_hist["voice"] == duplicated_voice
+    assert dup_hist["versions"][0]["kind"] == "save"
+    assert dup_hist["versions"][0]["parent_sha256"] == dup_sha
+    editor_hist = (
+        await api_client.get(
+            "/prompts/templates/_writer_seo/history", params={"voice": "bowtie-editor"}
+        )
+    ).json()
+    assert editor_hist["versions"] == []
+
+    # The duplicate voice's sha moved; re-using the now-stale sha conflicts.
+    stale = await api_client.put(
+        "/prompts/templates/_writer_seo",
+        params={"voice": duplicated_voice},
+        json={"template": g.json()["template"] + "\n# again\n", "expected_sha256": dup_sha},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["error"] == "stale_sha"
+
+
+@pytest.mark.asyncio
+async def test_preview_resolves_voice_source_policy(
+    api_client: AsyncClient, duplicated_voice: str
+):
+    """Preview for a voice substitutes that voice's source-policy block."""
+    g = await api_client.get(
+        "/prompts/templates/writer_small_refresh", params={"voice": duplicated_voice}
+    )
+    body = g.json()["template"]
+    r = await api_client.post(
+        "/prompts/templates/writer_small_refresh/preview",
+        params={"voice": duplicated_voice},
+        json={"template": body},
+    )
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["voice"] == duplicated_voice
+    assert "引用與資料來源規則" in payload["resolved"]
+    assert "{source_policy_block}" not in payload["resolved"]

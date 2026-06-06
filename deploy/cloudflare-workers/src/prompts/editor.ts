@@ -44,8 +44,9 @@ const NAMED_PREVIEW_KEYS = new Set([
   "create_mode_block",
 ]);
 
-/** Default persona slug used to render the preview persona block. */
-const PREVIEW_PERSONA_SLUG = "bowtie-editor";
+/** Default persona slug — the preview persona block falls back to this voice
+ * (then a placeholder) when the requested voice has no persona row. */
+const DEFAULT_PREVIEW_VOICE = "bowtie-editor";
 
 /**
  * Required placeholders per template — verbatim from `_REQUIRED_PLACEHOLDERS`.
@@ -156,11 +157,29 @@ export function consumersOf(
 // applies every other override key. Unknown `{placeholders}` are left intact.
 // ---------------------------------------------------------------------------
 
+/**
+ * Best-effort persona block for the preview, from the voice's persona row.
+ * Falls back to the default voice, then a placeholder, when a voice has no
+ * persona row. Mirrors Python `prompts.py::_default_persona_block` (the persona
+ * block is preview-cosmetic — runtime assembly reads the persona at run time).
+ */
+async function defaultPersonaBlock(sql: Sql, voice: string): Promise<string> {
+  for (const slug of voice === DEFAULT_PREVIEW_VOICE ? [voice] : [voice, DEFAULT_PREVIEW_VOICE]) {
+    try {
+      return toPromptBlock(await loadPersona(sql, slug));
+    } catch {
+      continue;
+    }
+  }
+  return "（preview: persona block not configured）";
+}
+
 export async function substitutePreview(
   sql: Sql,
   text: string,
   overrides: Record<string, string>,
-  snap: Map<string, PromptTemplateRow>,
+  view: Map<string, PromptTemplateRow>,
+  voice: string = DEFAULT_PREVIEW_VOICE,
 ): Promise<string> {
   const todayIso = Object.hasOwn(overrides, "today_date")
     ? (overrides["today_date"] ?? "")
@@ -170,23 +189,18 @@ export async function substitutePreview(
   if (Object.hasOwn(overrides, "persona_block")) {
     personaBlock = overrides["persona_block"] ?? "";
   } else {
-    try {
-      const persona = await loadPersona(sql, PREVIEW_PERSONA_SLUG);
-      personaBlock = toPromptBlock(persona);
-    } catch {
-      personaBlock = "（preview: persona block not configured）";
-    }
+    personaBlock = await defaultPersonaBlock(sql, voice);
   }
 
   const sourcePolicyBlock = Object.hasOwn(overrides, "source_policy_block")
     ? (overrides["source_policy_block"] ?? "")
-    : (await getPolicy(sql)).toPromptBlock();
+    : (await getPolicy(sql, voice)).toPromptBlock();
 
   let createModeBlock: string;
   if (Object.hasOwn(overrides, "create_mode_block")) {
     createModeBlock = overrides["create_mode_block"] ?? "";
   } else {
-    const cm = snap.get("outline_create_mode");
+    const cm = view.get("outline_create_mode");
     createModeBlock = cm !== undefined ? cm.body.replace(/\s+$/, "") : "";
   }
 

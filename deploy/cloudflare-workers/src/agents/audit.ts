@@ -111,7 +111,8 @@ async function buildSystemPrompt(
   todayDate: string,
 ): Promise<string> {
   const persona = await loadPersona(sql, personaSlug);
-  const template = await getAssembled(sql, "audit");
+  // The run's voice resolves the audit prompt (falling back to __shared__).
+  const template = await getAssembled(sql, "audit", personaSlug);
   // The audit system prompt filters the glossary to terms present in the draft
   // (context_text = html_body), matching the Python call site.
   return template

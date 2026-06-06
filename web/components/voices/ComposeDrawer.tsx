@@ -11,6 +11,9 @@ interface ComposeDrawerProps {
   mode: { kind: "create" } | { kind: "edit"; persona: Persona };
   onClose: () => void;
   onSaved: (slug: string) => void;
+  /** When true, this is the last non-archived voice — archiving is disabled
+   * (the app must keep at least one usable voice; the server also returns 409). */
+  isLastVoice?: boolean;
 }
 
 function emptyForm(): PersonaIn {
@@ -177,7 +180,7 @@ function DisclaimerTemplateList({
   );
 }
 
-export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
+export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: ComposeDrawerProps) {
   const qc = useQueryClient();
   const [form, setForm] = useState<PersonaIn>(
     mode.kind === "create" ? emptyForm() : fromPersona(mode.persona),
@@ -239,7 +242,12 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
       qc.invalidateQueries({ queryKey: ["personas"] });
       onClose();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        e.message.startsWith("409")
+          ? "Cannot archive the last remaining voice."
+          : e.message,
+      ),
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -341,7 +349,12 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
             {mode.kind === "edit" && (
               <button
                 type="button"
-                disabled={busy || archiveMut.isPending}
+                disabled={busy || archiveMut.isPending || isLastVoice}
+                title={
+                  isLastVoice
+                    ? "Cannot archive the last remaining voice — the app must keep one usable voice."
+                    : undefined
+                }
                 onClick={() => {
                   if (
                     confirm(
@@ -351,7 +364,7 @@ export function ComposeDrawer({ mode, onClose, onSaved }: ComposeDrawerProps) {
                     archiveMut.mutate(mode.persona.slug);
                   }
                 }}
-                className="text-accent-deep text-[12px] hover:underline disabled:opacity-40 disabled:pointer-events-none"
+                className="text-accent-deep text-[12px] hover:underline disabled:opacity-40 disabled:pointer-events-none disabled:no-underline"
               >
                 {archiveMut.isPending ? "Archiving…" : "Archive this voice"}
               </button>

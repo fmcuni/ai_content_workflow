@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { use, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, use, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { SectionHead } from "@/components/SectionHead";
@@ -30,30 +31,48 @@ function relativeTime(iso: string): string {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-// `params` is a Promise in Next.js 16 — must be unwrapped with `use()`.
+// `params` is a Promise in Next.js 16 — must be unwrapped with `use()`. The
+// editor reads `?voice=` via useSearchParams, which Next 16 requires to sit
+// behind a Suspense boundary (mirrors app/runs/new + app/login).
 export default function PromptEditorPage({
   params,
 }: {
   params: Promise<{ templateId: string }>;
 }) {
+  return (
+    <Suspense fallback={null}>
+      <PromptEditorContent params={params} />
+    </Suspense>
+  );
+}
+
+function PromptEditorContent({
+  params,
+}: {
+  params: Promise<{ templateId: string }>;
+}) {
   const { templateId } = use(params);
+  // The prompt library is per-voice; `?voice=` carries the selected voice from
+  // the list page. Default to bowtie-editor to match the server default.
+  const searchParams = useSearchParams();
+  const voice = searchParams.get("voice") ?? "bowtie-editor";
   const queryClient = useQueryClient();
 
   const templateQ = useQuery({
-    queryKey: ["prompts", "template", templateId],
-    queryFn: () => promptsApi.template(templateId),
+    queryKey: ["prompts", "template", voice, templateId],
+    queryFn: () => promptsApi.template(templateId, voice),
   });
   const schemaQ = useQuery({
-    queryKey: ["prompts", "schema", templateId],
-    queryFn: () => promptsApi.templateSchema(templateId),
+    queryKey: ["prompts", "schema", voice, templateId],
+    queryFn: () => promptsApi.templateSchema(templateId, voice),
   });
   const consumersQ = useQuery({
-    queryKey: ["prompts", "consumers", templateId],
-    queryFn: () => promptsApi.templateConsumers(templateId),
+    queryKey: ["prompts", "consumers", voice, templateId],
+    queryFn: () => promptsApi.templateConsumers(templateId, voice),
   });
   const historyQ = useQuery({
-    queryKey: ["prompts", "history", templateId],
-    queryFn: () => promptsApi.templateHistory(templateId),
+    queryKey: ["prompts", "history", voice, templateId],
+    queryFn: () => promptsApi.templateHistory(templateId, voice),
   });
 
   const [buffer, setBuffer] = useState<string>("");
@@ -104,7 +123,7 @@ export default function PromptEditorPage({
         template: buffer,
         route: activeRoute,
       };
-      return promptsApi.previewTemplate(templateId, body);
+      return promptsApi.previewTemplate(templateId, voice, body);
     },
     onSuccess: (data) => {
       setPreviewText(data.resolved);
@@ -126,16 +145,16 @@ export default function PromptEditorPage({
 
   const saveMut = useMutation({
     mutationFn: () =>
-      promptsApi.saveTemplate(templateId, {
+      promptsApi.saveTemplate(templateId, voice, {
         template: buffer,
         expected_sha256: sha,
       }),
     onSuccess: (data) => {
       toast.success("Saved · effect applies on next run");
       setSha(data.sha256);
-      queryClient.invalidateQueries({ queryKey: ["prompts", "template", templateId] });
-      queryClient.invalidateQueries({ queryKey: ["prompts", "templates"] });
-      queryClient.invalidateQueries({ queryKey: ["prompts", "history", templateId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "template", voice, templateId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "templates", voice] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "history", voice, templateId] });
     },
     onError: (e: Error) => {
       if (e.message.includes("409")) {
@@ -152,8 +171,8 @@ export default function PromptEditorPage({
     mutationFn: async (target: PromptVersionSummary) => {
       // Always fetch the version body — both to show it in the dialog AND
       // to defend against the row being deleted before we POST revert.
-      const detail = await promptsApi.templateVersion(templateId, target.version_id);
-      return promptsApi.revertTemplate(templateId, {
+      const detail = await promptsApi.templateVersion(templateId, voice, target.version_id);
+      return promptsApi.revertTemplate(templateId, voice, {
         target_version_id: detail.version_id,
         expected_sha256: sha,
       });
@@ -162,9 +181,9 @@ export default function PromptEditorPage({
       toast.success("Reverted · next run will use this body");
       setSha(data.sha256);
       setOpenVersion(null);
-      queryClient.invalidateQueries({ queryKey: ["prompts", "template", templateId] });
-      queryClient.invalidateQueries({ queryKey: ["prompts", "templates"] });
-      queryClient.invalidateQueries({ queryKey: ["prompts", "history", templateId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "template", voice, templateId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "templates", voice] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", "history", voice, templateId] });
     },
     onError: (e: Error) => {
       if (e.message.includes("409")) {
@@ -178,9 +197,9 @@ export default function PromptEditorPage({
   });
 
   const versionDetailQ = useQuery({
-    queryKey: ["prompts", "version", templateId, openVersion?.version_id],
+    queryKey: ["prompts", "version", voice, templateId, openVersion?.version_id],
     queryFn: () =>
-      promptsApi.templateVersion(templateId, openVersion!.version_id),
+      promptsApi.templateVersion(templateId, voice, openVersion!.version_id),
     enabled: openVersion !== null,
   });
 
@@ -188,7 +207,7 @@ export default function PromptEditorPage({
     mutationFn: async () => {
       setBuffer("");
       await queryClient.invalidateQueries({
-        queryKey: ["prompts", "template", templateId],
+        queryKey: ["prompts", "template", voice, templateId],
       });
     },
   });
@@ -206,6 +225,9 @@ export default function PromptEditorPage({
         kicker={
           <>
             {templateQ.data?.category === "partial" ? "Partial" : "Agent prompt"}
+            {" · voice "}
+            {voice}
+            {templateQ.data?.voice_slug === "__shared__" ? " (shared default)" : null}
             {templateQ.data?.filename ? <> · {templateQ.data.filename}</> : null}
           </>
         }
@@ -297,7 +319,7 @@ export default function PromptEditorPage({
                   {schemaQ.data.found_includes.map((name) => (
                     <li key={name} className="font-mono text-[11px]">
                       <Link
-                        href={`/prompts/${name}`}
+                        href={`/prompts/${name}?voice=${encodeURIComponent(voice)}`}
                         className="text-accent hover:underline"
                       >
                         {`{{include:${name}}}`}
@@ -317,7 +339,10 @@ export default function PromptEditorPage({
                 <ul className="space-y-1">
                   {consumersQ.data.consumers.map((id) => (
                     <li key={id} className="font-mono text-[11px]">
-                      <Link href={`/prompts/${id}`} className="text-accent hover:underline">
+                      <Link
+                        href={`/prompts/${id}?voice=${encodeURIComponent(voice)}`}
+                        className="text-accent hover:underline"
+                      >
                         {id}
                       </Link>
                     </li>

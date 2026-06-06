@@ -12,8 +12,12 @@ from content_tool.gemini.client import GeminiClient
 from content_tool.models.gap_analysis import GapAnalysis
 
 
-async def build_system_prompt(today: date, *, session: AsyncSession) -> str:
-    template = await prompts_store.get_assembled("gap_analysis", session=session)
+async def build_system_prompt(
+    today: date, *, voice_slug: str = "bowtie-editor", session: AsyncSession
+) -> str:
+    template = await prompts_store.get_assembled(
+        "gap_analysis", voice_slug=voice_slug, session=session
+    )
     return template.replace("{today_date}", today.isoformat())
 
 
@@ -59,7 +63,7 @@ async def run_gap_analysis(
         .one()
     )
 
-    sys_prompt = await build_system_prompt(today, session=session)
+    sys_prompt = await build_system_prompt(today, voice_slug=run["persona"], session=session)
     user_prompt = build_user_prompt(
         topic=run["topic"],
         keywords=run["keywords"],

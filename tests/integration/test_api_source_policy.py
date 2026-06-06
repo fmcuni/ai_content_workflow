@@ -6,15 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_tool import source_policy_store
 
+# The voice the /source-policy endpoints edit when ?voice= is omitted.
+_DEFAULT_VOICE = "bowtie-editor"
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def reset_source_policy(
     pg_session_factory: async_sessionmaker[AsyncSession],
 ):
-    """Restore the singleton policy row to the bundled seed + drop history.
+    """Restore the per-voice policy rows to the bundled seed + drop history.
 
-    Every test in this module mutates the singleton row and the in-process
-    cache, so reset to a known baseline before and after each one.
+    Every test in this module mutates a voice's row and the in-process cache, so
+    reset the default voice (and the shared seed it falls back to) to a known
+    baseline before and after each one.
     """
 
     async def _reset() -> None:
@@ -25,9 +29,14 @@ async def reset_source_policy(
                 text(
                     "UPDATE content_tool.source_policy "
                     "SET body = :body, sha256 = :sha, bytes = :bytes, updated_by = NULL "
-                    "WHERE policy_id = 'default'"
+                    "WHERE voice_slug IN ('__shared__', :voice)"
                 ),
-                {"body": seed.body, "sha": seed.sha256, "bytes": seed.bytes},
+                {
+                    "body": seed.body,
+                    "sha": seed.sha256,
+                    "bytes": seed.bytes,
+                    "voice": _DEFAULT_VOICE,
+                },
             )
             await s.commit()
         source_policy_store.clear_cache()
@@ -42,7 +51,8 @@ async def test_get_returns_policy_and_rendered_block(api_client: AsyncClient):
     r = await api_client.get("/source-policy")
     assert r.status_code == 200
     body = r.json()
-    assert body["policy_id"] == "default"
+    assert body["voice"] == _DEFAULT_VOICE
+    assert body["voice_slug"] == _DEFAULT_VOICE
     assert len(body["sha256"]) == 64
     # Seeded competitor + authority lists are present.
     assert "manulife.com.hk" in body["policy"]["deny"]["domains"]
@@ -174,3 +184,53 @@ async def test_revert_restores_prior_version(api_client: AsyncClient):
     reverted = r.json()
     assert reverted["reverted_from_version_id"] == target
     assert "newauth.org" in reverted["policy"]["prefer"]["domains"]
+
+
+# ---------------------------------------------------------------------------
+# Per-voice scoping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unknown_voice_falls_back_to_shared(api_client: AsyncClient):
+    """A voice with no policy row resolves the __shared__ seed (and says so)."""
+    r = await api_client.get("/source-policy", params={"voice": "ghost-voice"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["voice"] == "ghost-voice"
+    assert body["voice_slug"] == "__shared__"  # resolved via fallback
+
+
+@pytest.mark.asyncio
+async def test_save_is_isolated_between_voices(
+    api_client: AsyncClient, duplicated_voice: str
+):
+    """Saving a voice's policy must not mutate another voice's policy."""
+    editor_before = (await api_client.get("/source-policy")).json()
+
+    dup = (await api_client.get("/source-policy", params={"voice": duplicated_voice})).json()
+    assert dup["voice_slug"] == duplicated_voice  # the clone owns its own row
+    new_policy = dict(dup["policy"])
+    new_policy["deny"] = {"domains": [*dup["policy"]["deny"]["domains"], "dup-only.example"]}
+    saved = await api_client.put(
+        "/source-policy",
+        params={"voice": duplicated_voice},
+        json={"policy": new_policy, "expected_sha256": dup["sha256"]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["voice"] == duplicated_voice
+    assert "dup-only.example" in saved.json()["policy"]["deny"]["domains"]
+
+    # The duplicate voice changed; bowtie-editor's policy is untouched.
+    editor_after = (await api_client.get("/source-policy")).json()
+    assert editor_after["sha256"] == editor_before["sha256"]
+    assert "dup-only.example" not in editor_after["policy"]["deny"]["domains"]
+
+    # And the duplicate voice's history records the save (newest) on top of the
+    # seed version the duplicate endpoint stamped, all under its own voice.
+    dup_hist = (
+        await api_client.get("/source-policy/history", params={"voice": duplicated_voice})
+    ).json()
+    assert dup_hist["voice"] == duplicated_voice
+    assert dup_hist["versions"][0]["kind"] == "save"
+    assert dup_hist["versions"][0]["sha256"] == saved.json()["sha256"]

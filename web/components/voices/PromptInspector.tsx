@@ -108,9 +108,12 @@ const RUN_SCOPED_MODES: GraphMode[] = ["refresh", "create"];
 interface PromptInspectorProps {
   node: PromptNode;
   mode: GraphMode;
+  /** Voice (persona slug) whose template body to preview. Prompts are per-voice;
+   * a voice without its own copy falls back to the shared seed server-side. */
+  voice: string;
 }
 
-export function PromptInspector({ node, mode }: PromptInspectorProps) {
+export function PromptInspector({ node, mode, voice }: PromptInspectorProps) {
   const templateIds = [
     node.system_prompt_template_id,
     ...(node.alt_template_ids ?? []),
@@ -120,8 +123,8 @@ export function PromptInspector({ node, mode }: PromptInspectorProps) {
 
   const tmpl = useQuery({
     enabled: activeId !== null,
-    queryKey: ["prompt-template", activeId],
-    queryFn: () => promptsApi.template(activeId!),
+    queryKey: ["prompt-template", voice, activeId],
+    queryFn: () => promptsApi.template(activeId!, voice),
   });
 
   const schema = USER_PROMPT_SCHEMAS[mode]?.[node.id] ?? [];

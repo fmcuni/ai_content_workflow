@@ -40,7 +40,10 @@ async def build_system_prompt(
     context_text: str | None = None,
 ) -> str:
     persona = await load_persona(persona_name, session=session)
-    template_text = await prompts_store.get_assembled("audit", session=session)
+    # ``persona_name`` is the run's voice: resolve the audit prompt under it.
+    template_text = await prompts_store.get_assembled(
+        "audit", voice_slug=persona_name, session=session
+    )
     return build_system_prompt_from_pack(
         persona, today, template_text=template_text, context_text=context_text
     )

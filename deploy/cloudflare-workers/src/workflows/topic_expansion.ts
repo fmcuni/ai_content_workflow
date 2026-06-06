@@ -39,6 +39,20 @@ const DEFAULT_THINKING_LEVEL = "HIGH";
  */
 const CONCURRENCY_CAP = 3;
 
+// Terminal fallback when neither the candidate nor the batch names a voice. The
+// topic agents resolve their prompt under this voice (Phase 0 resolution rule:
+// candidate.persona_slug || batch.persona_default || DEFAULT_VOICE). Mirrors
+// content_tool/graph/topic_expansion.py.
+const DEFAULT_VOICE = "bowtie-editor";
+
+/** First non-empty voice slug, else DEFAULT_VOICE (mirrors `_resolve_voice`). */
+function resolveVoice(...candidates: (string | null | undefined)[]): string {
+  for (const candidate of candidates) {
+    if (candidate) return candidate;
+  }
+  return DEFAULT_VOICE;
+}
+
 interface Params {
   batchId: string;
 }
@@ -53,6 +67,7 @@ interface BatchRawRow {
   must_avoid: unknown;
   priority_focus: string | null;
   notes: string | null;
+  persona_default: string | null;
 }
 
 /** Serializable batch view threaded across the step boundary (arrays normalised). */
@@ -65,6 +80,7 @@ interface BatchRow {
   must_avoid: string[];
   priority_focus: string | null;
   notes: string | null;
+  persona_default: string | null;
 }
 
 interface GeneratedTopic {
@@ -75,6 +91,7 @@ interface GeneratedTopic {
 interface CandidateRow {
   topic: string;
   keywords: unknown;
+  persona_slug: string | null;
 }
 
 export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
@@ -106,7 +123,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
       this.withSql<BatchRow>(async (sql) => {
         const rows = await sql<BatchRawRow[]>`
           SELECT research_theme, target_audience, topic_count, keywords_per_topic,
-                 must_cover, must_avoid, priority_focus, notes
+                 must_cover, must_avoid, priority_focus, notes, persona_default
           FROM content_tool.topic_batches
           WHERE batch_id = ${batchId}::uuid
           LIMIT 1
@@ -139,6 +156,7 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
           mustAvoid: batch.must_avoid,
           priorityFocus: batch.priority_focus,
           notes: batch.notes,
+          voiceSlug: resolveVoice(batch.persona_default),
         });
         return output.topics.map((t) => ({ topic: t.topic, keywords: t.keywords }));
       }),
@@ -183,7 +201,9 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
       const chunk = candidateIds.slice(i, i + CONCURRENCY_CAP);
       await Promise.all(
         chunk.map((cid) =>
-          step.do(`analyse-${cid}`, async () => this.analyseCandidate(cid)),
+          step.do(`analyse-${cid}`, async () =>
+            this.analyseCandidate(cid, batch.persona_default),
+          ),
         ),
       );
     }
@@ -225,10 +245,13 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
    * verdicts. A failure of either agent is captured in `last_error` (the row is
    * NOT failed hard) — mirrors n_analyse_candidate's partial-failure handling.
    */
-  private async analyseCandidate(candidateId: string): Promise<string> {
+  private async analyseCandidate(
+    candidateId: string,
+    personaDefault: string | null,
+  ): Promise<string> {
     return this.withSql<string>(async (sql) => {
       const rows = await sql<CandidateRow[]>`
-        SELECT topic, keywords FROM content_tool.topic_candidates
+        SELECT topic, keywords, persona_slug FROM content_tool.topic_candidates
         WHERE candidate_id = ${candidateId}::uuid LIMIT 1
       `;
       const cand = rows[0];
@@ -237,12 +260,14 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
       }
       const topic = cand.topic;
       const keywords = toStringArray(cand.keywords);
+      // Phase 0 resolution rule: candidate.persona_slug || batch default || fallback.
+      const voiceSlug = resolveVoice(cand.persona_slug, personaDefault);
 
       const gemini = this.geminiClient();
       try {
         const [dedup, hot] = await Promise.all([
-          runTopicDedup(sql, gemini, { topic, keywords }),
-          runTopicHot(sql, gemini, { topic, keywords }),
+          runTopicDedup(sql, gemini, { topic, keywords, voiceSlug }),
+          runTopicHot(sql, gemini, { topic, keywords, voiceSlug }),
         ]);
         // One greppable line per candidate so an empty-candidate "no" is
         // explainable from `wrangler tail` without a DB dive (mirrors the

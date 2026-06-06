@@ -134,40 +134,48 @@ async def persisted_full_run(
     return str(run_id)
 
 
+_DEFAULT_TEST_VOICE = "bowtie-editor"
+
+
 @pytest_asyncio.fixture
 async def restore_template(
     pg_session_factory: async_sessionmaker[AsyncSession],
 ):
-    """Snapshot prompt_templates rows and restore them after the test.
+    """Snapshot per-voice prompt_templates rows and restore them after the test.
 
-    PUT/revert API tests mutate the live row (body/sha256/bytes/updated_by),
-    which would drift across tests and break sha assertions. The yielded
-    callable snapshots a row by template_id; teardown writes the saved values
-    back and busts the prompts_store cache so the next read reloads the
-    restored row rather than the mutated one.
+    PUT/revert API tests mutate the live ``(voice, template)`` row
+    (body/sha256/bytes/updated_by), which would drift across tests and break sha
+    assertions. The yielded callable snapshots a row by template_id for a voice
+    (default ``bowtie-editor`` — the voice the API edits when ``?voice=`` is
+    omitted); teardown writes the saved values back and busts the prompts_store
+    cache so the next read reloads the restored row rather than the mutated one.
     """
-    saved: dict[str, tuple[str, str, int, str | None]] = {}
+    saved: dict[tuple[str, str], tuple[str, str, int, str | None]] = {}
 
-    async def _snap(template_id: str) -> str:
+    async def _snap(template_id: str, voice: str = _DEFAULT_TEST_VOICE) -> str:
         async with pg_session_factory() as s:
             row = (
                 await s.execute(
                     select(PromptTemplate).where(
-                        PromptTemplate.template_id == template_id
+                        PromptTemplate.voice_slug == voice,
+                        PromptTemplate.template_id == template_id,
                     )
                 )
             ).scalar_one()
-            saved[template_id] = (row.body, row.sha256, row.bytes, row.updated_by)
+            saved[(voice, template_id)] = (row.body, row.sha256, row.bytes, row.updated_by)
         return template_id
 
     yield _snap
 
-    for template_id, (body, sha256, num_bytes, updated_by) in saved.items():
+    for (voice, template_id), (body, sha256, num_bytes, updated_by) in saved.items():
         async with pg_session_factory() as s:
             row = (
                 await s.execute(
                     select(PromptTemplate)
-                    .where(PromptTemplate.template_id == template_id)
+                    .where(
+                        PromptTemplate.voice_slug == voice,
+                        PromptTemplate.template_id == template_id,
+                    )
                     .with_for_update()
                 )
             ).scalar_one()
@@ -177,3 +185,59 @@ async def restore_template(
             row.updated_by = updated_by
             await s.commit()
     prompts_store.clear_cache()
+
+
+async def _purge_voice(
+    pg_session_factory: async_sessionmaker[AsyncSession], slug: str
+) -> None:
+    """Delete every per-voice row for ``slug`` (templates, versions, policy,
+    policy versions, persona) and bust the in-process caches.
+
+    Used by the ``duplicated_voice`` fixture to leave the DB exactly as it found
+    it — the per-test truncate in ``pg_session_factory`` does not cover these
+    tables.
+    """
+    from sqlalchemy import text
+
+    from content_tool import source_policy_store
+
+    async with pg_session_factory() as s:
+        for table, col in (
+            ("prompt_versions", "voice_slug"),
+            ("prompt_templates", "voice_slug"),
+            ("source_policy_versions", "voice_slug"),
+            ("source_policy", "voice_slug"),
+            ("personas", "slug"),
+        ):
+            # table/col are hard-coded literals from the loop above (no user
+            # input); the slug is bound as a parameter.
+            await s.execute(
+                text(f"DELETE FROM content_tool.{table} WHERE {col} = :slug"),  # noqa: S608
+                {"slug": slug},
+            )
+        await s.commit()
+    prompts_store.clear_cache()
+    source_policy_store.clear_cache()
+
+
+@pytest_asyncio.fixture
+async def duplicated_voice(
+    api_client: AsyncClient,
+    pg_session_factory: async_sessionmaker[AsyncSession],
+):
+    """Create a throwaway voice (a duplicate of ``bowtie-editor``) for per-voice
+    route tests, and purge all of its rows on teardown.
+
+    Yields the new voice slug. The duplicate endpoint clones the source voice's
+    agent/partial templates + source policy and seeds their history, so the new
+    voice is independently editable.
+    """
+    slug = "dup-test-voice"
+    await _purge_voice(pg_session_factory, slug)
+    r = await api_client.post(
+        "/personas/bowtie-editor/duplicate",
+        json={"slug": slug, "name": "Dup Test Voice"},
+    )
+    assert r.status_code == 201, r.text
+    yield slug
+    await _purge_voice(pg_session_factory, slug)

@@ -16,12 +16,30 @@ Agents that already hold an ``AsyncSession`` (writer, audit, outline,
 gap_analysis) call the ``*_session`` helpers; agents without one (topic_*,
 judges, the refresh evaluator) call the ``*_standalone`` helpers, which open a
 session from the factory registered via :func:`configure` at app startup.
+
+Per-voice scoping
+-----------------
+Each row is keyed by ``(voice_slug, template_id)``. Agent and partial prompts
+are scoped to a voice (persona slug); the reserved sentinel ``__shared__`` holds
+the global judges and the canonical seed-of-record that every voice falls back
+to. Resolution follows a strict fallback chain for both the top-level template
+and every ``{{include:NAME}}`` partial it pulls in::
+
+    voice_slug  ->  '__shared__'  ->  bundled prompts/<id>.md file
+
+Includes resolve *within the requested voice first* — a voice's agent prompt
+includes that voice's own partials — falling back to the shared partial (then
+the bundled file) only when the voice has not customised it. This keeps a voice
+created before a template was added (and any judge, which is shared) resolvable,
+and keeps assembled prompts byte-identical to the pre-per-voice behaviour for a
+voice whose rows match ``__shared__`` (e.g. the seeded ``bowtie-editor``).
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -29,6 +47,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from content_tool.db.models import PromptTemplate
 
 _INCLUDE_RE = re.compile(r"\{\{include:([A-Za-z0-9_./-]+)\}\}")
+
+# Reserved sentinel voice for global / seed-of-record rows (judges + canonical
+# agent/partial set). Mirrors the migration default and the Workers ``SHARED_VOICE``.
+SHARED_VOICE = "__shared__"
+
+# Bundled agent/partial prompt sources. The last-resort fallback when neither
+# the requested voice nor ``__shared__`` has a DB row (e.g. the migration has
+# not been pushed yet) so the app still boots. ``template_id`` is the file stem
+# for every agent/partial under ``prompts/``.
+_PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
 
 class PromptTemplateNotFound(LookupError):
@@ -43,6 +71,7 @@ class PromptTemplateNotFound(LookupError):
 class TemplateRow:
     """Immutable snapshot of one ``prompt_templates`` row."""
 
+    voice_slug: str
     template_id: str
     category: str
     filename: str
@@ -58,11 +87,15 @@ class TemplateRow:
 # acceptable because this tool runs as a single FastAPI process and the editing
 # worker busts its own cache; a multi-worker deployment would add LISTEN/NOTIFY.
 _session_factory: async_sessionmaker[AsyncSession] | None = None
-_cache: dict[str, TemplateRow] | None = None
+_cache: dict[tuple[str, str], TemplateRow] | None = None
 
 
-def configure(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Register the session factory used by the ``*_standalone`` helpers."""
+def configure(session_factory: async_sessionmaker[AsyncSession] | None) -> None:
+    """Register the session factory used by the ``*_standalone`` helpers.
+
+    Pass ``None`` to de-register (e.g. test teardown after the engine is
+    disposed) so a stale/disposed factory is never reused.
+    """
     global _session_factory
     _session_factory = session_factory
 
@@ -84,10 +117,11 @@ def invalidate(template_id: str | None = None) -> None:
     clear_cache()
 
 
-async def _load_all(session: AsyncSession) -> dict[str, TemplateRow]:
+async def _load_all(session: AsyncSession) -> dict[tuple[str, str], TemplateRow]:
     rows = (await session.execute(select(PromptTemplate))).scalars().all()
     return {
-        r.template_id: TemplateRow(
+        (r.voice_slug, r.template_id): TemplateRow(
+            voice_slug=r.voice_slug,
             template_id=r.template_id,
             category=r.category,
             filename=r.filename,
@@ -99,8 +133,9 @@ async def _load_all(session: AsyncSession) -> dict[str, TemplateRow]:
     }
 
 
-async def snapshot(session: AsyncSession) -> dict[str, TemplateRow]:
-    """Return all templates keyed by template_id, loading + caching on first use.
+async def snapshot(session: AsyncSession) -> dict[tuple[str, str], TemplateRow]:
+    """Return all templates keyed by ``(voice_slug, template_id)``, loading +
+    caching on first use.
 
     The returned dict is the cached instance — treat it as read-only.
     """
@@ -110,7 +145,7 @@ async def snapshot(session: AsyncSession) -> dict[str, TemplateRow]:
     return _cache
 
 
-async def _snapshot_standalone() -> dict[str, TemplateRow]:
+async def _snapshot_standalone() -> dict[tuple[str, str], TemplateRow]:
     global _cache
     if _cache is not None:
         return _cache
@@ -123,62 +158,114 @@ async def _snapshot_standalone() -> dict[str, TemplateRow]:
     return _cache
 
 
+def _bundled_file_body(template_id: str) -> str | None:
+    """Raw body of the bundled ``prompts/<template_id>.md`` file, or ``None``.
+
+    The last link in the fallback chain. Read verbatim (no rstrip) so a
+    top-level file resolves byte-identically to a DB-stored body.
+    """
+    try:
+        return (_PROMPT_DIR / f"{template_id}.md").read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _lookup_row(
+    snap: dict[tuple[str, str], TemplateRow], voice_slug: str, template_id: str
+) -> TemplateRow | None:
+    """Resolve a row following ``voice_slug -> '__shared__'`` (snapshot only)."""
+    row = snap.get((voice_slug, template_id))
+    if row is not None:
+        return row
+    if voice_slug != SHARED_VOICE:
+        return snap.get((SHARED_VOICE, template_id))
+    return None
+
+
+def _raw_body(
+    snap: dict[tuple[str, str], TemplateRow], voice_slug: str, template_id: str
+) -> str:
+    """Raw body via the full ``voice -> __shared__ -> bundled file`` chain."""
+    row = _lookup_row(snap, voice_slug, template_id)
+    if row is not None:
+        return row.body
+    body = _bundled_file_body(template_id)
+    if body is None:
+        raise PromptTemplateNotFound(template_id)
+    return body
+
+
 def resolve_body(
-    body: str, snap: dict[str, TemplateRow], *, _seen: frozenset[str] = frozenset()
+    body: str,
+    snap: dict[tuple[str, str], TemplateRow],
+    *,
+    voice_slug: str = SHARED_VOICE,
+    _seen: frozenset[str] = frozenset(),
 ) -> str:
     """Inline ``{{include:NAME}}`` directives in ``body`` from ``snap``.
 
     Mirrors ``writer.resolve_includes``: included partials are ``rstrip("\\n")``
-    before inlining; cycles raise ``ValueError``; an unknown include raises
-    :class:`PromptTemplateNotFound`.
+    before inlining; cycles raise ``ValueError``; an unknown include (in the
+    voice, in ``__shared__``, and on disk) raises :class:`PromptTemplateNotFound`.
+    Each partial follows the same ``voice -> __shared__ -> file`` chain, with the
+    originally-requested ``voice_slug`` threaded through nested includes so a
+    voice's own partials keep priority all the way down.
     """
 
     def _sub(match: re.Match[str]) -> str:
         name = match.group(1)
         if name in _seen:
             raise ValueError(f"include cycle detected at {{{{include:{name}}}}}")
-        row = snap.get(name)
-        if row is None:
-            raise PromptTemplateNotFound(name)
-        return resolve_body(row.body.rstrip("\n"), snap, _seen=_seen | {name})
+        inner = _raw_body(snap, voice_slug, name)
+        return resolve_body(
+            inner.rstrip("\n"), snap, voice_slug=voice_slug, _seen=_seen | {name}
+        )
 
     return _INCLUDE_RE.sub(_sub, body)
 
 
-def assemble_from_snapshot(template_id: str, snap: dict[str, TemplateRow]) -> str:
-    """Resolve ``template_id``'s full body (with includes) from a snapshot."""
-    row = snap.get(template_id)
-    if row is None:
-        raise PromptTemplateNotFound(template_id)
-    return resolve_body(row.body, snap)
+def assemble_from_snapshot(
+    template_id: str,
+    snap: dict[tuple[str, str], TemplateRow],
+    *,
+    voice_slug: str = SHARED_VOICE,
+) -> str:
+    """Resolve ``template_id``'s full body (with includes) for ``voice_slug``."""
+    body = _raw_body(snap, voice_slug, template_id)
+    return resolve_body(body, snap, voice_slug=voice_slug)
 
 
 def assemble_with_override(
     route_id: str,
-    snap: dict[str, TemplateRow],
+    snap: dict[tuple[str, str], TemplateRow],
     *,
     override_name: str,
     override_body: str,
+    voice_slug: str = SHARED_VOICE,
 ) -> str:
     """Assemble ``route_id`` but resolve ``override_name`` to ``override_body``.
 
     Used by the editor preview so an unsaved partial draft is slotted into its
-    consumer while the rest resolve from the DB.
+    consumer while the rest resolve from the DB (within ``voice_slug``, with the
+    usual shared/file fallback).
     """
-    row = snap.get(route_id)
-    if row is None:
-        raise PromptTemplateNotFound(route_id)
+    body = _raw_body(snap, voice_slug, route_id)
     return _resolve_with_override(
-        row.body, snap, override_name=override_name, override_body=override_body
+        body,
+        snap,
+        override_name=override_name,
+        override_body=override_body,
+        voice_slug=voice_slug,
     )
 
 
 def _resolve_with_override(
     body: str,
-    snap: dict[str, TemplateRow],
+    snap: dict[tuple[str, str], TemplateRow],
     *,
     override_name: str,
     override_body: str,
+    voice_slug: str = SHARED_VOICE,
     _seen: frozenset[str] = frozenset(),
 ) -> str:
     def _sub(match: re.Match[str]) -> str:
@@ -188,37 +275,50 @@ def _resolve_with_override(
         if name == override_name:
             inner = override_body.rstrip("\n")
         else:
-            row = snap.get(name)
-            if row is None:
-                raise PromptTemplateNotFound(name)
-            inner = row.body.rstrip("\n")
+            inner = _raw_body(snap, voice_slug, name).rstrip("\n")
         return _resolve_with_override(
             inner,
             snap,
             override_name=override_name,
             override_body=override_body,
+            voice_slug=voice_slug,
             _seen=_seen | {name},
         )
 
     return _INCLUDE_RE.sub(_sub, body)
 
 
-async def get_assembled(template_id: str, *, session: AsyncSession) -> str:
-    """Fully-resolved system prompt for ``template_id`` (caller holds a session)."""
-    return assemble_from_snapshot(template_id, await snapshot(session))
+async def get_assembled(
+    template_id: str, *, voice_slug: str = SHARED_VOICE, session: AsyncSession
+) -> str:
+    """Fully-resolved system prompt for ``(voice_slug, template_id)``.
 
-
-async def get_assembled_standalone(template_id: str) -> str:
-    """Fully-resolved system prompt for ``template_id`` (no caller session).
-
-    Opens a session from the configured factory on cache miss.
+    The caller holds a session. Resolves includes within ``voice_slug`` and
+    falls back ``voice -> __shared__ -> bundled file`` per missing row.
     """
-    return assemble_from_snapshot(template_id, await _snapshot_standalone())
+    return assemble_from_snapshot(
+        template_id, await snapshot(session), voice_slug=voice_slug
+    )
 
 
-async def get_body(template_id: str, *, session: AsyncSession) -> str:
-    """Raw, unresolved body for ``template_id`` (no include expansion)."""
-    row = (await snapshot(session)).get(template_id)
+async def get_assembled_standalone(
+    template_id: str, *, voice_slug: str = SHARED_VOICE
+) -> str:
+    """Fully-resolved system prompt for ``(voice_slug, template_id)`` (no caller
+    session). Opens a session from the configured factory on cache miss.
+    """
+    return assemble_from_snapshot(
+        template_id, await _snapshot_standalone(), voice_slug=voice_slug
+    )
+
+
+async def get_body(
+    template_id: str, *, voice_slug: str = SHARED_VOICE, session: AsyncSession
+) -> str:
+    """Raw, unresolved body for ``(voice_slug, template_id)`` (no include
+    expansion). Follows the ``voice -> __shared__`` snapshot fallback.
+    """
+    row = _lookup_row(await snapshot(session), voice_slug, template_id)
     if row is None:
         raise PromptTemplateNotFound(template_id)
     return row.body

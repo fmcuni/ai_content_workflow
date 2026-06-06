@@ -22,6 +22,8 @@ import { TOPIC_HOT_SCHEMA, type TopicHotOutput } from "./topic_schemas";
 export interface TopicHotInput {
   topic: string;
   keywords: string[];
+  /** The batch/candidate voice (persona slug); resolves the prompt under it. */
+  voiceSlug: string;
   onThought?: ThoughtCallback;
 }
 
@@ -40,8 +42,8 @@ export interface TopicHotTokens {
 // System prompt assembly — mirrors Python `build_system_prompt`.
 // ---------------------------------------------------------------------------
 
-async function buildSystemPrompt(sql: Sql): Promise<string> {
-  return getAssembled(sql, "topic_hot");
+async function buildSystemPrompt(sql: Sql, voiceSlug: string): Promise<string> {
+  return getAssembled(sql, "topic_hot", voiceSlug);
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +74,7 @@ export async function runTopicHot(
   gemini: GeminiClient,
   input: TopicHotInput,
 ): Promise<{ output: TopicHotOutput; tokens: TopicHotTokens }> {
-  const systemPrompt = await buildSystemPrompt(sql);
+  const systemPrompt = await buildSystemPrompt(sql, input.voiceSlug);
   const userPrompt = buildUserPrompt({ topic: input.topic, keywords: input.keywords });
 
   const result = await gemini.generate({

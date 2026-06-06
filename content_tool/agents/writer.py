@@ -94,9 +94,14 @@ async def build_system_prompt(
     session: AsyncSession,
     context_text: str | None = None,
 ) -> str:
-    template = await prompts_store.get_assembled(f"writer_{route}", session=session)
+    # ``persona_name`` is the run's voice (persona slug): both the prompt
+    # template and the source policy resolve under that voice (falling back to
+    # __shared__ / bundled file when the voice has not customised them).
+    template = await prompts_store.get_assembled(
+        f"writer_{route}", voice_slug=persona_name, session=session
+    )
     persona = await load_persona(persona_name, session=session)
-    policy = await source_policy_store.get_policy(session=session)
+    policy = await source_policy_store.get_policy(voice_slug=persona_name, session=session)
     return (
         template.replace("{persona_block}", persona.to_prompt_block(context_text))
         .replace("{today_date}", today.isoformat())
