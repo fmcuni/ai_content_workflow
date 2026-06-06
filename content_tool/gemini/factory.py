@@ -45,4 +45,6 @@ def make_gemini_client(
     if not settings.langfuse_enabled:
         return inner
 
-    return ObservedGeminiClient(inner, enabled=True)
+    # Pass the model so each Langfuse generation carries it — this is what lets
+    # Langfuse run model analytics and compute cost automatically from usage.
+    return ObservedGeminiClient(inner, enabled=True, model=model)

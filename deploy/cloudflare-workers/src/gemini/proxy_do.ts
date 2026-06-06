@@ -21,7 +21,13 @@
 import { DurableObject } from "cloudflare:workers";
 
 import type { Env } from "../index";
-import { emitGeneration, flushLangfuse, getLangfuse, type PromptMeta } from "../observability/langfuse";
+import {
+  emitGeneration,
+  flushLangfuse,
+  getLangfuse,
+  type PromptMeta,
+  type TraceMeta,
+} from "../observability/langfuse";
 import { RealGeminiClient } from "./client";
 import type { GeminiResult, GenerateOptions, ThoughtCallback } from "./types";
 
@@ -49,6 +55,12 @@ export interface ProxyGenerateRequest {
    * gracefully (the generation is still emitted, just without prompt metadata).
    */
   promptMeta?: PromptMeta;
+  /**
+   * Run-level info (topic, entry mode) forwarded one-way to name + tag the
+   * Langfuse trace. Plain data — crosses the RPC edge fine; omitted by call sites
+   * that lack it (the trace then falls back to a run-id name).
+   */
+  traceMeta?: TraceMeta;
 }
 
 export class GeminiProxy extends DurableObject<Env> {
@@ -102,6 +114,8 @@ export class GeminiProxy extends DurableObject<Env> {
       }
       emitGeneration(langfuse, {
         agent: req.opts.agent,
+        // The model actually used — resolved the same way as in generate().
+        model: req.model || (this.env.GEMINI_MODEL ?? DEFAULT_MODEL),
         systemPrompt: req.opts.systemPrompt,
         userPrompt: req.opts.userPrompt,
         rawText: result.rawText,
@@ -113,6 +127,7 @@ export class GeminiProxy extends DurableObject<Env> {
         finishReason: result.finishReason,
         runId: req.runId,
         promptMeta: req.promptMeta,
+        traceMeta: req.traceMeta,
       });
       // Flush within the DO lifecycle so the fetch-based exporter delivers before
       // the isolate is frozen (the edge equivalent of the Python shutdown flush).

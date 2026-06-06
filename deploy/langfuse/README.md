@@ -27,6 +27,7 @@ Add to `.env.local` (local dev) or set via `wrangler secret put` (Workers):
 | `LANGFUSE_HOST` | `http://localhost:3000` | URL of this Langfuse instance |
 | `LANGFUSE_PUBLIC_KEY` | `pk-lf-…` | From Settings → API Keys |
 | `LANGFUSE_SECRET_KEY` | `sk-lf-…` | From Settings → API Keys (treat as a secret) |
+| `LANGFUSE_TRACING_ENVIRONMENT` (Workers) / `LANGFUSE_ENVIRONMENT` (Python) | `development` | Separates traces by origin in the UI. Python defaults to `development`; the deployed Worker defaults to `production`. Lowercase, no `langfuse` prefix |
 
 When `LANGFUSE_ENABLED=false` (the default) the app never imports the
 Langfuse SDK and behaves identically to a build without the integration.
@@ -50,6 +51,8 @@ Every call to `gemini.generate()` that passes through `ObservedGeminiClient`
 emits a **generation** span carrying:
 
 - Agent name (e.g. `writer`, `audit`, `judge.brand_voice`)
+- Model name (e.g. `gemini-3.1-pro-preview`) — lets Langfuse run model
+  analytics and **compute cost automatically** from the token usage below
 - System prompt + user prompt (input)
 - Raw text + parsed JSON (output)
 - Token usage (input / output / total including thinking tokens)

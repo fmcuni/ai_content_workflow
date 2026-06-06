@@ -126,7 +126,7 @@ async def test_observed_records_generation_when_enabled(monkeypatch: pytest.Monk
     langfuse_client.reset_for_testing(fake_lf)
 
     inner = _FakeInnerClient()
-    client = ObservedGeminiClient(inner, enabled=True)
+    client = ObservedGeminiClient(inner, enabled=True, model="gemini-3.1-pro-preview")
 
     set_prompt_meta(
         PromptMeta(template_id="writer_full_rewrite", voice_slug="bowtie-editor", sha256="abc123")
@@ -147,8 +147,15 @@ async def test_observed_records_generation_when_enabled(monkeypatch: pytest.Monk
     assert len(fake_lf.generations) == 1
     gen = fake_lf.generations[0]
     assert gen.name == "writer"
-    # trace_context groups all generations from one run (v4 API)
-    assert gen.init_kwargs["trace_context"] == {"trace_id": "run-42"}
+    # model drives Langfuse model analytics + automatic cost calculation
+    assert gen.init_kwargs["model"] == "gemini-3.1-pro-preview"
+    # trace_context groups all generations from one run under a deterministic,
+    # 32-hex OTEL trace id derived from run_id (v4 rejects raw run_id strings).
+    from langfuse import Langfuse
+
+    expected_trace_id = Langfuse.create_trace_id(seed="run-42")
+    assert gen.init_kwargs["trace_context"] == {"trace_id": expected_trace_id}
+    assert len(expected_trace_id) == 32 and expected_trace_id == expected_trace_id.lower()
     assert gen.init_kwargs["metadata"]["template_id"] == "writer_full_rewrite"
     assert gen.init_kwargs["metadata"]["prompt_sha256"] == "abc123"
     assert gen.init_kwargs["metadata"]["voice_slug"] == "bowtie-editor"

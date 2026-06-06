@@ -12,7 +12,7 @@
  * with no live viewer (refresh / topic scans) omit `runId` and stay non-streaming.
  */
 
-import type { PromptMeta } from "../observability/langfuse";
+import type { PromptMeta, TraceMeta } from "../observability/langfuse";
 import type { GeminiClient, GeminiResult, GenerateOptions } from "./types";
 import type { GeminiProxy, ProxyGenerateOptions } from "./proxy_do";
 
@@ -28,6 +28,8 @@ export interface DoGeminiClientConfig {
    * observability degrades gracefully without it.
    */
   promptMeta?: PromptMeta;
+  /** Run-level info (topic, entry mode) to name + tag the run's Langfuse trace. */
+  traceMeta?: TraceMeta;
 }
 
 /** Default US region hint — probe-confirmed to bypass the geo-block (enam/wnam both work). */
@@ -60,6 +62,7 @@ export class DoGeminiClient implements GeminiClient {
       opts: proxyOpts,
       runId: this.config.runId,
       promptMeta: this.config.promptMeta,
+      traceMeta: this.config.traceMeta,
     });
   }
 }

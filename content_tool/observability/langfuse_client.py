@@ -62,8 +62,15 @@ def init_langfuse() -> None:
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key,
             host=settings.langfuse_host,
+            environment=settings.langfuse_environment,
         )
-        logger.info("Langfuse client initialised", extra={"host": settings.langfuse_host})
+        logger.info(
+            "Langfuse client initialised",
+            extra={
+                "host": settings.langfuse_host,
+                "environment": settings.langfuse_environment,
+            },
+        )
     except Exception:
         logger.exception("Failed to initialise Langfuse client — observability disabled")
         _client = None

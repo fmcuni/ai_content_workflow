@@ -33,6 +33,7 @@ import { getSql } from "../db/client";
 import { toJsonb, pgJson } from "../db/serialize";
 import { DoGeminiClient } from "../gemini/do_client";
 import type { GeminiClient } from "../gemini/types";
+import type { TraceMeta } from "../observability/langfuse";
 import { runOutline } from "../agents/outline";
 import { runFetchArticle } from "../agents/fetch_article";
 import { runGapAnalysis } from "../agents/gap_analysis";
@@ -274,7 +275,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       await this.emitStep(step, "emit-outline-start", runId, "strategy.outline.start", {});
       await step.do("outline", async () =>
         this.withSql(async (sql) => {
-          const gemini = this.geminiClient(runId, run.persona);
+          const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
           await runOutline(sql, gemini, {
             runId,
             startMode: "create",
@@ -436,7 +437,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     await this.emitStep(step, "emit-gap-start", runId, "strategy.gap_analysis.start", {});
     await step.do("gap-analysis", async () =>
       this.withSql(async (sql) => {
-        const gemini = this.geminiClient(runId, run.persona);
+        const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
         await runGapAnalysis(sql, gemini, {
           runId,
           voiceSlug: run.persona,
@@ -460,7 +461,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     await this.emitStep(step, "emit-outline-start-refresh", runId, "strategy.outline.start", {});
     const chosenRoute = await step.do("outline", async () =>
       this.withSql<string>(async (sql) => {
-        const gemini = this.geminiClient(runId, run.persona);
+        const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
         const gap = await this.loadGapPayload(sql, runId);
         await runOutline(sql, gemini, {
           runId,
@@ -540,7 +541,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       );
       const draftId = await step.do(`writer-${round}-${iteration}`, async () =>
         this.withSql<string>(async (sql) => {
-          const gemini = this.geminiClient(runId, run.persona);
+          const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
           const result = await runWriter(sql, gemini, {
             run: {
               runId,
@@ -663,7 +664,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       );
       const overallPass = await step.do(`audit-${round}-${iteration}`, async () =>
         this.withSql<boolean>(async (sql) => {
-          const gemini = this.geminiClient(runId, run.persona);
+          const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
           const render = await this.loadRenderForAudit(sql, draftId);
           const citationIntents = toObjectArray(
             (await this.loadDraftMarkup(sql, draftId)).citation_intents,
@@ -1126,7 +1127,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     }
   }
 
-  private geminiClient(runId: string, voiceSlug?: string): GeminiClient {
+  private geminiClient(runId: string, voiceSlug?: string, traceMeta?: TraceMeta): GeminiClient {
     // Route through the US-pinned GeminiProxy DO: a direct call from this colo
     // (Asia/HK) is geo-blocked by Google AI Studio. DoGeminiClient forwards to a
     // DO obtained with locationHint "enam", which egresses a US IP.
@@ -1143,6 +1144,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       thinkingLevel: DEFAULT_THINKING_LEVEL,
       runId,
       ...(voiceSlug !== undefined ? { promptMeta: { voiceSlug } } : {}),
+      ...(traceMeta !== undefined ? { traceMeta } : {}),
     });
   }
 

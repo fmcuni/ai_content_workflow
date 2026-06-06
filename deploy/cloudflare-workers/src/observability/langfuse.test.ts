@@ -12,23 +12,32 @@ import type { Langfuse } from "langfuse";
 // A spy that records the args passed to `generation()` and whether `.end()` was
 // called. Cast to Langfuse — we only exercise the two methods our code touches,
 // so a structural fake keeps the test free of the real (network) SDK.
-function fakeLangfuse(overrides: Partial<Record<"generation" | "flushAsync", unknown>> = {}): {
+function fakeLangfuse(
+  overrides: Partial<Record<"generation" | "trace" | "flushAsync" | "shutdownAsync", unknown>> = {},
+): {
   client: Langfuse;
+  trace: ReturnType<typeof vi.fn>;
   generation: ReturnType<typeof vi.fn>;
   end: ReturnType<typeof vi.fn>;
   flushAsync: ReturnType<typeof vi.fn>;
+  shutdownAsync: ReturnType<typeof vi.fn>;
 } {
   const end = vi.fn();
+  const trace = (overrides.trace as ReturnType<typeof vi.fn>) ?? vi.fn(() => ({}));
   const generation =
     (overrides.generation as ReturnType<typeof vi.fn>) ?? vi.fn(() => ({ end }));
   const flushAsync =
     (overrides.flushAsync as ReturnType<typeof vi.fn>) ?? vi.fn(async () => undefined);
-  const client = { generation, flushAsync } as unknown as Langfuse;
-  return { client, generation, end, flushAsync };
+  // flushLangfuse uses shutdownAsync (flushes AND awaits in-flight ingestion).
+  const shutdownAsync =
+    (overrides.shutdownAsync as ReturnType<typeof vi.fn>) ?? vi.fn(async () => undefined);
+  const client = { trace, generation, flushAsync, shutdownAsync } as unknown as Langfuse;
+  return { client, trace, generation, end, flushAsync, shutdownAsync };
 }
 
 const RECORD: GenerationRecord = {
   agent: "writer",
+  model: "gemini-3.1-pro-preview",
   systemPrompt: "you are a writer",
   userPrompt: "write about X",
   rawText: "<h1>X</h1>",
@@ -70,15 +79,20 @@ describe("isLangfuseEnabled", () => {
 
 describe("emitGeneration", () => {
   it("maps the record onto a Langfuse generation and ends it", () => {
-    const { client, generation, end } = fakeLangfuse();
+    const { client, trace, generation, end } = fakeLangfuse();
 
     emitGeneration(client, RECORD);
 
+    // Upserts the trace (keyed on runId) so the run shows in the Traces view.
+    expect(trace).toHaveBeenCalledTimes(1);
+    expect(trace.mock.calls[0]![0]).toMatchObject({ id: "run-abc" });
     expect(generation).toHaveBeenCalledTimes(1);
     expect(end).toHaveBeenCalledTimes(1);
 
     const arg = generation.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.name).toBe("writer");
+    // model drives Langfuse model analytics + automatic cost calculation.
+    expect(arg.model).toBe("gemini-3.1-pro-preview");
     // runId becomes the trace id so a run's generations group under one trace.
     expect(arg.traceId).toBe("run-abc");
     // Prompts flow one-way into input — never read back / managed by Langfuse.
@@ -96,11 +110,34 @@ describe("emitGeneration", () => {
     });
   });
 
+  it("names the trace by topic + short run id and tags it by mode + voice", () => {
+    const { client, trace } = fakeLangfuse();
+
+    emitGeneration(client, { ...RECORD, traceMeta: { topic: "兒童手足口病", startMode: "refresh" } });
+
+    const arg = trace.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.id).toBe("run-abc");
+    expect(arg.name).toBe("兒童手足口病 · run-abc"); // runId is < 8 chars, so the full id shows
+    expect(arg.tags).toEqual(expect.arrayContaining(["refresh", "bowtie"]));
+    expect(arg.metadata).toMatchObject({ runId: "run-abc", topic: "兒童手足口病", startMode: "refresh" });
+  });
+
+  it("falls back to a run-id trace name when no topic is provided", () => {
+    const { client, trace } = fakeLangfuse();
+
+    emitGeneration(client, { ...RECORD, traceMeta: undefined });
+
+    const arg = trace.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.name).toBe("run · run-abc");
+  });
+
   it("omits prompt metadata and traceId when not provided", () => {
-    const { client, generation } = fakeLangfuse();
+    const { client, trace, generation } = fakeLangfuse();
 
     emitGeneration(client, { ...RECORD, runId: undefined, promptMeta: undefined });
 
+    // No runId → no trace to key on, so the upsert is skipped.
+    expect(trace).not.toHaveBeenCalled();
     const arg = generation.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.traceId).toBeUndefined();
     expect(arg.metadata).toEqual({ latencyMs: 1234, finishReason: "STOP" });
@@ -121,18 +158,35 @@ describe("flushLangfuse", () => {
     await expect(flushLangfuse(null)).resolves.toBeUndefined();
   });
 
-  it("calls flushAsync on a real client", async () => {
-    const { client, flushAsync } = fakeLangfuse();
+  it("calls shutdownAsync on a real client (flushes AND awaits delivery)", async () => {
+    const { client, shutdownAsync } = fakeLangfuse();
     await flushLangfuse(client);
-    expect(flushAsync).toHaveBeenCalledTimes(1);
+    expect(shutdownAsync).toHaveBeenCalledTimes(1);
   });
 
   it("swallows flush errors (never propagates)", async () => {
     const { client } = fakeLangfuse({
-      flushAsync: vi.fn(async () => {
+      shutdownAsync: vi.fn(async () => {
         throw new Error("flush failed");
       }),
     });
     await expect(flushLangfuse(client)).resolves.toBeUndefined();
+  });
+
+  it("does not hang when shutdownAsync never settles (bounded by timeout)", async () => {
+    // Reproduces what broke prod: a host that accepts the connection but never
+    // responds leaves shutdownAsync pending forever. flushLangfuse must still
+    // resolve so the DO's waitUntil cannot hold a run open past its time limit.
+    vi.useFakeTimers();
+    try {
+      const { client } = fakeLangfuse({
+        shutdownAsync: vi.fn(() => new Promise<void>(() => undefined)), // never settles
+      });
+      const flushPromise = flushLangfuse(client);
+      await vi.advanceTimersByTimeAsync(10_000); // past FLUSH_TIMEOUT_MS
+      await expect(flushPromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     langfuse_host: str = "http://localhost:3000"
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
+    # Separates traces by origin in the Langfuse UI (local dev vs evals vs prod).
+    # Must be a lowercase alphanumeric string with hyphens/underscores that does
+    # not start with "langfuse" (Langfuse environment-name constraint).
+    langfuse_environment: str = "development"
 
     @field_validator("langfuse_enabled", mode="before")
     @classmethod
