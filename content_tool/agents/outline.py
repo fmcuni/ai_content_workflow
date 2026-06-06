@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from content_tool import prompts_store
 from content_tool.db.models import FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.prompt_context import PromptMeta, set_prompt_meta
 from content_tool.models.outline import Outline
 
 
@@ -44,6 +45,11 @@ async def build_system_prompt(
     template = await prompts_store.get_assembled(
         "outline", voice_slug=voice_slug, session=session
     )
+    row = await prompts_store.get_template_row("outline", voice_slug=voice_slug, session=session)
+    if row is not None:
+        set_prompt_meta(PromptMeta(
+            template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256
+        ))
     return template.replace("{today_date}", today.isoformat()).replace(
         "{create_mode_block}", block
     )

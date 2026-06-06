@@ -69,6 +69,28 @@ Bindings (see `wrangler.jsonc`): Hyperdrive (`HYPERDRIVE`), Workflows
 (`PRODUCTION`, `TOPIC_EXPANSION`, `REFRESH_SCAN`), Durable Objects
 (`RUN_STREAM`, `GEMINI_PROXY`), and a daily Cron Trigger.
 
+## Observability (Langfuse, optional)
+
+Additive only and **OFF by default**. When enabled, every Gemini `generate()`
+call from the `GeminiProxy` DO emits a Langfuse **generation** (input prompts,
+output text, token usage, latency, finish reason, plus run-id / prompt
+metadata), grouped by `run_id` as the trace id — mirroring the Python
+`ObservedGeminiClient`. Prompts flow **one-way** into traces; Langfuse Prompt
+Management is never used. A tracing fault never breaks a run.
+
+Enable by setting the flag var to `true` **and** providing both keys as secrets.
+With the flag unset/false or either key absent it is a strict no-op (no client,
+no network, the `langfuse` package is never imported):
+
+```bash
+# Non-secret flag + host: set in wrangler.jsonc `vars` (or via `wrangler secret put`):
+#   LANGFUSE_ENABLED = "true"
+#   LANGFUSE_HOST    = "https://cloud.langfuse.com"   # or your self-hosted URL
+# Secrets:
+npx wrangler secret put LANGFUSE_PUBLIC_KEY
+npx wrangler secret put LANGFUSE_SECRET_KEY
+```
+
 ## Supabase / DB notes
 
 - `postgres.js` over Hyperdrive — `{ max: 5, fetch_types: false }`. Still a direct

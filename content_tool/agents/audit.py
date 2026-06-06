@@ -9,6 +9,7 @@ from content_tool import prompts_store
 from content_tool.agents.audit_checks import run_deterministic_checks
 from content_tool.db.models import AuditRun, Citation, Draft, GapAnalysisRow, Render, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.prompt_context import PromptMeta, set_prompt_meta
 from content_tool.models.audit import AuditFinding, AuditOutput, SeveritySummary
 from content_tool.models.persona import PersonaPack
 from content_tool.policy.personas import load_persona
@@ -44,6 +45,11 @@ async def build_system_prompt(
     template_text = await prompts_store.get_assembled(
         "audit", voice_slug=persona_name, session=session
     )
+    row = await prompts_store.get_template_row("audit", voice_slug=persona_name, session=session)
+    if row is not None:
+        set_prompt_meta(PromptMeta(
+            template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256
+        ))
     return build_system_prompt_from_pack(
         persona, today, template_text=template_text, context_text=context_text
     )

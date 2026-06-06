@@ -12,6 +12,7 @@
  * with no live viewer (refresh / topic scans) omit `runId` and stay non-streaming.
  */
 
+import type { PromptMeta } from "../observability/langfuse";
 import type { GeminiClient, GeminiResult, GenerateOptions } from "./types";
 import type { GeminiProxy, ProxyGenerateOptions } from "./proxy_do";
 
@@ -21,6 +22,12 @@ export interface DoGeminiClientConfig {
   thinkingLevel: string;
   /** When set, the proxy streams live thought chunks to this run's SSE hub. */
   runId?: string;
+  /**
+   * Optional prompt-template identity, forwarded one-way into Langfuse generation
+   * metadata (voice slug / template id / sha256). Omit when not available —
+   * observability degrades gracefully without it.
+   */
+  promptMeta?: PromptMeta;
 }
 
 /** Default US region hint — probe-confirmed to bypass the geo-block (enam/wnam both work). */
@@ -52,6 +59,7 @@ export class DoGeminiClient implements GeminiClient {
       thinkingLevel: this.config.thinkingLevel,
       opts: proxyOpts,
       runId: this.config.runId,
+      promptMeta: this.config.promptMeta,
     });
   }
 }

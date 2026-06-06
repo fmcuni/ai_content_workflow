@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from content_tool import prompts_store, source_policy_store
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.prompt_context import PromptMeta, set_prompt_meta
 from content_tool.models.writer import WriterOutput
 from content_tool.policy.personas import load_persona
 
@@ -97,9 +98,21 @@ async def build_system_prompt(
     # ``persona_name`` is the run's voice (persona slug): both the prompt
     # template and the source policy resolve under that voice (falling back to
     # __shared__ / bundled file when the voice has not customised them).
+    template_id = f"writer_{route}"
     template = await prompts_store.get_assembled(
-        f"writer_{route}", voice_slug=persona_name, session=session
+        template_id, voice_slug=persona_name, session=session
     )
+    # Bind prompt metadata for the upcoming Gemini call so ObservedGeminiClient
+    # can attach it to the Langfuse generation without re-assembling the prompt.
+    row = await prompts_store.get_template_row(
+        template_id, voice_slug=persona_name, session=session
+    )
+    if row is not None:
+        set_prompt_meta(PromptMeta(
+            template_id=row.template_id,
+            voice_slug=row.voice_slug,
+            sha256=row.sha256,
+        ))
     persona = await load_persona(persona_name, session=session)
     policy = await source_policy_store.get_policy(voice_slug=persona_name, session=session)
     return (

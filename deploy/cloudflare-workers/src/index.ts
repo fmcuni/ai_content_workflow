@@ -80,6 +80,20 @@ export interface Env {
   // events. ON by default; "0" / "false" / "off" stream thinking live but skip
   // persisting it to content_tool.run_event_logs. Read by the RunStream DO.
   PERSIST_THINKING?: string;
+  // --- Langfuse observability (additive; default OFF) ---
+  // Var — "true"/"1"/"on"/"yes" enables emitting a Langfuse GENERATION per Gemini
+  // call from the GeminiProxy DO. Anything else (or unset) = strict no-op: no
+  // client, no network, the `langfuse` package is never imported. Mirrors the
+  // Python ObservedGeminiClient. Prompts flow ONE-WAY into traces; Langfuse
+  // Prompt Management is never used. See src/observability/langfuse.ts.
+  LANGFUSE_ENABLED?: string;
+  // Secrets — `wrangler secret put LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`.
+  // Both must be present (in addition to LANGFUSE_ENABLED) or the integration
+  // stays a no-op.
+  LANGFUSE_PUBLIC_KEY?: string;
+  LANGFUSE_SECRET_KEY?: string;
+  // Var — Langfuse host (e.g. "https://cloud.langfuse.com" or a self-hosted URL).
+  LANGFUSE_HOST?: string;
 }
 
 const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();

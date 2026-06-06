@@ -322,3 +322,30 @@ async def get_body(
     if row is None:
         raise PromptTemplateNotFound(template_id)
     return row.body
+
+
+async def get_template_row(
+    template_id: str, *, voice_slug: str = SHARED_VOICE, session: AsyncSession
+) -> TemplateRow | None:
+    """Return the resolved ``TemplateRow`` for ``(voice_slug, template_id)``.
+
+    Follows the ``voice -> __shared__`` fallback chain. Returns ``None`` when
+    no row exists and no bundled file is available (i.e. the template is
+    genuinely missing). Bundled-file rows do not have a DB sha256 — callers
+    that need the sha256 should treat a ``None`` return as "no metadata".
+
+    Used by ``ObservedGeminiClient`` / prompt-meta injection to obtain the
+    ``sha256``, ``template_id``, and ``voice_slug`` WITHOUT re-running prompt
+    assembly.
+    """
+    return _lookup_row(await snapshot(session), voice_slug, template_id)
+
+
+async def get_template_row_standalone(
+    template_id: str, *, voice_slug: str = SHARED_VOICE
+) -> TemplateRow | None:
+    """Same as ``get_template_row`` but opens its own session (no caller session).
+
+    Used by judge runners and other standalone code paths.
+    """
+    return _lookup_row(await _snapshot_standalone(), voice_slug, template_id)

@@ -21,6 +21,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 import type { Env } from "../index";
+import { emitGeneration, flushLangfuse, getLangfuse, type PromptMeta } from "../observability/langfuse";
 import { RealGeminiClient } from "./client";
 import type { GeminiResult, GenerateOptions, ThoughtCallback } from "./types";
 
@@ -37,9 +38,17 @@ export interface ProxyGenerateRequest {
   /**
    * When set, the proxy streams thought parts live to this run's RUN_STREAM hub
    * instead of running the silent non-streaming path. The SSE callback is built
-   * inside the DO (functions can't cross the RPC edge).
+   * inside the DO (functions can't cross the RPC edge). Also used as the Langfuse
+   * trace id so a run's generations are grouped under one trace.
    */
   runId?: string;
+  /**
+   * Optional prompt-template identity (voice slug / template id / sha256), passed
+   * one-way into the Langfuse generation metadata. Plain data — crosses the RPC
+   * edge fine. Omitted by call sites that don't have it; observability degrades
+   * gracefully (the generation is still emitted, just without prompt metadata).
+   */
+  promptMeta?: PromptMeta;
 }
 
 export class GeminiProxy extends DurableObject<Env> {
@@ -57,22 +66,60 @@ export class GeminiProxy extends DurableObject<Env> {
     });
 
     const { runId } = req;
+    let result: GeminiResult;
     if (runId === undefined) {
-      return client.generate(req.opts);
+      result = await client.generate(req.opts);
+    } else {
+      // Serialize thought POSTs onto a promise chain so chunks reach RUN_STREAM in
+      // order (the frontend concatenates contiguous chunks per agent). A failed
+      // POST is swallowed — a broken SSE pipe must never abort generation.
+      let chain: Promise<void> = Promise.resolve();
+      const onThought: ThoughtCallback = (agent, chunk) => {
+        chain = chain.then(() => this.appendThought(runId, agent, chunk));
+      };
+      result = await client.generate({ ...req.opts, onThought });
+      // Ensure every queued thought lands before the step's await resolves.
+      await chain;
     }
 
-    // Serialize thought POSTs onto a promise chain so chunks reach RUN_STREAM in
-    // order (the frontend concatenates contiguous chunks per agent). A failed
-    // POST is swallowed — a broken SSE pipe must never abort generation.
-    let chain: Promise<void> = Promise.resolve();
-    const onThought: ThoughtCallback = (agent, chunk) => {
-      chain = chain.then(() => this.appendThought(runId, agent, chunk));
-    };
-
-    const result = await client.generate({ ...req.opts, onThought });
-    // Ensure every queued thought lands before the step's await resolves.
-    await chain;
+    // Additive observability: emit a Langfuse generation (one-way prompt → trace,
+    // grouped by runId). Strict no-op when LANGFUSE_ENABLED is unset / keys absent.
+    // Failures here NEVER propagate — the run's result is already in hand.
+    await this.observe(req, result);
     return result;
+  }
+
+  /**
+   * Record one Langfuse generation for this call and flush it within the DO
+   * lifecycle. No-op when Langfuse is disabled. NEVER throws — a tracing fault
+   * must not break a run, so all errors are swallowed.
+   */
+  private async observe(req: ProxyGenerateRequest, result: GeminiResult): Promise<void> {
+    try {
+      const langfuse = await getLangfuse(this.env);
+      if (langfuse === null) {
+        return;
+      }
+      emitGeneration(langfuse, {
+        agent: req.opts.agent,
+        systemPrompt: req.opts.systemPrompt,
+        userPrompt: req.opts.userPrompt,
+        rawText: result.rawText,
+        parsed: result.parsed,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        thinkingTokens: result.thinkingTokens,
+        latencyMs: result.latencyMs,
+        finishReason: result.finishReason,
+        runId: req.runId,
+        promptMeta: req.promptMeta,
+      });
+      // Flush within the DO lifecycle so the fetch-based exporter delivers before
+      // the isolate is frozen (the edge equivalent of the Python shutdown flush).
+      this.ctx.waitUntil(flushLangfuse(langfuse));
+    } catch {
+      // Intentionally swallowed — observability must never abort generation.
+    }
   }
 
   /** POST one `{agent}.thinking` event to the run's RUN_STREAM hub. */

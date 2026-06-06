@@ -15,7 +15,7 @@ from content_tool.agents.gap_analysis import run_gap_analysis
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
 from content_tool.db.models import Run
-from content_tool.gemini.client import RealGeminiClient
+from content_tool.gemini.factory import make_gemini_client
 
 
 @click.group()
@@ -80,7 +80,7 @@ async def _run(
     engine = make_engine(settings.postgres_url)
     sf = make_session_factory(engine)
 
-    gemini = RealGeminiClient(
+    gemini = make_gemini_client(
         api_key=settings.gemini_api_key,
         model=settings.gemini_model,
         thinking_level=settings.gemini_thinking_level,

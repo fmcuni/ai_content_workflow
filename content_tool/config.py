@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +47,23 @@ class Settings(BaseSettings):
     # Refresh route
     refresh_config_path: str = "config/refresh.yaml"
     refresh_cron_enabled: bool = True
+
+    # Langfuse observability (all optional; integration is a no-op when disabled)
+    langfuse_enabled: bool = False
+    langfuse_host: str = "http://localhost:3000"
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+
+    @field_validator("langfuse_enabled", mode="before")
+    @classmethod
+    def _empty_str_is_disabled(cls, value: object) -> object:
+        # A bare ``LANGFUSE_ENABLED=`` in an env file is a common way to express
+        # "off"; pydantic would otherwise reject the empty string as an invalid
+        # bool and crash startup. Treat it as the disabled default so the
+        # integration's no-op guarantee holds.
+        if isinstance(value, str) and value.strip() == "":
+            return False
+        return value
 
 
 def get_settings() -> Settings:

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.prompt_context import RunContext, set_run_context
 from content_tool.gemini.streaming import set_thought_emitter
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
@@ -300,6 +301,7 @@ class RunExecutor:
         # markers through the same SSE + persistence choke point.
         set_thought_emitter(_emit_thought)
         set_event_emitter(_emit_event)
+        set_run_context(RunContext(run_id=str(run_id)))
         self._event_log.start()
         try:
             # Re-detect the SEO plugin against the live WP target as the run

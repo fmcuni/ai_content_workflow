@@ -1,0 +1,124 @@
+# Langfuse self-hosted — all data stays in our own infra (no Langfuse Cloud).
+# Run:  docker compose -f deploy/langfuse/docker-compose.yml up -d
+#
+# After first boot, visit http://localhost:3000, create an organisation + project,
+# then copy the Public Key and Secret Key into your .env.local (or Wrangler secrets).
+#
+# Images: pin to a specific patch version in production for reproducibility.
+# Check https://github.com/langfuse/langfuse/releases for the latest.
+
+version: "3.9"
+
+services:
+  # ── Langfuse web / API ──────────────────────────────────────────────────
+  langfuse-web:
+    image: langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_started
+      langfuse-clickhouse:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://langfuse:langfuse@langfuse-db:5432/langfuse"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      CLICKHOUSE_URL: "http://langfuse-clickhouse:8123"
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+      NEXTAUTH_URL: "http://localhost:3000"
+      # Generate a strong random secret for production:
+      #   openssl rand -hex 32
+      NEXTAUTH_SECRET: "change-me-in-production"
+      SALT: "change-me-in-production"
+      # Disable Langfuse Cloud telemetry — all data is local
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: "bowtie"
+      LANGFUSE_INIT_ORG_NAME: "Bowtie"
+      LANGFUSE_INIT_PROJECT_ID: "content-tool"
+      LANGFUSE_INIT_PROJECT_NAME: "AI Content Tool"
+    networks:
+      - langfuse
+
+  # ── Langfuse background worker ──────────────────────────────────────────
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_started
+      langfuse-clickhouse:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://langfuse:langfuse@langfuse-db:5432/langfuse"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      CLICKHOUSE_URL: "http://langfuse-clickhouse:8123"
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+      TELEMETRY_ENABLED: "false"
+    networks:
+      - langfuse
+
+  # ── PostgreSQL (Langfuse metadata) ──────────────────────────────────────
+  langfuse-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - langfuse
+
+  # ── ClickHouse (traces / observations storage) ──────────────────────────
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user langfuse --password langfuse --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - langfuse
+
+  # ── Redis (queue / pub-sub) ──────────────────────────────────────────────
+  langfuse-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - langfuse_redis_data:/data
+    networks:
+      - langfuse
+
+volumes:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_redis_data:
+
+networks:
+  langfuse:
+    driver: bridge

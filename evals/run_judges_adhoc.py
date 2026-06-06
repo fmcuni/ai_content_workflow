@@ -19,7 +19,7 @@ import sys
 from content_tool import prompts_store
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
-from content_tool.gemini.client import RealGeminiClient
+from content_tool.gemini.factory import make_gemini_client
 from evals.judges import gather_inputs, score_run
 
 
@@ -35,7 +35,7 @@ async def main(run_id: str) -> None:
             raise SystemExit(f"run {run_id} not found or has no draft")
 
         assert settings.gemini_api_key, "GEMINI_API_KEY is required to run the judges"
-        gemini = RealGeminiClient(
+        gemini = make_gemini_client(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
             thinking_level="low",

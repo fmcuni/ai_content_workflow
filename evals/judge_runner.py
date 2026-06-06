@@ -3,6 +3,7 @@ from typing import Any
 
 from content_tool import prompts_store
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.prompt_context import PromptMeta, set_prompt_meta
 
 
 @dataclass
@@ -89,7 +90,21 @@ async def run_judge(
     use_url_context: bool = False,
     response_schema: dict[str, Any] | None = None,
 ) -> JudgeResult:
-    prompt = await prompts_store.get_assembled_standalone(f"judge_{metric}")
+    template_id = f"judge_{metric}"
+    prompt = await prompts_store.get_assembled_standalone(template_id)
+    # Bind prompt metadata so ObservedGeminiClient can attach it to the
+    # Langfuse generation without re-assembling the prompt.  If the store is
+    # not yet configured (e.g. unit tests that call run_judge directly without
+    # a DB) the RuntimeError is silently swallowed — no metadata is set and
+    # Langfuse simply records the generation without template linkage.
+    try:
+        row = await prompts_store.get_template_row_standalone(template_id)
+        if row is not None:
+            set_prompt_meta(PromptMeta(
+                template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256
+            ))
+    except RuntimeError:
+        pass
     schema = response_schema or JUDGE_SCHEMAS.get(metric, _DEFAULT_SCHEMA)
     result = await gemini.generate(
         agent=f"judge.{metric}",

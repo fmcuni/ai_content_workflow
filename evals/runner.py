@@ -1,11 +1,16 @@
 import asyncio
+import json
+import logging
 import subprocess
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from content_tool.config import get_settings
 from content_tool.db.models import Eval
+
+logger = logging.getLogger(__name__)
 
 # Judge only the most-recent N published runs per nightly run, and skip runs that
 # already have judge scores — bounds the recurring Gemini cost.
@@ -17,6 +22,52 @@ def current_commit_sha() -> str:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()  # noqa: S607
     except Exception:
         return "unknown"
+
+
+def _emit_langfuse_score(
+    *,
+    run_id: UUID | None,
+    metric: str,
+    score: float | None,
+    judge_notes: dict[str, object] | None,
+) -> None:
+    """Best-effort Langfuse score emission.  Never raises.
+
+    Attaches a Score to the Langfuse trace identified by ``run_id``.  When
+    ``run_id`` is ``None`` (fixture-only eval with no corresponding run) the
+    call is silently skipped — there is no trace to attach to.
+
+    Guardrail: this function is only reachable when ``LANGFUSE_ENABLED=true``
+    and the singleton client is initialised.  All exceptions are caught so a
+    Langfuse outage never breaks the DB write path.
+    """
+    if run_id is None:
+        return
+    if score is None:
+        return
+    try:
+        from content_tool.observability.langfuse_client import get_langfuse
+
+        lf = get_langfuse()
+        if lf is None:
+            return
+
+        comment: str | None = None
+        if judge_notes:
+            try:
+                comment = json.dumps(judge_notes, ensure_ascii=False)
+            except Exception:
+                comment = str(judge_notes)
+
+        lf.create_score(
+            trace_id=str(run_id),
+            name=metric,
+            value=score,
+            comment=comment,
+        )
+    except Exception:
+        logger.debug("Langfuse score emission failed for metric=%s run_id=%s", metric, run_id,
+                     exc_info=True)
 
 
 async def record_eval(
@@ -37,6 +88,18 @@ async def record_eval(
         ))
         await session.commit()
 
+    # Mirror score to Langfuse (best-effort, never raises, no-op when disabled).
+    try:
+        if get_settings().langfuse_enabled:
+            _emit_langfuse_score(
+                run_id=run_id,
+                metric=metric,
+                score=score,
+                judge_notes=judge_notes,
+            )
+    except Exception:
+        logger.debug("Langfuse score gating check failed", exc_info=True)
+
 
 async def main() -> None:
     """Run reference + LLM-judge evals against recent published runs; emit to content_tool.evals."""
@@ -46,7 +109,7 @@ async def main() -> None:
     from content_tool.config import get_settings
     from content_tool.db.connection import make_engine, make_session_factory
     from content_tool.db.models import Citation, Draft, Run
-    from content_tool.gemini.client import RealGeminiClient
+    from content_tool.gemini.factory import make_gemini_client
     from evals.judges import JUDGE_METRICS, gather_inputs, score_run
 
     settings = get_settings()
@@ -85,7 +148,7 @@ async def main() -> None:
 
     # LLM-judge pass — bounded to the most recent runs, skipping already-judged ones.
     assert settings.gemini_api_key, "GEMINI_API_KEY is required for the LLM-judge pass"
-    gemini = RealGeminiClient(
+    gemini = make_gemini_client(
         api_key=settings.gemini_api_key, model=settings.gemini_model, thinking_level="low"
     )
     for r in runs[:JUDGE_RUN_LIMIT]:

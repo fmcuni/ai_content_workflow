@@ -9,6 +9,7 @@ from content_tool import prompts_store
 from content_tool.config import Settings, get_settings
 from content_tool.db.models import GapAnalysisRow, Run
 from content_tool.gemini.client import GeminiClient
+from content_tool.gemini.prompt_context import PromptMeta, set_prompt_meta
 from content_tool.models.gap_analysis import GapAnalysis
 
 
@@ -18,6 +19,13 @@ async def build_system_prompt(
     template = await prompts_store.get_assembled(
         "gap_analysis", voice_slug=voice_slug, session=session
     )
+    row = await prompts_store.get_template_row(
+        "gap_analysis", voice_slug=voice_slug, session=session
+    )
+    if row is not None:
+        set_prompt_meta(PromptMeta(
+            template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256
+        ))
     return template.replace("{today_date}", today.isoformat())
 
 

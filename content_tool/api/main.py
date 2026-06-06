@@ -32,7 +32,8 @@ from content_tool.api.sse import RunExecutor
 from content_tool.api.wp_options_cache import TtlCache
 from content_tool.config import Settings, get_settings, is_configured
 from content_tool.db.connection import make_engine, make_session_factory
-from content_tool.gemini.client import RealGeminiClient
+from content_tool.gemini.factory import make_gemini_client
+from content_tool.observability.langfuse_client import flush_langfuse, init_langfuse
 from content_tool.observability.logging import configure_logging
 from content_tool.observability.tracing import configure_tracing
 from content_tool.wordpress.client import WordPressClient
@@ -75,7 +76,7 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
 
     engine = make_engine(settings.postgres_url)
     sf = make_session_factory(engine)
-    gemini = RealGeminiClient(
+    gemini = make_gemini_client(
         api_key=settings.gemini_api_key,
         model=settings.gemini_model,
         thinking_level=settings.gemini_thinking_level,
@@ -143,6 +144,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await flush_langfuse()
         engine = getattr(app.state, "engine", None)
         if engine is not None:
             await engine.dispose()
@@ -151,6 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     configure_logging(os.getenv("LOG_LEVEL", "info"))
     configure_tracing()
+    init_langfuse()
     app = FastAPI(title="Bowtie AI Content Tool", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
