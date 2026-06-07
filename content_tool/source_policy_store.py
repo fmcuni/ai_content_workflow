@@ -79,7 +79,10 @@ def clean(raw: dict[str, Any]) -> dict[str, Any]:
     prefer = _section(raw, "prefer")
     ce = _section(raw, "community_exception")
     return {
-        "deny": {"domains": _clean_list(deny, "domains", lower=True)},
+        "deny": {
+            "domains": _clean_list(deny, "domains", lower=True),
+            "tlds": _clean_list(deny, "tlds", lower=True),
+        },
         "prefer": {
             "tlds": _clean_list(prefer, "tlds", lower=True),
             "domains": _clean_list(prefer, "domains", lower=True),

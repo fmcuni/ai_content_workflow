@@ -22,6 +22,7 @@ export const SOURCE_POLICY_RAW = {
       "hsbclife.com.hk",
       "fwd.com.hk",
     ],
+    tlds: [] as string[],
   },
   prefer: {
     tlds: [".gov.hk", ".gov", ".edu", ".edu.hk"],
@@ -49,7 +50,7 @@ export const SOURCE_POLICY_RAW = {
 
 /** The normalised policy shape stored as canonical JSON in the DB row. */
 export interface CleanPolicy {
-  deny: { domains: string[] };
+  deny: { domains: string[]; tlds: string[] };
   prefer: { tlds: string[]; domains: string[] };
   community_exception: { topic_categories: string[]; allowed_domains: string[] };
 }
@@ -88,7 +89,7 @@ export function cleanPolicy(raw: unknown): CleanPolicy {
   const prefer = asSection(raw, "prefer");
   const ce = asSection(raw, "community_exception");
   return {
-    deny: { domains: cleanList(deny, "domains") },
+    deny: { domains: cleanList(deny, "domains"), tlds: cleanList(deny, "tlds") },
     prefer: { tlds: cleanList(prefer, "tlds"), domains: cleanList(prefer, "domains") },
     community_exception: {
       topic_categories: cleanList(ce, "topic_categories"),
@@ -125,6 +126,11 @@ export interface PolicyDecision {
 
 /** Bowtie-owned domains that get the "bowtie_owned" denial reason. */
 const BOWTIE_DOMAINS: ReadonlySet<string> = new Set(["bowtie.com.hk", "bowtie.com"]);
+
+/** Lowercase a TLD entry and strip any leading dot (".cn" -> "cn"). */
+function normaliseTld(tld: string): string {
+  return tld.trim().toLowerCase().replace(/^\.+/, "");
+}
 
 // ---------------------------------------------------------------------------
 // Apex-domain extraction (mirrors tldextract logic for the domains we handle)
@@ -175,6 +181,8 @@ function apexDomain(raw: string): string {
 
 export class SourcePolicy {
   readonly denyDomains: ReadonlySet<string>;
+  /** Denied TLDs, normalised to a bare lowercased suffix (no leading dot). */
+  readonly denyTlds: readonly string[];
   readonly preferTlds: readonly string[];
   readonly preferDomains: ReadonlySet<string>;
   readonly communityTopicCategories: ReadonlySet<string>;
@@ -183,6 +191,7 @@ export class SourcePolicy {
   constructor(raw: unknown = SOURCE_POLICY_RAW) {
     const c = cleanPolicy(raw);
     this.denyDomains = new Set(c.deny.domains);
+    this.denyTlds = c.deny.tlds.map(normaliseTld);
     this.preferTlds = c.prefer.tlds;
     this.preferDomains = new Set(c.prefer.domains);
     this.communityTopicCategories = new Set(c.community_exception.topic_categories);
@@ -219,6 +228,12 @@ export class SourcePolicy {
       return { decision: "denied", reason: "competitor", matchedRule: apex };
     }
 
+    for (const tld of this.denyTlds) {
+      if (apex === tld || apex.endsWith(`.${tld}`)) {
+        return { decision: "denied", reason: "other", matchedRule: `denied-tld:${tld}` };
+      }
+    }
+
     return { decision: "allowed", reason: null, matchedRule: apex };
   }
 
@@ -245,6 +260,12 @@ export class SourcePolicy {
       this.communityAllowedDomains.size > 0
         ? [...this.communityAllowedDomains].sort().join("、")
         : "（未設定）";
+    // Denied-TLD line is emitted only when configured, so the default rendered
+    // block (and its prompt sha) is unchanged for empty policies.
+    const deniedTldLines =
+      this.denyTlds.length > 0
+        ? [`- 額外硬性禁止：不可引用屬於以下頂級域名（TLD）的來源：${this.denyTlds.join(" / ")}。`]
+        : [];
 
     return [
       "引用與資料來源規則（由 source_policy 統一管理）：",
@@ -259,6 +280,7 @@ export class SourcePolicy {
       `- 高度建議優先採用（例子，非窮舉清單）：TLD ${tlds}；機構 ${domains}。` +
         "若有更權威、更貼題的官方一手來源，亦可採用。",
       "- 硬性禁止：不可引用 bowtie.com.hk 或任何保險公司網站作為資料來源。",
+      ...deniedTldLines,
       `- 社區來源例外：只有當 topic_category 屬於「${cats}」時，` +
         `方可引用社區／論壇來源（例如 ${commDomains}）；其他題材一律不可引用社區來源。`,
       "- 引用必須在文中自然 ground 到具體段落，不可堆砌或泛泛而引。",

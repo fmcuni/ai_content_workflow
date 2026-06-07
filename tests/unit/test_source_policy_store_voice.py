@@ -13,6 +13,19 @@ from content_tool import source_policy_store
 from content_tool.source_policy_store import SHARED_VOICE, PolicySnapshot
 
 
+def test_clean_canonical_includes_deny_tlds_in_fixed_order() -> None:
+    # deny.tlds is normalised (trim+lowercase+dedup) and serialised right after
+    # deny.domains. The exact byte order must match the TS canonicalPolicyJson so
+    # the cross-backend sha256 token stays portable.
+    out = source_policy_store.clean({"deny": {"tlds": [" .CN ", ".cn", "RU"]}})
+    assert out["deny"] == {"domains": [], "tlds": [".cn", "ru"]}
+    assert source_policy_store.canonical_json({"deny": {"tlds": [".cn"]}}) == (
+        '{"deny":{"domains":[],"tlds":[".cn"]},'
+        '"prefer":{"tlds":[],"domains":[]},'
+        '"community_exception":{"topic_categories":[],"allowed_domains":[]}}'
+    )
+
+
 def test_fallback_snapshot_reads_yaml_and_carries_voice() -> None:
     snap = source_policy_store.fallback_snapshot("ghost-voice")
     assert snap.voice_slug == "ghost-voice"

@@ -34,6 +34,7 @@ DEFAULT_VOICE = "bowtie-editor"
 _MAX_POLICY_BYTES = 64 * 1024
 _LIST_FIELDS = (
     ("deny", "domains"),
+    ("deny", "tlds"),
     ("prefer", "tlds"),
     ("prefer", "domains"),
     ("community_exception", "topic_categories"),
