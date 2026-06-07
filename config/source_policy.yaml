@@ -12,6 +12,9 @@ deny:
     - zurich.com.hk
     - hsbclife.com.hk
     - fwd.com.hk
+  # Denied TLDs (bare suffix or with leading dot, e.g. ".cn"). Empty by default —
+  # any source whose apex ends with one of these is denied as a citation source.
+  tlds: []
 prefer:
   tlds: [".gov.hk", ".gov", ".edu", ".edu.hk"]
   domains:

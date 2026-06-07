@@ -22,6 +22,11 @@ class PolicyDecision:
 _BOWTIE_DOMAINS = {"bowtie.com.hk", "bowtie.com"}
 
 
+def _normalise_tld(tld: str) -> str:
+    """Lowercase a TLD entry and strip any leading dot (``.cn`` -> ``cn``)."""
+    return tld.strip().lower().lstrip(".")
+
+
 def _str_list(mapping: dict[str, object], key: str) -> list[str]:
     val = mapping.get(key, [])
     if isinstance(val, list):
@@ -42,6 +47,9 @@ class SourcePolicy:
         prefer = _section(raw, "prefer")
         ce = _section(raw, "community_exception")
         self.deny_domains: set[str] = set(_str_list(deny, "domains"))
+        # Denied TLDs are normalised to a bare, lowercased suffix (no leading
+        # dot) so matching is a simple apex-suffix test in ``evaluate``.
+        self.deny_tlds: list[str] = [_normalise_tld(t) for t in _str_list(deny, "tlds")]
         self.prefer_tlds: list[str] = _str_list(prefer, "tlds")
         self.prefer_domains: set[str] = set(_str_list(prefer, "domains"))
         self.community_topic_categories: set[str] = set(_str_list(ce, "topic_categories"))
@@ -74,6 +82,10 @@ class SourcePolicy:
         if apex in self.deny_domains:
             return PolicyDecision("denied", reason="competitor", matched_rule=apex)
 
+        for tld in self.deny_tlds:
+            if apex == tld or apex.endswith(f".{tld}"):
+                return PolicyDecision("denied", reason="other", matched_rule=f"denied-tld:{tld}")
+
         return PolicyDecision("allowed", matched_rule=apex)
 
     def to_prompt_block(self) -> str:
@@ -86,6 +98,16 @@ class SourcePolicy:
         domains = "、".join(sorted(self.prefer_domains)) if self.prefer_domains else "（未設定）"
         cats = "、".join(sorted(self.community_topic_categories)) or "（未設定）"
         comm_domains = "、".join(sorted(self.community_allowed_domains)) or "（未設定）"
+        # Denied-TLD line is emitted only when configured, so the default
+        # rendered block (and its prompt sha) is unchanged for empty policies.
+        denied_tld_lines = (
+            [
+                f"- 額外硬性禁止：不可引用屬於以下頂級域名（TLD）的來源："
+                f"{' / '.join(self.deny_tlds)}。"
+            ]
+            if self.deny_tlds
+            else []
+        )
         return "\n".join(
             [
                 "引用與資料來源規則（由 source_policy 統一管理）：",
@@ -100,6 +122,7 @@ class SourcePolicy:
                 f"- 高度建議優先採用（例子，非窮舉清單）：TLD {tlds}；機構 {domains}。"
                 "若有更權威、更貼題的官方一手來源，亦可採用。",
                 "- 硬性禁止：不可引用 bowtie.com.hk 或任何保險公司網站作為資料來源。",
+                *denied_tld_lines,
                 f"- 社區來源例外：只有當 topic_category 屬於「{cats}」時，"
                 f"方可引用社區／論壇來源（例如 {comm_domains}）；其他題材一律不可引用社區來源。",
                 "- 引用必須在文中自然 ground 到具體段落，不可堆砌或泛泛而引。",

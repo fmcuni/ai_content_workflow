@@ -44,6 +44,7 @@ const DEFAULT_VOICE = "bowtie-editor";
 
 const LIST_FIELDS: ReadonlyArray<readonly [string, string]> = [
   ["deny", "domains"],
+  ["deny", "tlds"],
   ["prefer", "tlds"],
   ["prefer", "domains"],
   ["community_exception", "topic_categories"],

@@ -11,7 +11,7 @@ import { sourcePolicyApi } from "@/lib/api";
 import type { SourcePolicyDoc } from "@/lib/types";
 
 const EMPTY_DOC: SourcePolicyDoc = {
-  deny: { domains: [] },
+  deny: { domains: [], tlds: [] },
   prefer: { tlds: [], domains: [] },
   community_exception: { topic_categories: [], allowed_domains: [] },
 };
@@ -224,7 +224,14 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
           hint="Competitors / insurers — never cited"
           items={doc.deny.domains}
           placeholder="manulife.com.hk"
-          onChange={(domains) => setDoc((d) => ({ ...d, deny: { domains } }))}
+          onChange={(domains) => setDoc((d) => ({ ...d, deny: { ...d.deny, domains } }))}
+        />
+        <ChipList
+          label="Denied TLDs"
+          hint="Any source under these TLDs — never cited"
+          items={doc.deny.tlds}
+          placeholder=".cn"
+          onChange={(tlds) => setDoc((d) => ({ ...d, deny: { ...d.deny, tlds } }))}
         />
         <ChipList
           label="Preferred TLDs"

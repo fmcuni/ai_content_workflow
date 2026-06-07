@@ -755,7 +755,7 @@ export interface UserPromptExample {
 // --- Source policy (editable) ---------------------------------------------
 
 export interface SourcePolicyDoc {
-  deny: { domains: string[] };
+  deny: { domains: string[]; tlds: string[] };
   prefer: { tlds: string[]; domains: string[] };
   community_exception: { topic_categories: string[]; allowed_domains: string[] };
 }
