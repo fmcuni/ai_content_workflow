@@ -8,6 +8,7 @@
 
 import type { Sql } from "postgres";
 import { toJsonb } from "../db/serialize";
+import { pyJsonDumps } from "../util/py_json";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import { getAssembled } from "../prompts/store";
 import { loadPersona, toPromptBlock } from "./persona";
@@ -131,46 +132,6 @@ async function buildSystemPrompt(
     .replace("{persona_block}", toPromptBlock(persona, contextText))
     .replace("{today_date}", todayIso())
     .replace("{source_policy_block}", policy.toPromptBlock());
-}
-
-/**
- * Reproduce Python `json.dumps(value, ensure_ascii=False)` exactly: compact
- * `JSON.stringify` re-spaced to Python's default `", "` / `": "` separators
- * (outside string literals), with non-ASCII preserved. Same logic as the
- * helper in audit.ts — the writer prompt must be byte-identical to the Python
- * reference so prompt-sha parity holds.
- */
-function pyJsonDumps(value: unknown): string {
-  return reSpaceJson(JSON.stringify(value));
-}
-
-function reSpaceJson(compact: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (const ch of compact) {
-    if (escaped) {
-      out += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      out += ch;
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      out += ch;
-      continue;
-    }
-    if (!inString && (ch === ":" || ch === ",")) {
-      out += ch + " ";
-      continue;
-    }
-    out += ch;
-  }
-  return out;
 }
 
 /**

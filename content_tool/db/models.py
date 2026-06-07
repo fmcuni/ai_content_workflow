@@ -385,53 +385,46 @@ class RefreshEvaluation(Base):
     latency_ms: Mapped[int | None]
 
 
-class WpUserCache(Base):
+class _WpEntityCache(Base):
+    """Shared shape for the WordPress user/category lookup caches: a WP integer
+    id plus name/slug, refreshed in bulk. Subclasses set the table name and the
+    per-table name index."""
+
+    __abstract__ = True
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class WpUserCache(_WpEntityCache):
     __tablename__ = "wp_users"
     __table_args__ = (
         Index("wp_users_name_idx", "name"),
         {"schema": "content_tool"},
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    slug: Mapped[str] = mapped_column(String, nullable=False)
-    synced_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=text("now()")
-    )
 
-
-class WpCategoryCache(Base):
+class WpCategoryCache(_WpEntityCache):
     __tablename__ = "wp_categories"
     __table_args__ = (
         Index("wp_categories_name_idx", "name"),
         {"schema": "content_tool"},
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    slug: Mapped[str] = mapped_column(String, nullable=False)
-    synced_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=text("now()")
-    )
 
-
-class PromptVersion(Base):
-    """Immutable history row for every prompt-template save or revert.
-
-    The on-disk file under ``prompts/`` is the live copy; this table is the
-    audit trail and the source for the editor's "History" panel + one-click
-    revert. ``parent_sha256`` chains rows so the lineage is recoverable even
-    if ``saved_at`` ties.
+class _VersionRow(Base):
+    """Shared columns for the append-only prompt / source-policy version history:
+    a sha-chained, byte-counted ``body`` snapshot with author + kind. Subclasses
+    add their target-id column (``template_id`` / ``policy_id``), table name, and
+    indexes. ``parent_sha256`` chains rows so the lineage is recoverable even if
+    ``saved_at`` ties.
     """
 
-    __tablename__ = "prompt_versions"
-    __table_args__ = (
-        Index("prompt_versions_template_idx", "template_id", "saved_at"),
-        Index(
-            "prompt_versions_voice_idx", "voice_slug", "template_id", "saved_at"
-        ),
-        {"schema": "content_tool"},
-    )
+    __abstract__ = True
 
     version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
@@ -439,7 +432,6 @@ class PromptVersion(Base):
     voice_slug: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'__shared__'")
     )
-    template_id: Mapped[str] = mapped_column(String, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
     parent_sha256: Mapped[str | None] = mapped_column(String)
     body: Mapped[str] = mapped_column(String, nullable=False)
@@ -451,6 +443,26 @@ class PromptVersion(Base):
     kind: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'save'")
     )
+
+
+class PromptVersion(_VersionRow):
+    """Immutable history row for every prompt-template save or revert.
+
+    The on-disk file under ``prompts/`` is the live copy; this table is the
+    audit trail and the source for the editor's "History" panel + one-click
+    revert.
+    """
+
+    __tablename__ = "prompt_versions"
+    __table_args__ = (
+        Index("prompt_versions_template_idx", "template_id", "saved_at"),
+        Index(
+            "prompt_versions_voice_idx", "voice_slug", "template_id", "saved_at"
+        ),
+        {"schema": "content_tool"},
+    )
+
+    template_id: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class PromptTemplate(Base):
@@ -516,11 +528,11 @@ class SourcePolicyRecord(Base):
     updated_by: Mapped[str | None] = mapped_column(String)
 
 
-class SourcePolicyVersion(Base):
+class SourcePolicyVersion(_VersionRow):
     """Immutable history row for every source-policy save or revert.
 
-    Mirrors :class:`PromptVersion`. ``parent_sha256`` chains rows so the lineage
-    is recoverable even if ``saved_at`` ties.
+    Mirrors :class:`PromptVersion` (shares :class:`_VersionRow`), keyed by
+    ``policy_id`` instead of ``template_id``.
     """
 
     __tablename__ = "source_policy_versions"
@@ -530,24 +542,7 @@ class SourcePolicyVersion(Base):
         {"schema": "content_tool"},
     )
 
-    version_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
-    voice_slug: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'__shared__'")
-    )
     policy_id: Mapped[str] = mapped_column(String, nullable=False)
-    sha256: Mapped[str] = mapped_column(String, nullable=False)
-    parent_sha256: Mapped[str | None] = mapped_column(String)
-    body: Mapped[str] = mapped_column(String, nullable=False)
-    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    saved_by: Mapped[str] = mapped_column(String, nullable=False)
-    saved_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=text("now()")
-    )
-    kind: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'save'")
-    )
 
 
 class RunEventLog(Base):

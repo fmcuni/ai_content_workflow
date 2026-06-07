@@ -12,6 +12,7 @@ import type { Sql } from "postgres";
 import { toJsonb } from "../db/serialize";
 
 import { getAssembled } from "../prompts/store";
+import { pyJsonDumps } from "../util/py_json";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import { AUDIT_OUTPUT_SCHEMA, type AuditFinding, type AuditOutput } from "./schemas";
 import { loadPersona, toPromptBlock } from "./persona";
@@ -49,55 +50,6 @@ export interface AuditTokens {
   tokensOut: number;
   thinkingTokens: number;
   latencyMs: number;
-}
-
-// ---------------------------------------------------------------------------
-// json.dumps(..., ensure_ascii=False) parity
-//
-// Python's json.dumps uses item/key separators ", " and ": " (with spaces) by
-// default. JSON.stringify uses no spaces. Re-introduce the spaces so the prompt
-// bytes match the Python source exactly. ensure_ascii=False ⇒ keep raw UTF-8,
-// which JSON.stringify already does.
-// ---------------------------------------------------------------------------
-
-function pyJsonDumps(value: unknown): string {
-  // JSON.stringify with two-space indent, then collapse the pretty-printing
-  // back to Python's compact-with-spaces form is brittle; instead serialise
-  // compactly and re-space the structural separators that sit outside strings.
-  return reSpaceJson(JSON.stringify(value));
-}
-
-/**
- * Insert a space after structural `:` and `,` separators that are NOT inside a
- * JSON string literal, reproducing Python's default `", "` / `": "` separators.
- */
-function reSpaceJson(compact: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (const ch of compact) {
-    if (escaped) {
-      out += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      out += ch;
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      out += ch;
-      continue;
-    }
-    if (!inString && (ch === ":" || ch === ",")) {
-      out += ch + " ";
-      continue;
-    }
-    out += ch;
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import type { Sql } from "postgres";
 import { getRefreshConfig } from "../config/refresh";
 import type { DeterministicResult } from "./deterministic_checks";
 import { getAssembled } from "../prompts/store";
+import { pyJsonDumps, todayDateUtc } from "../util/py_json";
 import { loadPersona, toPromptBlock } from "../agents/persona";
 import { AUDIT_OUTPUT_SCHEMA, type AuditOutput } from "../agents/schemas";
 import type { GeminiClient } from "../gemini/types";
@@ -109,49 +110,6 @@ export function computeStaleness(
 // ---------------------------------------------------------------------------
 // llm_audit_published
 // ---------------------------------------------------------------------------
-
-/**
- * json.dumps(..., ensure_ascii=False) parity — Python uses ", " / ": "
- * separators. Re-introduce a space after structural `:`/`,` outside strings so
- * the prompt bytes match the Python source exactly (mirrors audit.ts).
- */
-function reSpaceJson(compact: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (const ch of compact) {
-    if (escaped) {
-      out += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      out += ch;
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      out += ch;
-      continue;
-    }
-    if (!inString && (ch === ":" || ch === ",")) {
-      out += ch + " ";
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
-
-function pyJsonDumps(value: unknown): string {
-  return reSpaceJson(JSON.stringify(value));
-}
-
-/** YYYY-MM-DD in UTC — mirrors Python `date.today()` slotted into the template. */
-function todayDateUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export interface LlmAuditInput {
   html: string;
