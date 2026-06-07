@@ -198,24 +198,6 @@ function resolveBodyWithOverride(
 // ---------------------------------------------------------------------------
 
 /**
- * Raw, unresolved body for `(voiceSlug, templateId)` (no include expansion).
- * Follows the `voice -> __shared__` snapshot fallback. Throws
- * PromptTemplateNotFound if neither the voice nor `__shared__` has the row.
- */
-export async function getBody(
-  sql: Sql,
-  templateId: string,
-  voiceSlug: string = SHARED_VOICE,
-): Promise<string> {
-  const view = voiceView(await snapshot(sql), voiceSlug);
-  const row = view.get(templateId);
-  if (row === undefined) {
-    throw new PromptTemplateNotFound(templateId);
-  }
-  return row.body;
-}
-
-/**
  * Fully-resolved body for `(voiceSlug, templateId)` (all includes inlined).
  * Includes resolve within `voiceSlug`, falling back to `__shared__` per row.
  */
