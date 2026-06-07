@@ -55,7 +55,9 @@ deploy/cloudflare-workers/  Production hosting: TypeScript port of the backend a
                      Cloudflare Worker (Hono + Workflows + Durable Objects, DB via
                      postgres.js over Hyperdrive). See its README + AGENTS notes.
 docs/superpowers/    specs/ and plans/ — design docs per feature, dated
-evals/               LLM-judge evals + fixtures (nightly cron + PR label trigger)
+evals/               LLM-judge evals + fixtures (nightly cron + PR label trigger);
+                     prompt_advisor.py = aggregate LLM-as-judge that prescribes
+                     prompt fixes (`python -m evals.run_prompt_advisor`)
 tests/{unit,integration,fixtures}
 scripts/             Cron entrypoints (e.g. refresh_scan)
 ```

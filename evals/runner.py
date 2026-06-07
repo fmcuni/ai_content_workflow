@@ -102,8 +102,13 @@ async def record_eval(
 
 
 async def main() -> None:
-    """Run reference + LLM-judge evals against recent published runs; emit to content_tool.evals."""
-    from sqlalchemy import select
+    """Run reference + LLM-judge evals against recent draft-bearing runs.
+
+    A run is judged once it has a draft (HITL_2 onwards) — it need not be
+    published, so prompt quality can be evaluated before anything ships.
+    Emits to content_tool.evals.
+    """
+    from sqlalchemy import exists, select
 
     from content_tool import prompts_store
     from content_tool.config import get_settings
@@ -119,7 +124,10 @@ async def main() -> None:
 
     async with sf() as session:
         runs = (await session.execute(
-            select(Run).where(Run.status == "published").order_by(Run.created_at.desc()).limit(30)
+            select(Run)
+            .where(exists().where(Draft.run_id == Run.run_id))
+            .order_by(Run.created_at.desc())
+            .limit(30)
         )).scalars().all()
 
         for r in runs:

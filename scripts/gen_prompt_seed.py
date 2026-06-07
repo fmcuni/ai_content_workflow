@@ -108,6 +108,7 @@ _JUDGES = {
     "judge_coverage": "coverage.md",
     "judge_citation_alignment": "citation_alignment.md",
     "judge_hk_localisation": "hk_localisation.md",
+    "judge_prompt_advisor": "prompt_advisor.md",
 }
 
 
