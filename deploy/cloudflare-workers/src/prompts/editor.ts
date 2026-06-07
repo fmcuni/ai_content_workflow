@@ -71,14 +71,6 @@ export const REQUIRED_PLACEHOLDERS: Readonly<Record<string, readonly string[]>> 
 };
 
 // ---------------------------------------------------------------------------
-// Editable gate
-// ---------------------------------------------------------------------------
-
-export function isEditable(row: Pick<PromptTemplateRow, "category">): boolean {
-  return EDITABLE_CATEGORIES.has(row.category);
-}
-
-// ---------------------------------------------------------------------------
 // Include / placeholder discovery
 // ---------------------------------------------------------------------------
 

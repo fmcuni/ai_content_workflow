@@ -723,12 +723,3 @@ export async function detectSeoPlugin(env: Env): Promise<SeoPlugin | null> {
   if (keys.includes("rank_math_description")) return "rankmath";
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// Target label
-// ---------------------------------------------------------------------------
-
-/** Expose the WP_TARGET env var — surfaced by the dry-publish endpoint. */
-export function getTargetLabel(env: Env): string | undefined {
-  return env.WP_TARGET;
-}

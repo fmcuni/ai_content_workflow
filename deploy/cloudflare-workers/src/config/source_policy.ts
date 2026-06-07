@@ -267,6 +267,3 @@ export class SourcePolicy {
     ].join("\n");
   }
 }
-
-/** Singleton instance — import this for normal use. */
-export const sourcePolicyInstance = new SourcePolicy();
