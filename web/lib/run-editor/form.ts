@@ -46,10 +46,12 @@ export function buildSnapshotIn(
   form: Hitl2Request,
   comments: Hitl2Comment[],
   trigger: Hitl2SnapshotTrigger,
+  committedHtml?: string | null,
 ): Hitl2SnapshotIn {
   return {
     trigger,
     html_body: html,
+    committed_html_body: committedHtml ?? null,
     seo_title: form.edited_seo_title ?? null,
     meta_description: form.edited_meta_description ?? null,
     notes: form.notes ?? null,
@@ -103,6 +105,7 @@ export function buildArticlePayload(html: string, form: Hitl2Request): ArticleEd
 export function snapshotKey(s: Hitl2SnapshotIn): string {
   return JSON.stringify([
     s.html_body,
+    s.committed_html_body ?? null,
     s.seo_title ?? null,
     s.meta_description ?? null,
     s.notes ?? null,
@@ -126,6 +129,7 @@ export function snapshotInFromSaved(s: Hitl2Snapshot): Hitl2SnapshotIn {
   return {
     trigger: "manual",
     html_body: s.html_body,
+    committed_html_body: s.committed_html_body ?? null,
     seo_title: s.seo_title ?? null,
     meta_description: s.meta_description ?? null,
     notes: s.notes ?? null,

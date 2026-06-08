@@ -15,6 +15,8 @@ import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
 import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
+import { TrackedChangesView } from "@/components/TrackedChangesView";
+import { computeTrackedChanges } from "@/lib/tracked-changes";
 import { useArticleComments } from "@/lib/useArticleComments";
 import { useReviewThreads } from "@/lib/useReviewThreads";
 import { useApplyEdits } from "@/lib/useApplyEdits";
@@ -42,7 +44,7 @@ import {
 import { api } from "@/lib/api";
 import type { Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline } from "@/lib/types";
 
-type EditTab = "article" | "outline" | "raw" | "payload";
+type EditTab = "article" | "outline" | "tracked" | "raw" | "payload";
 
 export default function EditRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -63,6 +65,9 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const [outline, setOutline] = useState<Outline | null>(null);
   const [outlineDirty, setOutlineDirty] = useState(false);
   const [html, setHtml] = useState("");
+  // Tracked-changes baseline (last committed body); defaults to the render so a
+  // fresh editor has zero pending. AI edits advance it.
+  const [committedHtml, setCommittedHtml] = useState("");
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -114,10 +119,12 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
         const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
         const sent = new Set(ctx.commentIds);
         setHtml(cleaned);
+        setCommittedHtml(cleaned); // AI edits advance the baseline (human-only tracking)
         setComments((cs) => cs.filter((c) => !sent.has(c.id)));
         setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
       } else {
         setHtml(newHtml);
+        setCommittedHtml(newHtml);
         setForm((f) => ({ ...f, notes: "" }));
       }
     },
@@ -152,6 +159,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     if (hydratedFromSnapshotRef.current) return; // a saved snapshot owns the body
     renderSeededRef.current = true;
     setHtml(render.data.html_body);
+    setCommittedHtml(render.data.html_body); // no pending tracked changes on load
     setForm((f) => ({
       ...f,
       edited_seo_title: render.data!.seo_title,
@@ -185,9 +193,18 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   }, [run.data, existingPost.data, existingPostSettled]);
 
   const snapshotIn = useMemo<Hitl2SnapshotIn>(
-    () => buildSnapshotIn(html, form, comments, "manual"),
-    [html, form, comments],
+    () => buildSnapshotIn(html, form, comments, "manual", committedHtml),
+    [html, form, comments, committedHtml],
   );
+  // Pending human tracked changes (committed baseline vs working body).
+  const pendingChanges = useMemo(
+    () => computeTrackedChanges(committedHtml, html).hunks.length,
+    [committedHtml, html],
+  );
+  const commentOnChange = (anchorText: string) => {
+    reviewThreads.beginThread(`r-${Math.random().toString(36).slice(2, 10)}`, anchorText);
+    setRightTab("review");
+  };
 
   // Clean baseline mirrors the render seed (body + SEO) and the WP-metadata
   // prefill (run row first, existing post as fallback), so a freshly-loaded
@@ -199,6 +216,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     return snapshotKey({
       trigger: "manual",
       html_body: render.data.html_body,
+      committed_html_body: render.data.html_body,
       seo_title: render.data.seo_title,
       meta_description: render.data.meta_description,
       notes: null,
@@ -217,6 +235,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
     setHtml(s.html_body);
+    setCommittedHtml(s.committed_html_body ?? s.html_body);
     setComments(s.comments ?? []);
     setForm((f) => applySnapshotToForm(f, s));
   }, [setComments]);
@@ -354,6 +373,10 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
             <TabsList className="border-b border-rule">
               <TabsTrigger value="article">Article</TabsTrigger>
               <TabsTrigger value="outline">Outline</TabsTrigger>
+              <TabsTrigger value="tracked">
+                Tracked changes
+                {pendingChanges > 0 && <span className="ml-1 text-accent">({pendingChanges})</span>}
+              </TabsTrigger>
               <TabsTrigger value="raw">Raw HTML</TabsTrigger>
               <TabsTrigger value="payload">WP payload</TabsTrigger>
             </TabsList>
@@ -399,6 +422,17 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                   }}
                 />
               )}
+            </TabsContent>
+            <TabsContent value="tracked" className="pt-6">
+              <TrackedChangesView
+                committed={committedHtml}
+                working={html}
+                onChange={({ committed, working }) => {
+                  setCommittedHtml(committed);
+                  setHtml(working);
+                }}
+                onComment={commentOnChange}
+              />
             </TabsContent>
             <TabsContent value="raw" className="pt-6">
               <RawHtmlView html={html} />

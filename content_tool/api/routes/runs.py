@@ -593,6 +593,7 @@ async def save_hitl2_snapshot(
             created_by=payload.editor_email or "unknown",  # real author identity (email)
             trigger=payload.trigger,
             html_body=payload.html_body,
+            committed_html_body=payload.committed_html_body,
             seo_title=payload.seo_title,
             meta_description=payload.meta_description,
             notes=payload.notes,

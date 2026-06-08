@@ -1148,6 +1148,7 @@ const HITL2_SNAPSHOT_KEEP = 50;
 interface Hitl2SnapshotBody {
   trigger?: "interval" | "navigate" | "unload" | "manual";
   html_body?: string;
+  committed_html_body?: string | null;
   seo_title?: string | null;
   meta_description?: string | null;
   notes?: string | null;
@@ -1169,6 +1170,7 @@ interface Hitl2SnapshotRow {
   created_by: string | null;
   trigger: string;
   html_body: string;
+  committed_html_body: string | null;
   seo_title: string | null;
   meta_description: string | null;
   notes: string | null;
@@ -1266,6 +1268,7 @@ function toSnapshotOut(
     created_by: row.created_by,
     trigger: row.trigger,
     html_body: row.html_body,
+    committed_html_body: row.committed_html_body,
     seo_title: row.seo_title,
     meta_description: row.meta_description,
     notes: row.notes,
@@ -1552,13 +1555,14 @@ runsRouter.post("/:id/hitl2-snapshots", requireRole("viewer"), async (c) => {
     const comments = body.comments ?? null;
     const rows = await sql<Hitl2SnapshotRow[]>`
       INSERT INTO content_tool.hitl2_snapshots (
-        snapshot_id, run_id, created_by, trigger, html_body, seo_title,
-        meta_description, notes, comments, wp_publish_status, wp_author_id,
+        snapshot_id, run_id, created_by, trigger, html_body, committed_html_body,
+        seo_title, meta_description, notes, comments, wp_publish_status, wp_author_id,
         wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt,
         wp_publish_at
       ) VALUES (
         ${snapshotId}, ${runId}, ${editorEmail}, ${body.trigger ?? "manual"},
-        ${body.html_body ?? ""}, ${body.seo_title ?? null}, ${body.meta_description ?? null},
+        ${body.html_body ?? ""}, ${body.committed_html_body ?? null},
+        ${body.seo_title ?? null}, ${body.meta_description ?? null},
         ${body.notes ?? null}, ${comments === null ? null : toJsonb(sql, comments)},
         ${body.wp_publish_status ?? null}, ${body.wp_author_id ?? null},
         ${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)},
@@ -1568,9 +1572,9 @@ runsRouter.post("/:id/hitl2-snapshots", requireRole("viewer"), async (c) => {
       )
       RETURNING
         snapshot_id, run_id, created_at, created_by, trigger, html_body,
-        seo_title, meta_description, notes, comments, wp_publish_status,
-        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
-        wp_slug, wp_excerpt, wp_publish_at
+        committed_html_body, seo_title, meta_description, notes, comments,
+        wp_publish_status, wp_author_id, wp_category_ids, wp_tag_ids,
+        wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at
     `;
 
     // Prune to the newest HITL2_SNAPSHOT_KEEP rows so history stays bounded.
@@ -1617,9 +1621,9 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
     const snaps = await sql<Hitl2SnapshotRow[]>`
       SELECT
         snapshot_id, run_id, created_at, created_by, trigger, html_body,
-        seo_title, meta_description, notes, comments, wp_publish_status,
-        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
-        wp_slug, wp_excerpt, wp_publish_at
+        committed_html_body, seo_title, meta_description, notes, comments,
+        wp_publish_status, wp_author_id, wp_category_ids, wp_tag_ids,
+        wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at
       FROM content_tool.hitl2_snapshots
       WHERE run_id = ${runId}
       ORDER BY created_at DESC

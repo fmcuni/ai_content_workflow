@@ -193,6 +193,9 @@ class Hitl2Snapshot(Base):
     created_by: Mapped[str | None] = mapped_column(String)
     trigger: Mapped[str] = mapped_column(String, nullable=False)
     html_body: Mapped[str] = mapped_column(String, nullable=False)
+    # Tracked-changes baseline: the last committed body. NULL ⇒ no pending human
+    # tracked changes (committed == html_body).
+    committed_html_body: Mapped[str | None] = mapped_column(String)
     seo_title: Mapped[str | None] = mapped_column(String)
     meta_description: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(String)

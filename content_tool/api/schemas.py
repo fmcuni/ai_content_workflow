@@ -147,6 +147,8 @@ class Hitl2SnapshotIn(BaseModel):
     # Author of this snapshot (email). See Hitl2Request.editor_email.
     editor_email: str | None = None
     html_body: str
+    # Tracked-changes baseline (last committed body). None ⇒ no pending changes.
+    committed_html_body: str | None = None
     seo_title: str | None = None
     meta_description: str | None = None
     notes: str | None = None

@@ -481,6 +481,8 @@ export interface Hitl2SnapshotIn {
   /** Snapshot author identity (email). See Hitl2Request.editor_email. */
   editor_email?: string;
   html_body: string;
+  /** Tracked-changes baseline (last committed body). null/undefined ⇒ no pending. */
+  committed_html_body?: string | null;
   seo_title?: string | null;
   meta_description?: string | null;
   notes?: string | null;

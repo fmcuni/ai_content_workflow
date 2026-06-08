@@ -120,6 +120,7 @@ describe("buildSnapshotIn", () => {
     expect(snap).toEqual({
       trigger: "interval",
       html_body: "<p>Body</p>",
+      committed_html_body: null,
       seo_title: "SEO Title",
       meta_description: "Meta description",
       notes: "tighten the intro",
@@ -142,6 +143,7 @@ describe("buildSnapshotIn", () => {
     expect(snap).toEqual({
       trigger: "manual",
       html_body: "<p>Body</p>",
+      committed_html_body: null,
       seo_title: null,
       meta_description: null,
       notes: null,
@@ -286,6 +288,7 @@ describe("snapshotKey", () => {
     expect(snapshotKey(minimal)).toBe(
       JSON.stringify([
         "<p>Body</p>",
+        null, // committed_html_body
         null,
         null,
         null,
