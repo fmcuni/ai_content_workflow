@@ -4,6 +4,7 @@ import type {
   ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
+  RunDraft,
   PersonaPatch, PersonaUsage, PublishTarget,
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListResponse,
@@ -191,6 +192,10 @@ export const api = {
     }),
   listHitl2Snapshots: (runId: string) =>
     http<Hitl2Snapshot[]>(`${BASE}/${runId}/hitl2-snapshots`),
+  // Draft iterations (with render body) for the unified version-history
+  // timeline. Newest-first by iteration; only iterations with a render appear.
+  listRunDrafts: (runId: string) =>
+    http<RunDraft[]>(`${BASE}/${runId}/drafts`),
   // Fire-and-forget save for tab close / reload, where an awaited fetch would be
   // cancelled. sendBeacon survives page teardown; returns false if it couldn't queue.
   beaconHitl2Snapshot: (runId: string, body: Hitl2SnapshotIn): boolean => {
@@ -367,7 +372,7 @@ export const promptsApi = {
   saveTemplate: (
     id: string,
     voice: string,
-    body: { template: string; expected_sha256: string },
+    body: { template: string; expected_sha256: string; note?: string | null },
   ) =>
     http<PromptSaveResponse>(`${PROMPTS_BASE}/templates/${id}${voiceQuery(voice)}`, {
       method: "PUT",
@@ -411,7 +416,10 @@ export const sourcePolicyApi = {
       method: "POST",
       body: JSON.stringify({ policy }),
     }),
-  save: (voice: string, body: { policy: SourcePolicyDoc; expected_sha256: string }) =>
+  save: (
+    voice: string,
+    body: { policy: SourcePolicyDoc; expected_sha256: string; note?: string | null },
+  ) =>
     http<SourcePolicySaveResponse>(`${SOURCE_POLICY_BASE}${voiceQuery(voice)}`, {
       method: "PUT",
       body: JSON.stringify(body),

@@ -731,6 +731,42 @@ def _current_snapshot_id(
     return None
 
 
+@router.get("/{run_id}/drafts")
+async def list_drafts(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> list[dict[str, object]]:
+    """All draft iterations that produced a render, newest-first, with the
+    render body + SEO metadata.
+
+    Powers the unified run-history timeline: AI/regenerate iterations are
+    interleaved with reviewer snapshots so a run reads as one chronology, and a
+    draft can be restored into the editor. Iterations without a render are
+    omitted (there is nothing restorable). Mirrors the Workers ``GET
+    /:id/drafts`` shape byte-for-byte for the parity gate.
+    """
+    async with sf() as session:
+        rows = (
+            await session.execute(
+                select(Draft, Render)
+                .join(Render, Render.draft_id == Draft.draft_id)
+                .where(Draft.run_id == run_id)
+                .order_by(Draft.iteration.desc())
+            )
+        ).all()
+    return [
+        {
+            "draft_id": str(draft.draft_id),
+            "iteration": draft.iteration,
+            "created_at": draft.created_at.isoformat(),
+            "html_body": render.html_body,
+            "seo_title": render.seo_title,
+            "meta_description": render.meta_description,
+        }
+        for draft, render in rows
+    ]
+
+
 @router.get("/{run_id}/gap-analysis")
 async def get_gap_analysis(run_id: UUID, sf=Depends(get_session_factory)) -> dict:  # noqa: ANN001, B008
     async with sf() as session:

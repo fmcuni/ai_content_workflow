@@ -106,6 +106,29 @@ async def test_save_updates_policy_and_records_version(api_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_save_persists_change_note(api_client: AsyncClient):
+    """An optional `note` on save is stored on the version row and surfaced in
+    history / version detail (Phase 6 change-note)."""
+    current = (await api_client.get("/source-policy")).json()
+    new_policy = dict(current["policy"])
+    new_policy["deny"] = {"domains": [*current["policy"]["deny"]["domains"], "noted.com.hk"]}
+
+    note = "added a competitor domain"
+    r = await api_client.put(
+        "/source-policy",
+        json={"policy": new_policy, "expected_sha256": current["sha256"], "note": note},
+    )
+    assert r.status_code == 200, r.text
+    version_id = r.json()["version_id"]
+
+    hist = (await api_client.get("/source-policy/history")).json()
+    assert hist["versions"][0]["note"] == note
+
+    detail = (await api_client.get(f"/source-policy/versions/{version_id}")).json()
+    assert detail["note"] == note
+
+
+@pytest.mark.asyncio
 async def test_save_lowercases_and_dedupes_domains(api_client: AsyncClient):
     current = (await api_client.get("/source-policy")).json()
     new_policy = {

@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { VersionDiff } from "@/components/VersionDiff";
 import { promptsApi } from "@/lib/api";
 import type { PromptVersionSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,12 @@ function PromptEditorContent({
   const [activeRoute, setActiveRoute] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string>("");
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Optional one-line change reason recorded on the next save's version row.
+  const [noteInput, setNoteInput] = useState<string>("");
   const [openVersion, setOpenVersion] = useState<PromptVersionSummary | null>(null);
+  // The version dialog defaults to a diff against the current live body; the
+  // toggle reveals the selected version's raw body.
+  const [versionDiffMode, setVersionDiffMode] = useState(true);
 
   // The server-loaded copy primes the buffer once per (template_id, sha)
   // pair; afterwards the buffer is the source of truth for the editor,
@@ -148,10 +154,12 @@ function PromptEditorContent({
       promptsApi.saveTemplate(templateId, voice, {
         template: buffer,
         expected_sha256: sha,
+        note: noteInput.trim() || null,
       }),
     onSuccess: (data) => {
       toast.success("Saved · effect applies on next run");
       setSha(data.sha256);
+      setNoteInput("");
       queryClient.invalidateQueries({ queryKey: ["prompts", "template", voice, templateId] });
       queryClient.invalidateQueries({ queryKey: ["prompts", "templates", voice] });
       queryClient.invalidateQueries({ queryKey: ["prompts", "history", voice, templateId] });
@@ -285,6 +293,14 @@ function PromptEditorContent({
                 <span className="text-accent-deep ml-2">· exceeds 64 KiB</span>
               ) : null}
             </p>
+            <input
+              type="text"
+              value={noteInput}
+              maxLength={500}
+              onChange={(e) => setNoteInput(e.target.value)}
+              placeholder="Optional change note — why this edit (saved to history)"
+              className="mt-2 w-full font-mono text-[11.5px] text-ink bg-paper-deep/30 border border-rule rounded-sm px-2.5 py-1.5 outline-none focus-visible:border-accent placeholder:text-ink-faint"
+            />
           </div>
 
           <aside className="space-y-6">
@@ -486,9 +502,46 @@ function PromptEditorContent({
             </p>
           )}
           {versionDetailQ.data && (
-            <pre className="font-mono text-[12px] leading-[1.55] text-ink-soft bg-paper-deep/30 border border-rule rounded-sm p-3 whitespace-pre-wrap max-h-[55vh] overflow-auto">
-              {versionDetailQ.data.body}
-            </pre>
+            <>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setVersionDiffMode(true)}
+                  className={cn(
+                    "font-mono text-[10.5px] uppercase tracking-wider border rounded-sm px-2 py-0.5 transition-colors",
+                    versionDiffMode
+                      ? "border-accent text-accent bg-accent/5"
+                      : "border-rule text-ink-soft hover:text-ink",
+                  )}
+                >
+                  Diff vs current
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVersionDiffMode(false)}
+                  className={cn(
+                    "font-mono text-[10.5px] uppercase tracking-wider border rounded-sm px-2 py-0.5 transition-colors",
+                    !versionDiffMode
+                      ? "border-accent text-accent bg-accent/5"
+                      : "border-rule text-ink-soft hover:text-ink",
+                  )}
+                >
+                  Raw body
+                </button>
+              </div>
+              {versionDiffMode ? (
+                <VersionDiff
+                  before={versionDetailQ.data.body}
+                  after={templateQ.data?.template ?? ""}
+                  className="p-0 max-h-[55vh]"
+                  emptyLabel="This is the current live body — no differences."
+                />
+              ) : (
+                <pre className="font-mono text-[12px] leading-[1.55] text-ink-soft bg-paper-deep/30 border border-rule rounded-sm p-3 whitespace-pre-wrap max-h-[55vh] overflow-auto">
+                  {versionDetailQ.data.body}
+                </pre>
+              )}
+            </>
           )}
 
           <div className="flex justify-end gap-2 pt-2">

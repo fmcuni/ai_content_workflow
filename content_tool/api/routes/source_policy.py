@@ -136,6 +136,9 @@ async def preview_source_policy(
 class _SaveRequest(BaseModel):
     policy: dict[str, Any]
     expected_sha256: str = Field(..., min_length=64, max_length=64)
+    # Optional one-line human change reason, stored on the version row. Not part
+    # of the hashed/canonical body, so sha/parity are unaffected.
+    note: str | None = Field(default=None, max_length=500)
 
 
 @router.put("")
@@ -206,6 +209,7 @@ async def save_source_policy(
             bytes=len(new_bytes),
             saved_by=editor,
             kind="save",
+            note=body.note,
         )
         session.add(version)
         await session.commit()

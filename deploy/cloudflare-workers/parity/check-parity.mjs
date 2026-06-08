@@ -305,6 +305,24 @@ async function buildEndpoints() {
     });
   }
 
+  // run_drafts — unified-timeline draft list for a discovered run id (or a
+  // synthetic id: both backends return [] for an unknown run, still a parity
+  // check). Env-dependent only in that the body content tracks the shared DB.
+  if (costsRunId) {
+    endpoints.push({
+      name: "run_drafts",
+      path: `/runs/${encodeURIComponent(costsRunId)}/drafts`,
+      envDependent: true,
+      note: `id=${costsRunId} — draft iterations + render body, env-dependent`,
+    });
+  } else {
+    endpoints.push({
+      name: "run_drafts",
+      path: `/runs/00000000-0000-0000-0000-000000000000/drafts`,
+      note: "no run id discoverable — checks empty-list parity ([])",
+    });
+  }
+
   return endpoints;
 }
 

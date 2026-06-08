@@ -1587,6 +1587,45 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /:id/drafts — all draft iterations that produced a render, newest-first.
+//
+// Powers the unified run-history timeline (AI/regenerate iterations interleaved
+// with reviewer snapshots). Iterations without a render are omitted (nothing
+// restorable). Mirrors the Python `GET /{run_id}/drafts` shape byte-for-byte.
+// ---------------------------------------------------------------------------
+runsRouter.get("/:id/drafts", async (c) => {
+  const runId = c.req.param("id");
+  const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
+    sql<
+      {
+        draft_id: string;
+        iteration: number;
+        created_at: string;
+        html_body: string;
+        seo_title: string;
+        meta_description: string;
+      }[]
+    >`
+      SELECT d.draft_id, d.iteration, d.created_at, r.html_body, r.seo_title, r.meta_description
+      FROM content_tool.drafts d
+      JOIN content_tool.renders r ON r.draft_id = d.draft_id
+      WHERE d.run_id = ${runId}
+      ORDER BY d.iteration DESC
+    `,
+  );
+  return c.json(
+    rows.map((row) => ({
+      draft_id: row.draft_id,
+      iteration: row.iteration,
+      created_at: pgTimestampToIso(row.created_at),
+      html_body: row.html_body,
+      seo_title: row.seo_title,
+      meta_description: row.meta_description,
+    })),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // PUT /:id/outline — persist a post-hoc outline edit (outlines.human_edits)
 // ---------------------------------------------------------------------------
 runsRouter.put("/:id/outline", requireRole("viewer"), async (c) => {
