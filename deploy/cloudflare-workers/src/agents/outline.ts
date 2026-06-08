@@ -66,7 +66,7 @@ async function buildSystemPrompt(
       ? (await getAssembled(sql, "outline_create_mode", voiceSlug)).replace(/\n+$/, "")
       : "";
 
-  const template = await getAssembled(sql, "outline", voiceSlug);
+  const template = await getAssembled(sql, "outline_rewrite_mode", voiceSlug);
 
   return substitute(template, {
     today_date: todayDate,

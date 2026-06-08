@@ -86,7 +86,7 @@ _DQ = "$pt$"
 _AGENTS = [
     "audit",
     "gap_analysis",
-    "outline",
+    "outline_rewrite_mode",
     "outline_create_mode",
     "writer_small_refresh",
     "writer_full_rewrite",

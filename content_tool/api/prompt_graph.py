@@ -116,7 +116,7 @@ _REFRESH_GRAPH: dict = {
             "order": 3,
             "kind": "llm",
             "uses_persona": False,
-            "system_prompt_template_id": "outline",
+            "system_prompt_template_id": "outline_rewrite_mode",
             "description": "Drafts the section-by-section outline the writer will follow.",
         },
         # Production sub-graph
@@ -170,7 +170,7 @@ _CREATE_GRAPH: dict = {
             "kind": "llm",
             "uses_persona": False,
             "system_prompt_template_id": "outline_create_mode",
-            "alt_template_ids": ["outline"],
+            "alt_template_ids": ["outline_rewrite_mode"],
             "description": (
                 "Builds the outline straight from the operator's brief (topic + keywords). "
                 "The create-mode block is prepended to the base outline template at runtime."

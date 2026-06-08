@@ -17,7 +17,7 @@ def test_hitl_gates_present():
 
 
 def test_template_ids_match_prompt_files():
-    expected = {"audit", "gap_analysis", "outline",
+    expected = {"audit", "gap_analysis", "outline_rewrite_mode",
                 "writer_small_refresh", "writer_full_rewrite"}
     found: set[str] = set()
     for n in PROMPT_GRAPH["nodes"]:
