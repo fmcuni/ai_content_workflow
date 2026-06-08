@@ -98,3 +98,40 @@ prod, deploy both Workers + restart Python.
 ## Out of scope (MVP)
 Fan-out to multiple targets; Ghost SEO meta / authors / categories / featured
 image upload / newsletter; encrypted-creds-in-DB; cred verification endpoint.
+
+## Phase 2 progress (2026-06-08)
+
+Ghost is **deferred** (the Ghost(Pro) account's Admin API plan is not yet
+upgraded). The buildable half of Phase 2 — **self-service publish-targets
+admin** — shipped WordPress-only:
+
+- **Schema reality vs spec:** the shipped `publish_targets` table has **no
+  `base_url` column**; base URL *and* creds both live in env under the
+  `auth_ref` prefix (`{ref}_BASE_URL` / `_USERNAME` / `_APP_PASSWORD`). The CRUD
+  UI registers the non-secret row only — an operator still provisions secrets
+  via `wrangler secret put` / `.env.local`.
+- **CRUD routes (both backends):** `POST /publish-targets` (create; `kind`
+  forced `wordpress`; `auth_ref` uniqueness enforced in-route, 409 on dup, 422
+  on malformed), `PATCH /:id` (name + status only — **`auth_ref` is immutable**),
+  `POST /:id/archive` + `/restore`, `GET /:id/usage` (assigned-voice count, warn
+  before archive), `GET /:id/readiness` (**presence-only** env check — booleans
+  only, never values). Workers `index.ts` gates all mutations + readiness with
+  `requireRole("admin")` (RBAC Workers-authoritative); readiness is admin-only
+  since it reveals which secrets exist.
+- **Web:** `/settings/publish-targets` admin page (list + readiness badge +
+  archive) + `TargetDrawer` (create/edit, shows the 3 secret names + live
+  readiness) + `ReadinessPanel`/`ReadinessBadge`. Admin-only nav entry "Targets".
+- **Decision (replaces spec's `verify` dry-run):** readiness is a presence-only
+  env probe, not a live WP call — secret-safe and zero-network. A real
+  credential verify remains out of scope.
+- **Tests:** Workers vitest `publish_targets_crud.test.ts` (11, real handlers +
+  role gates against a fake `sql`); Python `tests/integration/
+  test_api_publish_targets.py` (7, DB-backed → CI when Docker is up); web
+  `ReadinessPanel.test.tsx` (3). Parity manifest gains `publish_targets`
+  (+incl-archived) list + discovered-id `publish_target_usage`.
+- **No migration** — schema already supports everything; `kind` CHECK stays
+  `wordpress`-only (widen when Ghost lands).
+
+**Still deferred to a later Phase 2.x:** Ghost(Pro) publisher (blocked on the
+API plan upgrade) — widen the `kind` CHECK, add `GhostPublisher` + JWT, store
+`runs.cms_post_id`.

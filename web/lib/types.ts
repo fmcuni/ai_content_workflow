@@ -615,6 +615,34 @@ export interface PublishTarget {
   is_archived: boolean;
 }
 
+// Create a WordPress target. kind is always 'wordpress' this phase (not sent).
+export interface PublishTargetCreate {
+  name: string;
+  auth_ref: string;
+  status?: "active" | "inactive";
+}
+
+// Edit a target's display name / status. auth_ref + kind are immutable.
+export interface PublishTargetUpdate {
+  name?: string;
+  status?: "active" | "inactive";
+}
+
+export interface PublishTargetUsage {
+  publish_target_id: string;
+  assigned_voice_count: number;
+}
+
+// Presence-only check of a target's credential env vars (booleans only).
+export interface PublishTargetReadiness {
+  publish_target_id: string;
+  auth_ref: string;
+  base_url: boolean;
+  username: boolean;
+  app_password: boolean;
+  ready: boolean;
+}
+
 export interface PersonaIn {
   slug: string;
   name: string;

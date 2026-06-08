@@ -170,6 +170,15 @@ app.put("/source-policy", requireRole("admin"));
 app.post("/source-policy/revert", requireRole("admin"));
 app.post("/source-policy/preview", requireRole("editor"));
 
+// publish-targets: CRUD → admin (CMS-destination config). The readiness probe
+// reveals which credential secrets are provisioned, so it is admin-only too.
+// GET / and GET /:id/usage stay readable (they power the voice-editor dropdown).
+app.post("/publish-targets", requireRole("admin"));
+app.patch("/publish-targets/:id", requireRole("admin"));
+app.post("/publish-targets/:id/archive", requireRole("admin"));
+app.post("/publish-targets/:id/restore", requireRole("admin"));
+app.get("/publish-targets/:id/readiness", requireRole("admin"));
+
 // topic-batches: create batch + promote topics → editor. skip a candidate +
 // close a batch are editorial mutations → editor. DELETE batch → admin.
 app.post("/topic-batches", requireRole("editor"));

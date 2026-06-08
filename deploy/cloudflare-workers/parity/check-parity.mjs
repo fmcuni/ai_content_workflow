@@ -128,6 +128,20 @@ async function buildEndpoints() {
     normalize: (b) => (Array.isArray(b) ? sortByKey(b, (p) => p.persona_id ?? "") : b),
   });
 
+  // --- publish targets (list, both variants) ---
+  endpoints.push({
+    name: "publish_targets",
+    path: "/publish-targets",
+    normalize: (b) =>
+      Array.isArray(b) ? sortByKey(b, (t) => t.publish_target_id ?? "") : b,
+  });
+  endpoints.push({
+    name: "publish_targets_incl_archived",
+    path: "/publish-targets?include_archived=true",
+    normalize: (b) =>
+      Array.isArray(b) ? sortByKey(b, (t) => t.publish_target_id ?? "") : b,
+  });
+
   // --- articles (list) ---
   endpoints.push({
     name: "articles",
@@ -212,6 +226,22 @@ async function buildEndpoints() {
   } else {
     endpoints.push({ name: "persona_detail", skip: "no persona slug discoverable" });
     endpoints.push({ name: "persona_usage", skip: "no persona slug discoverable" });
+  }
+
+  // publish_target_usage — assigned voice count for a discovered target id.
+  // (Readiness is admin-gated + env-dependent, so it is not a parity entry.)
+  const targetsRes = await getJson(PY_BASE, "/publish-targets");
+  const targetId =
+    Array.isArray(targetsRes.body) && targetsRes.body[0]?.publish_target_id;
+  if (targetId) {
+    endpoints.push({
+      name: "publish_target_usage",
+      path: `/publish-targets/${encodeURIComponent(targetId)}/usage`,
+      envDependent: true,
+      note: `id=${targetId}; assigned voice count depends on persona assignments`,
+    });
+  } else {
+    endpoints.push({ name: "publish_target_usage", skip: "no publish target discoverable" });
   }
 
   // article_detail — by article_id.

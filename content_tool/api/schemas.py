@@ -408,6 +408,51 @@ class PublishTargetOut(BaseModel):
     is_archived: bool
 
 
+# An ``auth_ref`` is used as an env-var prefix (``{ref}_BASE_URL`` etc.), so it
+# must be a valid shell-style identifier: a letter/underscore followed by
+# letters, digits, or underscores. Conventionally uppercase (e.g. ``VHIS101_WP``).
+_AUTH_REF_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
+
+class PublishTargetCreate(BaseModel):
+    """Create a WordPress publish target (Phase 2 self-service).
+
+    ``kind`` is always ``wordpress`` in this phase and is not accepted from the
+    client. The actual base URL + credentials are NOT stored here — an operator
+    must provision ``{auth_ref}_BASE_URL`` / ``_USERNAME`` / ``_APP_PASSWORD`` in
+    the environment (see the readiness endpoint).
+    """
+
+    name: str = Field(min_length=1, max_length=128)
+    auth_ref: str = Field(min_length=1, max_length=64, pattern=_AUTH_REF_PATTERN)
+    status: Literal["active", "inactive"] = "active"
+
+
+class PublishTargetUpdate(BaseModel):
+    """Edit a target's display name / status. ``auth_ref`` is immutable — changing
+    which secrets a live target reads is intentionally not allowed here."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    status: Literal["active", "inactive"] | None = None
+
+
+class PublishTargetUsage(BaseModel):
+    publish_target_id: UUID
+    assigned_voice_count: int
+
+
+class PublishTargetReadiness(BaseModel):
+    """Presence-only check of a target's credential env vars. Booleans only —
+    credential VALUES are never read into the response."""
+
+    publish_target_id: UUID
+    auth_ref: str
+    base_url: bool
+    username: bool
+    app_password: bool
+    ready: bool
+
+
 # --- Topic batches ----------------------------------------------------------
 
 BatchStatus = Literal[

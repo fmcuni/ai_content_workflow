@@ -6,6 +6,7 @@ import type {
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
   RunDraft,
   PersonaPatch, PersonaUsage, PublishTarget,
+  PublishTargetCreate, PublishTargetReadiness, PublishTargetUpdate, PublishTargetUsage,
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListResponse,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
@@ -311,6 +312,28 @@ export const publishTargetsApi = {
     http<PublishTarget[]>(
       `${PUBLISH_TARGETS_BASE}${includeArchived ? "?include_archived=true" : ""}`,
     ),
+  create: (body: PublishTargetCreate) =>
+    http<PublishTarget>(PUBLISH_TARGETS_BASE, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  update: (id: string, body: PublishTargetUpdate) =>
+    http<PublishTarget>(`${PUBLISH_TARGETS_BASE}/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  archive: (id: string) =>
+    http<PublishTarget>(`${PUBLISH_TARGETS_BASE}/${id}/archive`, {
+      method: "POST",
+    }),
+  restore: (id: string) =>
+    http<PublishTarget>(`${PUBLISH_TARGETS_BASE}/${id}/restore`, {
+      method: "POST",
+    }),
+  usage: (id: string) =>
+    http<PublishTargetUsage>(`${PUBLISH_TARGETS_BASE}/${id}/usage`),
+  readiness: (id: string) =>
+    http<PublishTargetReadiness>(`${PUBLISH_TARGETS_BASE}/${id}/readiness`),
 };
 
 const TOPIC_BATCHES_BASE = "/api/topic-batches";

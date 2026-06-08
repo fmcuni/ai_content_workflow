@@ -27,7 +27,10 @@ const NAV: NavItem[] = [
 ];
 
 // Admin-only nav entries, appended when the operator can manage users.
-const ADMIN_NAV: NavItem[] = [{ href: "/admin/users", label: "Users" }];
+const ADMIN_NAV: NavItem[] = [
+  { href: "/settings/publish-targets", label: "Targets" },
+  { href: "/admin/users", label: "Users" },
+];
 
 function isoWeek(d: Date): number {
   const target = new Date(d.valueOf());
