@@ -425,13 +425,21 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     await this.statusStep(step, "status-fetching", runId, "fetching");
     await this.emitStep(step, "emit-fetch-start", runId, "strategy.fetch_article.start", {});
     const fetched = await step.do("fetch-article", async () =>
-      this.withSql<{ markdown: string }>(async (sql) => {
+      this.withSql<{ markdown: string; wpPostId: number | null; source: string }>(async (sql) => {
         const result = await runFetchArticle(sql, this.env, { runId, articleUrl });
-        // Persist only what the outline needs — keep the step checkpoint small.
-        return { markdown: result.markdown };
+        // Persist only what the outline + done-event need — keep the step
+        // checkpoint small.
+        return { markdown: result.markdown, wpPostId: result.wpPostId, source: result.source };
       }),
     );
-    await this.emitStep(step, "emit-fetch-done", runId, "strategy.fetch_article.done", {});
+    // Surface external sourcing: when the URL isn't a post on the configured
+    // WordPress we rewrite from the live page (wpPostId null), and publish — if
+    // later approved — creates a new draft rather than updating a Bowtie post.
+    await this.emitStep(step, "emit-fetch-done", runId, "strategy.fetch_article.done", {
+      source: fetched.source,
+      wpPostId: fetched.wpPostId,
+      externalSource: fetched.wpPostId === null,
+    });
 
     // --- gap_analysis (Gemini + googleSearch/urlContext; backfills chosen_route) ---
     await this.statusStep(step, "status-strategy-refresh", runId, "strategy");

@@ -12,6 +12,45 @@ from content_tool.wordpress.client import WordPressClient
 
 _WP_BASE_DEFAULT = "https://www.bowtie.com.hk/blog/wp-json/wp/v2"
 
+# Direct live-page fetch timeout (s) used when the URL isn't a WP post.
+_LIVE_FETCH_TIMEOUT = 20.0
+
+# A browser User-Agent — Cloudflare-fronted sites (e.g. gobowtie.com/my) return
+# an Error 1010 challenge to non-browser agents.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+async def _fetch_live_html(
+    article_url: str, client: httpx.AsyncClient | None = None
+) -> str:
+    """Fetch the live page HTML directly. Degrade to "" on any failure (WAF
+    block, timeout, non-HTML) — gap_analysis reads the URL via Gemini
+    urlContext as a second source, so this must never raise."""
+    own_client = client is None
+    http_client = client or httpx.AsyncClient(timeout=_LIVE_FETCH_TIMEOUT)
+    try:
+        resp = await http_client.get(
+            article_url,
+            headers={
+                "User-Agent": _BROWSER_UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return ""
+        if "html" not in resp.headers.get("content-type", ""):
+            return ""
+        return resp.text
+    except httpx.HTTPError:
+        return ""
+    finally:
+        if own_client:
+            await http_client.aclose()
+
 
 async def fetch_article(
     *,
@@ -48,10 +87,39 @@ async def fetch_article(
             timeout=settings.wp_timeout,
         )
 
-    # Fetch post via slug
-    post = await wp_client.fetch_post_by_url(article_url)
+    # Fetch post via slug. A transient/transport error is treated like
+    # "not found" so a CMS hiccup never hard-blocks the run.
+    try:
+        post = await wp_client.fetch_post_by_url(article_url)
+    except Exception:
+        post = None
+
+    # External source: the URL isn't a post on the configured WordPress (e.g. it
+    # lives on a different site such as gobowtie.com/my). Don't block the run —
+    # fetch the live page directly and persist a row with wp_post_id = NULL (no
+    # existing CMS post to update; publish, if later approved, mints a new draft).
     if post is None:
-        raise ValueError(f"WP post not found for {article_url}")
+        live_html = await _fetch_live_html(article_url, client=client)
+        live_md = md(live_html, heading_style="ATX") if live_html else ""
+        session.add(
+            FetchedArticle(
+                run_id=run_id,
+                wp_post_id=None,
+                wp_categories=[],
+                wp_author_id=None,
+                wp_slug=None,
+                wp_link=article_url,
+                raw_html=live_html,
+                markdown=live_md,
+            )
+        )
+        await session.commit()
+        return {
+            "wp_post_id": None,
+            "wp_categories": [],
+            "raw_html": live_html,
+            "markdown": live_md,
+        }
 
     # Fetch full category objects (id/name/slug) to preserve existing behaviour
     cat_ids = post.categories

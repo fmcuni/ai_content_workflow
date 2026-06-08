@@ -142,12 +142,69 @@ describe("runFetchArticle", () => {
     expect(result.wpCategories).toEqual([CATEGORIES[9]]);
   });
 
-  it("throws when the WP post cannot be resolved", async () => {
-    const { sql } = makeFakeSql(null);
+  it("falls back to the live page (wp_post_id null) when the post can't be resolved", async () => {
+    // Arrange — WP returns no post; inject a live-HTML fetcher.
+    const { sql, inserts } = makeFakeSql(null);
     const client = makeWpClient(null);
+    const fetchLiveHtml = vi
+      .fn<(url: string) => Promise<string>>()
+      .mockResolvedValue("<h1>Live</h1><p>External body</p>");
 
-    await expect(runFetchArticle(sql, ENV, baseInput(client))).rejects.toThrow(
-      `WP post not found for ${ARTICLE_URL}`,
-    );
+    // Act
+    const result = await runFetchArticle(sql, ENV, {
+      ...baseInput(client),
+      fetchLiveHtml,
+    });
+
+    // Assert — external source, no CMS post id, run is NOT blocked
+    expect(result.source).toBe("live");
+    expect(result.wpPostId).toBeNull();
+    expect(result.wpCategories).toEqual([]);
+    expect(result.rawHtml).toContain("External body");
+    expect(result.markdown).toContain("# Live");
+    expect(fetchLiveHtml).toHaveBeenCalledWith(ARTICLE_URL);
+
+    // One INSERT with a null wp_post_id (2nd bound value)
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]![1]).toBeNull();
+  });
+
+  it("degrades to empty markdown (still inserts) when the live fetch fails", async () => {
+    const { sql, inserts } = makeFakeSql(null);
+    const client = makeWpClient(null);
+    const fetchLiveHtml = vi
+      .fn<(url: string) => Promise<string>>()
+      .mockResolvedValue("");
+
+    const result = await runFetchArticle(sql, ENV, {
+      ...baseInput(client),
+      fetchLiveHtml,
+    });
+
+    expect(result.source).toBe("live");
+    expect(result.wpPostId).toBeNull();
+    expect(result.rawHtml).toBe("");
+    expect(result.markdown).toBe("");
+    expect(inserts).toHaveLength(1);
+  });
+
+  it("treats a CMS transport error as not-found and falls back", async () => {
+    const { sql } = makeFakeSql(null);
+    const client = Object.create(WordPressClient.prototype) as WordPressClient;
+    vi.spyOn(client, "fetchPostByUrl").mockRejectedValue(new Error("transport_error: boom"));
+    const fetchLiveHtml = vi
+      .fn<(url: string) => Promise<string>>()
+      .mockResolvedValue("<p>live</p>");
+
+    const result = await runFetchArticle(sql, ENV, {
+      runId: RUN_ID,
+      articleUrl: ARTICLE_URL,
+      wpClient: client,
+      fetchLiveHtml,
+    });
+
+    expect(result.source).toBe("live");
+    expect(result.wpPostId).toBeNull();
+    expect(fetchLiveHtml).toHaveBeenCalledOnce();
   });
 });

@@ -36,7 +36,7 @@ async def test_fetch_article_resolves_via_slug_and_writes(db_session):
     wp_client = WordPressClient(
         _WP_BASE,
         username="user",
-        app_password="pass",
+        app_password="pass",  # noqa: S106
     )
 
     with respx.mock(assert_all_called=True) as router:
@@ -90,3 +90,104 @@ async def test_fetch_article_resolves_via_slug_and_writes(db_session):
     assert row.wp_author_id == 5
     assert row.wp_slug == "cancer-screening"
     assert row.wp_link == "https://www.bowtie.com.hk/blog/zh/cancer-screening/"
+
+
+@pytest.mark.asyncio
+async def test_fetch_article_external_source_does_not_block(db_session):
+    """A URL that isn't a post on the configured WP (e.g. gobowtie.com/my) must
+    not block the run — it falls back to the live page with wp_post_id NULL."""
+    run_id = uuid4()
+    external_url = "https://gobowtie.com/my/cn/blog/some-article/"
+    db_session.add(
+        Run(
+            run_id=run_id,
+            created_by="x",
+            status="fetching",
+            article_url=external_url,
+            topic="x",
+            keywords=["x"],
+            mode="auto",
+            acf_adv_id=1,
+            acf_widget_id=2,
+            persona="bowtie-zh-my",
+            today_date=date(2026, 5, 21),
+        )
+    )
+    await db_session.commit()
+
+    wp_client = WordPressClient(_WP_BASE, username="user", app_password="pass")  # noqa: S106
+
+    with respx.mock(assert_all_called=True) as router:
+        # WP REST returns no matching post → not resolvable on the CMS.
+        router.get(f"{_WP_BASE}/wp-json/wp/v2/posts").mock(
+            return_value=Response(200, json=[])
+        )
+        # Live page fetched directly with a browser UA.
+        router.get(external_url).mock(
+            return_value=Response(
+                200,
+                html="<h1>Live Title</h1><p>External body content</p>",
+            )
+        )
+
+        result = await fetch_article(
+            session=db_session,
+            run_id=run_id,
+            article_url=external_url,
+            wp_base=f"{_WP_BASE}/wp-json/wp/v2",
+            wp_client=wp_client,
+        )
+
+    assert result["wp_post_id"] is None
+    assert result["wp_categories"] == []
+    assert "External body content" in result["markdown"]
+
+    row = (
+        await db_session.execute(select(FetchedArticle).where(FetchedArticle.run_id == run_id))
+    ).scalar_one()
+    assert row.wp_post_id is None
+    assert row.wp_link == external_url
+    assert row.wp_categories == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_article_external_source_live_fetch_failure_degrades(db_session):
+    """When the live fetch also fails (WAF/non-200), still persist a row with
+    empty markdown so gap_analysis (urlContext) carries the rewrite source."""
+    run_id = uuid4()
+    external_url = "https://gobowtie.com/my/cn/blog/blocked/"
+    db_session.add(
+        Run(
+            run_id=run_id,
+            created_by="x",
+            status="fetching",
+            article_url=external_url,
+            topic="x",
+            keywords=["x"],
+            mode="auto",
+            acf_adv_id=1,
+            acf_widget_id=2,
+            persona="bowtie-zh-my",
+            today_date=date(2026, 5, 21),
+        )
+    )
+    await db_session.commit()
+
+    wp_client = WordPressClient(_WP_BASE, username="user", app_password="pass")  # noqa: S106
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{_WP_BASE}/wp-json/wp/v2/posts").mock(
+            return_value=Response(200, json=[])
+        )
+        router.get(external_url).mock(return_value=Response(403, text="blocked"))
+
+        result = await fetch_article(
+            session=db_session,
+            run_id=run_id,
+            article_url=external_url,
+            wp_base=f"{_WP_BASE}/wp-json/wp/v2",
+            wp_client=wp_client,
+        )
+
+    assert result["wp_post_id"] is None
+    assert result["markdown"] == ""

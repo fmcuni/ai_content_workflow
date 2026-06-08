@@ -26,6 +26,11 @@ export interface FetchArticleInput {
   articleUrl: string;
   /** Test seam — inject a client to avoid real network calls. */
   wpClient?: WordPressClient;
+  /**
+   * Test seam — inject a live-HTML fetcher. Defaults to a direct browser-UA
+   * HTTP GET, used only when the URL can't be resolved as a WP post.
+   */
+  fetchLiveHtml?: (url: string) => Promise<string>;
 }
 
 export interface FetchArticleResult {
@@ -33,7 +38,24 @@ export interface FetchArticleResult {
   wpCategories: WpCategory[];
   rawHtml: string;
   markdown: string;
+  /**
+   * Where the source content came from:
+   *   "wp"   — resolved an existing post on the configured WordPress
+   *   "live" — fetched the live page directly (not a Bowtie WP post)
+   * `wpPostId === null` ⇒ no existing CMS post to update on publish.
+   */
+  source: "wp" | "live";
 }
+
+// Direct live-page fetch timeout (ms). Independent of the WP REST timeout.
+const LIVE_FETCH_TIMEOUT_MS = 20_000;
+
+// A browser User-Agent — Cloudflare-fronted sites (e.g. gobowtie.com/my) return
+// an Error 1010 challenge to non-browser agents, so a default scripting UA gets
+// blocked. This mirrors the Python fallback.
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 // ---------------------------------------------------------------------------
 // HTML → Markdown
@@ -80,7 +102,42 @@ async function findExisting(
     wpCategories: pgJson<WpCategory[] | null>(row.wp_categories) ?? [],
     rawHtml: row.raw_html ?? "",
     markdown: row.markdown,
+    source: row.wp_post_id === null ? "live" : "wp",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Live-page fallback
+//
+// Used when the article URL can't be resolved as a post on the configured
+// WordPress — e.g. it lives on a different site (gobowtie.com/my) or was never
+// published to this CMS. We fetch the live HTML directly so the rewrite still
+// has source material and the run is NOT blocked. Network failures degrade to
+// an empty string (gap_analysis reads the live URL via Gemini urlContext as a
+// second source), never an exception.
+// ---------------------------------------------------------------------------
+
+async function directLiveFetch(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LIVE_FETCH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: controller.signal,
+    });
+    if (!resp.ok) return "";
+    const contentType = resp.headers.get("content-type") ?? "";
+    if (!contentType.includes("html")) return "";
+    return await resp.text();
+  } catch {
+    // Transient / WAF block / timeout — degrade to no markdown, never throw.
+    return "";
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +183,17 @@ export async function runFetchArticle(
 
   const wpClient = input.wpClient ?? new WordPressClient(env);
 
-  const post = await wpClient.fetchPostByUrl(input.articleUrl);
+  // Resolve the existing WP post. A transient/transport error from the CMS is
+  // treated the same as "not found" so a CMS hiccup never hard-blocks the run.
+  let post: Awaited<ReturnType<WordPressClient["fetchPostByUrl"]>> = null;
+  try {
+    post = await wpClient.fetchPostByUrl(input.articleUrl);
+  } catch {
+    post = null;
+  }
+
   if (post === null) {
-    throw new Error(`WP post not found for ${input.articleUrl}`);
+    return await fetchExternalArticle(sql, input);
   }
 
   const cats = await hydrateCategories(wpClient, post.categories);
@@ -159,5 +224,47 @@ export async function runFetchArticle(
     wpCategories: cats,
     rawHtml,
     markdown,
+    source: "wp",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// External-source path (no WP post)
+//
+// The URL doesn't resolve to a post on the configured WordPress. Fetch the live
+// page directly and persist a fetched_articles row with wp_post_id = NULL (no
+// existing CMS post to update — publish, if later approved, mints a new draft).
+// This keeps the run moving to HITL_2 instead of erroring out.
+// ---------------------------------------------------------------------------
+
+async function fetchExternalArticle(
+  sql: Sql,
+  input: FetchArticleInput,
+): Promise<FetchArticleResult> {
+  const fetchLiveHtml = input.fetchLiveHtml ?? directLiveFetch;
+  const rawHtml = await fetchLiveHtml(input.articleUrl);
+  const markdown = rawHtml === "" ? "" : htmlToMarkdown(rawHtml);
+
+  await sql`
+    INSERT INTO content_tool.fetched_articles
+      (run_id, wp_post_id, wp_categories, wp_author_id, wp_slug, wp_link, raw_html, markdown)
+    VALUES (
+      ${input.runId}::uuid,
+      ${null},
+      ${toJsonb(sql, [])},
+      ${null},
+      ${null},
+      ${input.articleUrl},
+      ${rawHtml},
+      ${markdown}
+    )
+  `;
+
+  return {
+    wpPostId: null,
+    wpCategories: [],
+    rawHtml,
+    markdown,
+    source: "live",
   };
 }
