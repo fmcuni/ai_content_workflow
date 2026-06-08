@@ -65,6 +65,7 @@ export interface PromptVersionRow {
   saved_by: string;
   saved_at: string;
   kind: string; // default 'save'
+  note: string | null; // optional human change reason (migration 20260610000000)
 }
 
 // content_tool.source_policy — per-voice editable source policy (one row per
@@ -93,6 +94,7 @@ export interface SourcePolicyVersionRow {
   saved_by: string;
   saved_at: string;
   kind: string; // default 'save'
+  note: string | null; // optional human change reason (migration 20260610000000)
 }
 
 export interface ArticleRow {

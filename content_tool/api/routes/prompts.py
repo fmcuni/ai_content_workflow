@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_tool import prompts_store, source_policy_store
@@ -412,7 +412,20 @@ async def template_history(
     """
     async with sf() as session:
         snap = await prompts_store.snapshot(session)
-        _editable_or_404(_voice_view(snap, voice), template_id)
+        live = _editable_or_404(_voice_view(snap, voice), template_id)
+        # Absolute, stable version numbering (oldest = 1): count the whole
+        # lineage, then derive each row's number from its newest-first offset so
+        # the displayed `v{n}` does not shift when older rows fall outside `limit`.
+        total = (
+            await session.execute(
+                select(func.count())
+                .select_from(PromptVersion)
+                .where(
+                    PromptVersion.voice_slug == voice,
+                    PromptVersion.template_id == template_id,
+                )
+            )
+        ).scalar_one()
         rows = (
             (
                 await session.execute(
@@ -431,17 +444,23 @@ async def template_history(
     return {
         "template_id": template_id,
         "voice": voice,
+        # The sha of the body the editor is live-editing; the history row whose
+        # sha matches is flagged `is_current` (the "● Live" entry).
+        "current_sha256": live.sha256,
         "versions": [
             {
                 "version_id": str(r.version_id),
+                "version_number": total - i,
+                "is_current": r.sha256 == live.sha256,
                 "sha256": r.sha256,
                 "parent_sha256": r.parent_sha256,
                 "bytes": r.bytes,
                 "saved_by": r.saved_by,
                 "saved_at": r.saved_at.isoformat(),
                 "kind": r.kind,
+                "note": r.note,
             }
-            for r in rows
+            for i, r in enumerate(rows)
         ],
     }
 
@@ -483,6 +502,7 @@ async def template_version(
         "saved_by": row.saved_by,
         "saved_at": row.saved_at.isoformat(),
         "kind": row.kind,
+        "note": row.note,
     }
 
 

@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from content_tool.api.routes.runs import _HITL2_SNAPSHOT_KEEP
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.db.connection import make_engine, make_session_factory
-from content_tool.db.models import Hitl2Snapshot, Run
+from content_tool.db.models import Draft, Hitl2Snapshot, Render, Run
 
 
 async def _seed_run(sf, run_id) -> None:
@@ -19,6 +19,21 @@ async def _seed_run(sf, run_id) -> None:
             article_url="https://www.bowtie.com.hk/blog/x", topic="x", keywords=[], mode="auto",
             acf_adv_id=1, acf_widget_id=2, persona="bowtie-editor",
             today_date=date(2026, 5, 27),
+        ))
+        await s.commit()
+
+
+async def _seed_render(sf, run_id, *, iteration: int, html_body: str) -> None:
+    """Seed a Draft + its Render so the run has 'live' published content."""
+    async with sf() as s:
+        draft_id = uuid4()
+        s.add(Draft(
+            draft_id=draft_id, run_id=run_id, iteration=iteration,
+            diagnose="d", markup_raw=html_body, citation_intents=[],
+        ))
+        s.add(Render(
+            draft_id=draft_id, seo_title="Gen Title",
+            meta_description="gen meta", html_body=html_body,
         ))
         await s.commit()
 
@@ -150,4 +165,73 @@ async def test_snapshot_stamps_editor_email_as_created_by(postgres_url):
         )
     assert r.status_code == 200
     assert r.json()["created_by"] == "author@bowtie.com.hk"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_stamps_version_number_and_is_current(postgres_url):
+    """version_number is oldest=1; is_current flags the snapshot matching the
+    live render body."""
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+    run_id = uuid4()
+    await _seed_run(sf, run_id)
+    # Live published content is "<p>v2</p>" — the second snapshot below.
+    await _seed_render(sf, run_id, iteration=1, html_body="<p>v2</p>")
+    app = _make_app(sf)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await ac.post(
+            f"/runs/{run_id}/hitl2-snapshots",
+            json={"trigger": "interval", "html_body": "<p>v1</p>"},
+        )
+        await ac.post(
+            f"/runs/{run_id}/hitl2-snapshots",
+            json={"trigger": "manual", "html_body": "<p>v2</p>"},
+        )
+        rows = (await ac.get(f"/runs/{run_id}/hitl2-snapshots")).json()
+
+    # Newest-first: a 'generated' baseline (from the render) plus the two saves.
+    by_body = {r["html_body"]: r for r in rows}
+    # Stable numbering, oldest = 1. The generated baseline is the oldest row.
+    assert by_body["<p>v1</p>"]["version_number"] == 2
+    assert by_body["<p>v2</p>"]["version_number"] == 3
+    # Only the snapshot whose body equals the live render is flagged current.
+    assert by_body["<p>v2</p>"]["is_current"] is True
+    assert by_body["<p>v1</p>"]["is_current"] is False
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_generated_baseline_seeded_from_render(postgres_url):
+    """A run with a render but no manual snapshots still lists exactly one
+    'generated' baseline (v1) carrying the render body — idempotent across GETs."""
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+    run_id = uuid4()
+    await _seed_run(sf, run_id)
+    await _seed_render(sf, run_id, iteration=1, html_body="<p>the AI draft</p>")
+    app = _make_app(sf)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        first = (await ac.get(f"/runs/{run_id}/hitl2-snapshots")).json()
+        second = (await ac.get(f"/runs/{run_id}/hitl2-snapshots")).json()
+
+    assert len(first) == 1
+    base = first[0]
+    assert base["trigger"] == "generated"
+    assert base["html_body"] == "<p>the AI draft</p>"
+    assert base["version_number"] == 1
+    assert base["is_current"] is True
+    assert base["created_by"] == "system:generated"
+    # Idempotent: a second GET does not create a duplicate baseline.
+    assert len(second) == 1
+
+    async with sf() as s:
+        n = (await s.execute(
+            select(func.count()).select_from(Hitl2Snapshot).where(
+                Hitl2Snapshot.run_id == run_id, Hitl2Snapshot.trigger == "generated"
+            )
+        )).scalar_one()
+    assert n == 1
     await engine.dispose()

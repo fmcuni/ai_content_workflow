@@ -272,25 +272,53 @@ sourcePolicyRouter.get("/history", async (c) => {
     }
     limit = parsed;
   }
-  const versions = await withDb(c.env, c.executionCtx, async (sql) => {
+  const fallbackSha = (await fallbackSnapshot(voice)).sha256;
+  const result = await withDb(c.env, c.executionCtx, async (sql) => {
+    // The sha the GET would show (voice row → __shared__ → bundled fallback),
+    // used to flag the "● Live" entry. Mirrors Python `_baseline_sha`.
+    const ownRows = await sql<Pick<SourcePolicyRow, "sha256">[]>`
+      SELECT sha256 FROM content_tool.source_policy WHERE voice_slug = ${voice} LIMIT 1
+    `;
+    let currentSha: string;
+    if (ownRows[0] !== undefined) {
+      currentSha = ownRows[0].sha256;
+    } else {
+      let sharedSha: string | null = null;
+      if (voice !== "__shared__") {
+        const sharedRows = await sql<Pick<SourcePolicyRow, "sha256">[]>`
+          SELECT sha256 FROM content_tool.source_policy WHERE voice_slug = '__shared__' LIMIT 1
+        `;
+        sharedSha = sharedRows[0]?.sha256 ?? null;
+      }
+      currentSha = sharedSha ?? fallbackSha;
+    }
+    const countRows = await sql<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM content_tool.source_policy_versions
+      WHERE voice_slug = ${voice}
+    `;
+    const total = parseInt(countRows[0]?.n ?? "0", 10);
     const rows = await sql<Omit<SourcePolicyVersionRow, "body">[]>`
-      SELECT version_id, voice_slug, policy_id, sha256, parent_sha256, bytes, saved_by, saved_at, kind
+      SELECT version_id, voice_slug, policy_id, sha256, parent_sha256, bytes, saved_by, saved_at, kind, note
       FROM content_tool.source_policy_versions
       WHERE voice_slug = ${voice}
       ORDER BY saved_at DESC
       LIMIT ${limit}
     `;
-    return rows.map((r) => ({
+    const versions = rows.map((r, i) => ({
       version_id: r.version_id,
+      version_number: total - i,
+      is_current: r.sha256 === currentSha,
       sha256: r.sha256,
       parent_sha256: r.parent_sha256,
       bytes: r.bytes,
       saved_by: r.saved_by,
       saved_at: pgTimestampToIso(r.saved_at),
       kind: r.kind,
+      note: r.note,
     }));
+    return { versions, current_sha256: currentSha };
   });
-  return c.json({ voice, versions });
+  return c.json({ voice, current_sha256: result.current_sha256, versions: result.versions });
 });
 
 // ---------------------------------------------------------------------------
@@ -301,7 +329,7 @@ sourcePolicyRouter.get("/versions/:versionId", async (c) => {
   const voice = resolveVoice(c);
   const row = await withDb(c.env, c.executionCtx, async (sql) => {
     const rows = await sql<SourcePolicyVersionRow[]>`
-      SELECT version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, saved_at, kind
+      SELECT version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, saved_at, kind, note
       FROM content_tool.source_policy_versions
       WHERE version_id = ${versionId} AND voice_slug = ${voice}
       LIMIT 1
@@ -324,6 +352,7 @@ sourcePolicyRouter.get("/versions/:versionId", async (c) => {
     saved_by: row.saved_by,
     saved_at: pgTimestampToIso(row.saved_at),
     kind: row.kind,
+    note: row.note,
   });
 });
 

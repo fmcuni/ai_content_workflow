@@ -84,11 +84,12 @@ class Hitl2SnapshotIn(BaseModel):
 
     One combined point-in-time snapshot of the editor body, SEO/WP metadata,
     overall notes, and anchored comments. ``trigger`` records what caused the
-    save (``interval`` | ``navigate`` | ``unload`` | ``manual``) for the
+    save (``interval`` | ``navigate`` | ``unload`` | ``manual``; the synthetic
+    ``generated`` baseline is server-written, never client-supplied) for the
     history list.
     """
 
-    trigger: Literal["interval", "navigate", "unload", "manual"] = "manual"
+    trigger: Literal["interval", "navigate", "unload", "manual", "generated"] = "manual"
     # Author of this snapshot (email). See Hitl2Request.editor_email.
     editor_email: str | None = None
     html_body: str
@@ -112,6 +113,10 @@ class Hitl2SnapshotOut(Hitl2SnapshotIn):
     snapshot_id: UUID
     created_at: datetime
     created_by: str | None = None
+    # Stable display number (oldest = 1) and "● Live" flag, set by the list
+    # endpoint. Defaulted so the single-row POST response still validates.
+    version_number: int | None = None
+    is_current: bool = False
 
 
 class RegenerateRequest(BaseModel):

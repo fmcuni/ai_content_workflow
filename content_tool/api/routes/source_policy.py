@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_tool import source_policy_store
@@ -256,6 +256,21 @@ async def source_policy_history(
 ) -> dict[str, Any]:
     """Newest-first saves + reverts for ``voice`` (bodies omitted to stay small)."""
     async with sf() as session:
+        live_row = (
+            await session.execute(
+                select(SourcePolicyRecord).where(SourcePolicyRecord.voice_slug == voice)
+            )
+        ).scalar_one_or_none()
+        # The sha the GET would show (voice row → __shared__ → bundled fallback);
+        # the matching history row is flagged `is_current` (the "● Live" entry).
+        current_sha = await _baseline_sha(session, voice, live_row)
+        total = (
+            await session.execute(
+                select(func.count())
+                .select_from(SourcePolicyVersion)
+                .where(SourcePolicyVersion.voice_slug == voice)
+            )
+        ).scalar_one()
         rows = (
             (
                 await session.execute(
@@ -270,17 +285,21 @@ async def source_policy_history(
         )
     return {
         "voice": voice,
+        "current_sha256": current_sha,
         "versions": [
             {
                 "version_id": str(r.version_id),
+                "version_number": total - i,
+                "is_current": r.sha256 == current_sha,
                 "sha256": r.sha256,
                 "parent_sha256": r.parent_sha256,
                 "bytes": r.bytes,
                 "saved_by": r.saved_by,
                 "saved_at": r.saved_at.isoformat(),
                 "kind": r.kind,
+                "note": r.note,
             }
-            for r in rows
+            for i, r in enumerate(rows)
         ],
     }
 
@@ -320,6 +339,7 @@ async def source_policy_version(
         "saved_by": row.saved_by,
         "saved_at": row.saved_at.isoformat(),
         "kind": row.kind,
+        "note": row.note,
     }
 
 

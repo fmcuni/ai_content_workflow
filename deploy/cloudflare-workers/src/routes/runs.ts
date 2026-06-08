@@ -1237,8 +1237,14 @@ function toNumberArray(value: unknown): number[] {
   return arr.map((v) => Number(v)).filter((n) => Number.isFinite(n));
 }
 
-/** Serialize a hitl2_snapshots row into the API output shape (timestamps→ISO, jsonb→native). */
-function toSnapshotOut(row: Hitl2SnapshotRow): Record<string, unknown> {
+/** Serialize a hitl2_snapshots row into the API output shape (timestamps→ISO,
+ * jsonb→native). `extra` merges the list endpoint's computed display fields
+ * (version_number / is_current); the single-row POST response omits them so
+ * they default (null / false) to match the Python schema. */
+function toSnapshotOut(
+  row: Hitl2SnapshotRow,
+  extra?: { version_number: number; is_current: boolean },
+): Record<string, unknown> {
   return {
     snapshot_id: row.snapshot_id,
     run_id: row.run_id,
@@ -1258,7 +1264,44 @@ function toSnapshotOut(row: Hitl2SnapshotRow): Record<string, unknown> {
     wp_slug: row.wp_slug,
     wp_excerpt: row.wp_excerpt,
     wp_publish_at: pgTimestampToIso(row.wp_publish_at),
+    version_number: extra?.version_number ?? null,
+    is_current: extra?.is_current ?? false,
   };
+}
+
+/**
+ * Idempotently seed a `trigger='generated'` baseline snapshot from the run's
+ * latest render, so the AI's original draft is always the v1 entry in the
+ * version-history panel. No-op when a `generated` row already exists or the run
+ * has no render yet. Mirrors `_ensure_generated_baseline` in the Python route.
+ */
+async function ensureGeneratedBaseline(sql: Sql, runId: string): Promise<void> {
+  const existing = await sql<{ snapshot_id: string }[]>`
+    SELECT snapshot_id FROM content_tool.hitl2_snapshots
+    WHERE run_id = ${runId} AND trigger = 'generated'
+    LIMIT 1
+  `;
+  if (existing[0] !== undefined) return;
+  const renderRows = await sql<
+    { html_body: string; seo_title: string; meta_description: string }[]
+  >`
+    SELECT r.html_body, r.seo_title, r.meta_description
+    FROM content_tool.renders r
+    JOIN content_tool.drafts d ON r.draft_id = d.draft_id
+    WHERE d.run_id = ${runId}
+    ORDER BY d.iteration DESC
+    LIMIT 1
+  `;
+  const render = renderRows[0];
+  if (render === undefined) return;
+  await sql`
+    INSERT INTO content_tool.hitl2_snapshots
+      (snapshot_id, run_id, created_by, trigger, html_body, seo_title, meta_description)
+    VALUES (
+      ${crypto.randomUUID()}, ${runId}, 'system:generated', 'generated',
+      ${render.html_body}, ${render.seo_title}, ${render.meta_description}
+    )
+  `;
 }
 
 /**
@@ -1499,8 +1542,21 @@ runsRouter.post("/:id/hitl2-snapshots", requireRole("viewer"), async (c) => {
 // ---------------------------------------------------------------------------
 runsRouter.get("/:id/hitl2-snapshots", async (c) => {
   const runId = c.req.param("id");
-  const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
-    sql<Hitl2SnapshotRow[]>`
+  const { rows, liveBody, total } = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    await ensureGeneratedBaseline(sql, runId);
+    // Live content the run would publish (latest render body) → "● Live" flag.
+    const liveRows = await sql<{ html_body: string }[]>`
+      SELECT r.html_body
+      FROM content_tool.renders r
+      JOIN content_tool.drafts d ON r.draft_id = d.draft_id
+      WHERE d.run_id = ${runId}
+      ORDER BY d.iteration DESC
+      LIMIT 1
+    `;
+    const countRows = await sql<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM content_tool.hitl2_snapshots WHERE run_id = ${runId}
+    `;
+    const snaps = await sql<Hitl2SnapshotRow[]>`
       SELECT
         snapshot_id, run_id, created_at, created_by, trigger, html_body,
         seo_title, meta_description, notes, comments, wp_publish_status,
@@ -1510,9 +1566,24 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
       WHERE run_id = ${runId}
       ORDER BY created_at DESC
       LIMIT ${HITL2_SNAPSHOT_KEEP}
-    `,
+    `;
+    return {
+      rows: snaps,
+      liveBody: liveRows[0]?.html_body ?? null,
+      total: parseInt(countRows[0]?.n ?? "0", 10),
+    };
+  });
+  // Newest-first; the first row whose body matches live is the "● Live" one.
+  const currentId =
+    liveBody === null ? null : (rows.find((r) => r.html_body === liveBody)?.snapshot_id ?? null);
+  return c.json(
+    rows.map((r, i) =>
+      toSnapshotOut(r, {
+        version_number: total - i,
+        is_current: r.snapshot_id === currentId,
+      }),
+    ),
   );
-  return c.json(rows.map(toSnapshotOut));
 });
 
 // ---------------------------------------------------------------------------

@@ -404,13 +404,25 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
                 key={v.version_id}
                 className="border-b border-rule py-2 flex items-center justify-between gap-2"
               >
-                <span className="font-mono text-[11px] text-ink-soft truncate">
-                  {v.kind} · {shortSha(v.sha256)} · {v.saved_by}
+                <span className="font-mono text-[11px] text-ink-soft truncate flex items-center gap-1.5">
+                  <span className="tabular-nums">v{v.version_number}</span>
+                  {v.is_current && (
+                    <span className="uppercase tracking-wider text-[10px] px-1 py-px rounded-sm bg-accent/15 text-accent">
+                      ● Live
+                    </span>
+                  )}
+                  <span>{v.kind} · {shortSha(v.sha256)} · {v.saved_by}</span>
                 </span>
                 <button
                   type="button"
-                  disabled={revertMut.isPending || !canEditPolicy}
-                  title={!canEditPolicy ? "Admin role required to revert the source policy." : undefined}
+                  disabled={revertMut.isPending || !canEditPolicy || v.is_current}
+                  title={
+                    v.is_current
+                      ? "This is the live version."
+                      : !canEditPolicy
+                        ? "Admin role required to revert the source policy."
+                        : undefined
+                  }
                   onClick={() => revertMut.mutate(v.version_id)}
                   className="font-sans text-[12px] font-medium text-accent hover:underline underline-offset-2 whitespace-nowrap disabled:opacity-50"
                 >
@@ -419,7 +431,7 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
               </li>
             ))}
             {versions.length === 0 && (
-              <li className="py-2 font-mono text-[11px] text-ink-faint">No edits yet.</li>
+              <li className="py-2 font-mono text-[11px] text-ink-faint">No history yet.</li>
             )}
           </ul>
         </div>

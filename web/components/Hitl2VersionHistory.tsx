@@ -19,6 +19,7 @@ const TRIGGER_LABEL: Record<Hitl2SnapshotTrigger, string> = {
   navigate: "auto · left page",
   unload: "auto · closed tab",
   manual: "manual",
+  generated: "AI · original draft",
 };
 
 function relativeTime(iso: string): string {
@@ -108,7 +109,19 @@ export function Hitl2VersionHistory({
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <PaperStamp tone="neutral">{TRIGGER_LABEL[s.trigger]}</PaperStamp>
+                      {typeof s.version_number === "number" && (
+                        <span className="font-mono text-[11px] text-ink-faint tabular-nums">
+                          v{s.version_number}
+                        </span>
+                      )}
+                      <PaperStamp tone={s.trigger === "generated" ? "info" : "neutral"}>
+                        {TRIGGER_LABEL[s.trigger]}
+                      </PaperStamp>
+                      {s.is_current && (
+                        <PaperStamp tone="accent">
+                          <span aria-label="Currently live version">● Live</span>
+                        </PaperStamp>
+                      )}
                       <span className="font-mono text-[12px] text-ink">
                         {relativeTime(s.created_at)}
                       </span>

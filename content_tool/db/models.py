@@ -443,6 +443,9 @@ class _VersionRow(Base):
     kind: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'save'")
     )
+    # Optional human-supplied change reason on manual saves. Null for autosaves,
+    # seed baselines, and reverts.
+    note: Mapped[str | None] = mapped_column(String)
 
 
 class PromptVersion(_VersionRow):
