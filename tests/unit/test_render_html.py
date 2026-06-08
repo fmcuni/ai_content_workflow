@@ -89,6 +89,60 @@ def test_no_raw_html_passthrough():
         render_html(bad)
 
 
+def test_faq_heading_carried_through_traditional():
+    """The Traditional voice still renders its hard-coded heading verbatim, so
+    existing output stays byte-identical."""
+    r = render_html(SAMPLE)
+    assert "<h2>常見問題</h2>" in r.html_body
+
+
+# A zh-MY (Simplified) voice writes its own Simplified FAQ heading, and the
+# auto-generated sources section is emitted in Simplified by resolve_citations.
+SAMPLE_ZH_MY = """\
+# 大肠癌：症状、筛查、治疗与保险指南（2026）
+%%meta desc=了解大肠癌的早期症状、筛查方法。%%
+
+大肠癌是常见的癌症之一。
+
+%%adv_panel id=1%%
+
+## 大肠癌筛查方法
+
+大便潜血测试是常见的初步筛查方法。
+
+%%page_widget id=2%%
+
+## 常见问题
+%%acf_faq type=q%%
+筛查资格是什么？
+%%acf_faq type=a%%
+50 至 75 岁居民。
+%%end%%
+
+## 资讯来源
+1. [www.example.gov.my](https://www.example.gov.my/x)
+"""
+
+
+def test_faq_heading_not_duplicated_for_simplified_voice():
+    """The model's Simplified heading is carried through and re-injected — NOT
+    appended on top of a hard-coded Traditional one (the duplicate-heading bug)."""
+    r = render_html(SAMPLE_ZH_MY)
+    assert "<h2>常见问题</h2>" in r.html_body
+    # The hard-coded Traditional heading must NOT appear alongside it.
+    assert "常見問題" not in r.html_body
+    assert r.html_body.count("常见问题") == 1
+    assert 'class="editor__item editor__faq"' in r.html_body
+
+
+def test_simplified_sources_section_rendered_and_reordered():
+    r = render_html(SAMPLE_ZH_MY)
+    assert "<h2>资讯来源</h2>" in r.html_body
+    assert "資訊來源" not in r.html_body
+    # Sources sit AFTER the FAQ widget.
+    assert r.html_body.index("editor__faq") < r.html_body.index("资讯来源")
+
+
 def test_missing_h1_raises():
     with pytest.raises(ValueError, match="H1"):
         render_html("no H1 here\n%%meta desc=x%%\nbody\n")

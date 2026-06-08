@@ -35,9 +35,15 @@ const DEFTERM_BLOCK_RE =
   /%%defterm name=(\S+?)%%[ \t]*\n?[ \t]*([\s\S]*?)[ \t]*\n?[ \t]*%%end%%/g;
 // Catches any residual marker fragment after well-formed blocks were stripped.
 const DEFTERM_RESIDUE_RE = /%%defterm\b|%%end%%/;
-// "## 常見問題" line and the "## 資訊來源" section split point.
-const FAQ_HEADING_RE = /##\s*常見問題\s*\n/;
-const SOURCES_SPLIT_RE = /\n##\s*資訊來源\s*\n/;
+// The model writes its own FAQ heading right before the first FAQ shortcode;
+// its wording follows the voice (e.g. Simplified 常见问题 for zh-MY). Capture it
+// (group 1) to re-inject the SAME heading instead of a hard-coded Traditional
+// one — appending a constant on top of a surviving Simplified heading caused the
+// duplicate-heading bug. FAQ_HEADING_RESIDUE_RE defensively drops a stray
+// heading (either script). SOURCES_SPLIT_RE matches either script.
+const FAQ_HEADING_RE = /^##[ \t]+(.+?)[ \t]*\n(?=\s*%%acf_faq type=q%%)/m;
+const FAQ_HEADING_RESIDUE_RE = /^##[ \t]*(?:常見問題|常见问题)[ \t]*\n/m;
+const SOURCES_SPLIT_RE = /\n##\s*(?:資訊來源|资讯来源)\s*\n/;
 // First <p>...</p> in the body, for the excerpt suggestion (DOTALL).
 const FIRST_PARAGRAPH_RE = /<p>([\s\S]*?)<\/p>/;
 
@@ -166,10 +172,19 @@ export function renderHtml(markupRaw: string): RenderOutput {
   // Sanitization gate (before transforming anything writer-controlled).
   checkNoRawHtml(rest);
 
-  // FAQ items, then strip the FAQ shortcodes and the "## 常見問題" heading.
+  // FAQ items + the model's own FAQ heading (whatever script/wording), then
+  // strip the shortcodes and the heading line.
   const faqItems = extractFaqItems(rest);
+  let faqHeading = "常見問題";
+  const headingMatch = FAQ_HEADING_RE.exec(rest);
+  if (headingMatch !== null) {
+    faqHeading = (headingMatch[1] ?? "").trim();
+    rest =
+      rest.slice(0, headingMatch.index) +
+      rest.slice(headingMatch.index + headingMatch[0].length);
+  }
   rest = rest.replace(FAQ_BLOCK_RE, "");
-  rest = rest.replace(FAQ_HEADING_RE, "");
+  rest = rest.replace(FAQ_HEADING_RESIDUE_RE, "");
 
   // Split off the "## 資訊來源" section so it can be re-ordered after the FAQ.
   let sourcesMd = "";
@@ -223,7 +238,7 @@ export function renderHtml(markupRaw: string): RenderOutput {
 
   let final = bodyHtml;
   if (faqHtml) {
-    final += "\n<h2>常見問題</h2>\n" + faqHtml + "\n";
+    final += `\n<h2>${faqHeading}</h2>\n` + faqHtml + "\n";
   }
   if (sourcesMd) {
     final += "\n" + md.render(sourcesMd);

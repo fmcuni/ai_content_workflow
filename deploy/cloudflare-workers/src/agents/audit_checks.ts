@@ -31,7 +31,9 @@ export interface DeterministicChecksInput {
 const ADV_PANEL_RE = /\[adv_panel id="\d+"\]/;
 const PAGE_WIDGET_RE = /\[page_widget id="\d+"\]/;
 
-const SOURCES_MARKER = "<h2>資訊來源</h2>";
+// Accept either Chinese script — the sources heading follows the voice's script
+// (see resolve_citations / citations.ts), so a zh-MY voice emits Simplified.
+const SOURCES_MARKERS = ["<h2>資訊來源</h2>", "<h2>资讯来源</h2>"];
 const FAQ_WIDGET_MARKER = 'class="editor__item editor__faq"';
 
 /**
@@ -69,7 +71,7 @@ export function runDeterministicChecks(input: DeterministicChecksInput): AuditFi
     });
   }
 
-  if (!htmlBody.includes(SOURCES_MARKER)) {
+  if (!SOURCES_MARKERS.some((marker) => htmlBody.includes(marker))) {
     findings.push({
       id: "det-fmt-sources",
       category: "format",

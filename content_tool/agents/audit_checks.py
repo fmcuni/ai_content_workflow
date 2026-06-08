@@ -31,7 +31,9 @@ def run_deterministic_checks(
             "must_fix": True,
         })
 
-    if "<h2>資訊來源</h2>" not in html_body:
+    # Accept either Chinese script — the sources heading follows the voice's
+    # script (see resolve_citations), so a zh-MY voice emits Simplified.
+    if "<h2>資訊來源</h2>" not in html_body and "<h2>资讯来源</h2>" not in html_body:
         findings.append({
             "id": "det-fmt-sources", "category": "format", "severity": "high",
             "location": "tail", "issue": "缺少 <h2>資訊來源</h2> section",

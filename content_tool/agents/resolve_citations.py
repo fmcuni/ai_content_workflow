@@ -9,12 +9,27 @@ from content_tool import source_policy_store
 from content_tool.agents.url_resolver import UrlResolver
 from content_tool.db.models import Citation, Draft, Run
 
+# Simplified- vs Traditional-only character sets used to pick the script of the
+# auto-generated sources heading so it matches the article's voice (e.g. a zh-MY
+# voice writes Simplified Chinese). Deliberately small but high-frequency — any
+# real article hits many. MUST stay in sync with the Workers port
+# (citations.ts). Default is Traditional, so existing voices stay byte-identical.
+_SIMPLIFIED_CHARS = frozenset("这个为与会时国说后应医险来们对现实样关开点岁费资讯问题卫营见")
+_TRADITIONAL_CHARS = frozenset("這個為與會時國說後應醫險來們對現實樣關開點歲費資訊問題衛營見")
 
-def _build_sources_md(allowed: list[tuple[str, str]]) -> str:
+
+def _sources_heading_for(markup: str) -> str:
+    """Pick the sources heading whose Chinese script matches ``markup``."""
+    simplified = sum(ch in _SIMPLIFIED_CHARS for ch in markup)
+    traditional = sum(ch in _TRADITIONAL_CHARS for ch in markup)
+    return "资讯来源" if simplified > traditional else "資訊來源"
+
+
+def _build_sources_md(allowed: list[tuple[str, str]], heading: str = "資訊來源") -> str:
     """allowed = [(domain, final_url), ...] in display order."""
     if not allowed:
         return ""
-    lines = ["", "## 資訊來源"]
+    lines = ["", f"## {heading}"]
     for i, (domain, url) in enumerate(allowed, 1):
         lines.append(f"{i}. [{domain}]({url})")
     return "\n".join(lines) + "\n"
@@ -82,8 +97,11 @@ async def run_resolve_citations(
         if was_displayed and resolved.final_url and domain:
             allowed_for_display.append((domain, resolved.final_url))
 
-    sources_md = _build_sources_md(allowed_for_display)
-    final_markup = (draft.markup_raw or "").rstrip() + "\n" + sources_md
+    markup_raw = draft.markup_raw or ""
+    sources_md = _build_sources_md(
+        allowed_for_display, heading=_sources_heading_for(markup_raw)
+    )
+    final_markup = markup_raw.rstrip() + "\n" + sources_md
 
     await session.execute(
         update(Draft).where(Draft.draft_id == draft_id).values(final_markup=final_markup)

@@ -49,15 +49,37 @@ interface CitationRecord {
   resolutionError: string | null;
 }
 
+// Simplified- vs Traditional-only character sets to pick the sources heading's
+// script so it matches the article's voice (e.g. a zh-MY voice = Simplified).
+// MUST stay in sync with the Python port (resolve_citations.py). Default is
+// Traditional, so existing voices stay byte-identical.
+const SIMPLIFIED_CHARS = new Set("这个为与会时国说后应医险来们对现实样关开点岁费资讯问题卫营见");
+const TRADITIONAL_CHARS = new Set("這個為與會時國說後應醫險來們對現實樣關開點歲費資訊問題衛營見");
+
+/** Pick the sources heading whose Chinese script matches `markup`. */
+function sourcesHeadingFor(markup: string): string {
+  let simplified = 0;
+  let traditional = 0;
+  for (const ch of markup) {
+    if (SIMPLIFIED_CHARS.has(ch)) simplified++;
+    else if (TRADITIONAL_CHARS.has(ch)) traditional++;
+  }
+  return simplified > traditional ? "资讯来源" : "資訊來源";
+}
+
 /**
  * Build the `## 資訊來源` section from the displayed citations, in iteration
  * order (no sort, no dedup). Mirrors Python `_build_sources_md`: leading blank
  * line + header, 1-indexed `{i}. [{domain}]({url})`, trailing newline. Returns
- * "" when nothing is displayed (no header emitted).
+ * "" when nothing is displayed (no header emitted). `heading` follows the
+ * article's script (default Traditional).
  */
-function buildSourcesMd(displayed: readonly { domain: string; finalUrl: string }[]): string {
+function buildSourcesMd(
+  displayed: readonly { domain: string; finalUrl: string }[],
+  heading = "資訊來源",
+): string {
   if (displayed.length === 0) return "";
-  const lines = ["", "## 資訊來源"];
+  const lines = ["", `## ${heading}`];
   displayed.forEach(({ domain, finalUrl }, i) => {
     lines.push(`${i + 1}. [${domain}](${finalUrl})`);
   });
@@ -191,7 +213,7 @@ export async function resolveCitations(
     }
   }
 
-  const sourcesMd = buildSourcesMd(displayed);
+  const sourcesMd = buildSourcesMd(displayed, sourcesHeadingFor(markupRaw));
   const finalMarkup = markupRaw.replace(/\s+$/, "") + "\n" + sourcesMd;
 
   return { finalMarkup, displayedCount: displayed.length };
