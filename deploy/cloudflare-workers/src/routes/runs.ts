@@ -15,6 +15,7 @@ import {
 import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
 import { canonicalizeSlug } from "../wordpress/slug";
+import { resolvePublishTarget, buildTargetEnv } from "../publishers/wp_factory";
 import { restartGuard } from "./run_guards";
 import type { AuthVars } from "../auth/middleware";
 import { resolveActorIdentity } from "./identity";
@@ -227,6 +228,7 @@ interface RunHitl2StateRow {
 
 interface RunDryPublishRow {
   start_mode: string;
+  persona: string;
   wp_publish_status: string | null;
   wp_category_ids: unknown;
   wp_tag_ids: unknown;
@@ -830,7 +832,7 @@ runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<RunDryPublishRow[]>`
       SELECT
-        start_mode, wp_publish_status, wp_category_ids, wp_tag_ids, wp_excerpt,
+        start_mode, persona, wp_publish_status, wp_category_ids, wp_tag_ids, wp_excerpt,
         wp_slug, wp_author_id, wp_featured_media_id, wp_publish_at, wp_pushed_post_id
       FROM content_tool.runs
       WHERE run_id = ${runId}
@@ -864,7 +866,13 @@ runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
       LIMIT 1
     `;
     const render = renderRows[0] ?? null;
-    return { run, render, fetchedPostId };
+
+    // Reflect the voice's actual publish target so the operator verifies the
+    // right CMS before approving HITL_2 (mirrors the Python dry-publish; NULL
+    // voice → process default). Throws for an archived target — surfaced as an
+    // error rather than a misleading default-target preview.
+    const target = await resolvePublishTarget(sql, run.persona, c.env.WP_TARGET ?? "");
+    return { run, render, fetchedPostId, target };
   });
 
   if (data === null) {
@@ -874,7 +882,12 @@ runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
     return c.json({ detail: "no render for this run" }, 404);
   }
 
-  const { run, render, fetchedPostId } = data;
+  const { run, render, fetchedPostId, target } = data;
+  // Credentials for the resolved target, read in the running Worker (never
+  // persisted). For the default target this returns c.env unchanged. Throws
+  // when a non-default target's credential env vars are absent (matches the
+  // Python factory's EnvironmentError).
+  const targetEnv = buildTargetEnv(c.env, target);
   // Effective WP post id: a prior push wins, else the refresh fetched-post id
   // (null for an un-pushed create → POST a new draft).
   const effectivePostId = run.wp_pushed_post_id ?? fetchedPostId;
@@ -934,7 +947,7 @@ runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
     requestBody.date_gmt = toDateGmt(pgTimestampToIso(publishAt) ?? publishAt);
   }
 
-  const targetBase = c.env.WP_BASE_URL ?? "";
+  const targetBase = targetEnv.WP_BASE_URL ?? "";
   const baseTrimmed = targetBase.replace(/\/$/, "");
   const method = effectivePostId ? "PUT" : "POST";
   const url = effectivePostId
@@ -942,8 +955,8 @@ runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
     : `${baseTrimmed}/wp-json/wp/v2/posts`;
 
   return c.json({
-    target_base_url: c.env.WP_BASE_URL ?? null,
-    target_label: c.env.WP_TARGET ?? null,
+    target_base_url: targetEnv.WP_BASE_URL ?? null,
+    target_label: target.label,
     request_method: method,
     request_url: url,
     request_headers: {
