@@ -43,7 +43,7 @@ export function EditorRail({
   applyingCommentId,
 }: EditorRailProps) {
   return (
-    <aside className="lg:sticky lg:top-0 self-start lg:max-h-[calc(100vh-4.75rem)] lg:overflow-y-auto">
+    <aside className="lg:sticky lg:top-0 self-start lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto">
       <Tabs value={tab} onValueChange={(v) => onTabChange(v as "wp" | "comments")}>
         <TabsList className="border-b border-rule">
           <TabsTrigger value="wp">WP metadata</TabsTrigger>
