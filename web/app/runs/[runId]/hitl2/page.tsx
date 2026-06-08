@@ -21,14 +21,10 @@ import { WpPayloadView } from "@/components/WpPayloadView";
 import { useArticleComments } from "@/lib/useArticleComments";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
-import {
-  buildDryRequest,
-  buildSnapshotIn,
-  isBlankBody,
-  snapshotInFromSaved,
-  snapshotKey,
-} from "@/lib/run-editor/form";
+import { buildDryRequest, buildSnapshotIn, snapshotKey } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
+import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
+import { RunEditorHeaderActions } from "@/components/run-editor/RunEditorHeaderActions";
 import { useRole } from "@/lib/use-role";
 import { useSession } from "@/lib/auth-client";
 import {
@@ -40,16 +36,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type {
-  ExistingPost,
-  Hitl2Request,
-  Hitl2Snapshot,
-  Hitl2SnapshotIn,
-  Hitl2SnapshotTrigger,
-} from "@/lib/types";
+import type { ExistingPost, Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn } from "@/lib/types";
 
 const MAX_ROUNDS = 3;
-const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function Hitl2Page({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -92,7 +81,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // Hydration runs once, after the snapshot list resolves. When a saved snapshot
   // exists it seeds the editor and these refs stop the render/WP prefills from
   // clobbering the restored work.
-  const hydrationDoneRef = useRef(false);
   const hydratedFromSnapshotRef = useRef(false);
 
   const refresh = useMutation({
@@ -226,14 +214,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   // --- Autosave + version history -----------------------------------------
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const snapshotIn = useMemo<Hitl2SnapshotIn>(
     () => buildSnapshotIn(html, form, comments, "manual"),
     [html, form, comments],
   );
-  const currentKey = useMemo(() => snapshotKey(snapshotIn), [snapshotIn]);
 
   // Baseline is derived from the same source data the prefill effects consume,
   // so a freshly-loaded page never reads as dirty before any real edit.
@@ -258,80 +243,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     });
   }, [render.data, existingPost.data, existingPost.isFetched]);
 
-  // `lastSavedKey` drives the dirty indicator (state, read during render);
-  // `lastSavedKeyRef` mirrors it for the unmount / pagehide handlers that run
-  // outside render and must see the latest value without re-subscribing.
-  const [lastSavedKey, setLastSavedKey] = useState<string | null>(null);
-  const lastSavedKeyRef = useRef<string | null>(null);
-  const snapshotRef = useRef(snapshotIn);
-  useEffect(() => {
-    snapshotRef.current = snapshotIn;
-  });
-  useEffect(() => {
-    lastSavedKeyRef.current = lastSavedKey;
-  }, [lastSavedKey]);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (baselineKey != null && lastSavedKey == null) setLastSavedKey(baselineKey);
-  }, [baselineKey, lastSavedKey]);
-
-  const isDirty = lastSavedKey != null && currentKey !== lastSavedKey;
-
-  const saveSnapshot = useCallback(
-    async (trigger: Hitl2SnapshotTrigger): Promise<"saved" | "unchanged" | "error"> => {
-      if (submittedRef.current || lastSavedKeyRef.current == null) return "unchanged";
-      const snap = snapshotRef.current;
-      // Never persist a blank body — TipTap reports empty mid-teardown, and a
-      // blank save would overwrite good work and reload to an empty editor.
-      if (isBlankBody(snap.html_body)) return "unchanged";
-      const key = snapshotKey(snap);
-      if (key === lastSavedKeyRef.current) return "unchanged"; // nothing changed
-      try {
-        setSaveState("saving");
-        await api.saveHitl2Snapshot(runId, { ...snap, trigger, editor_email: editorEmailRef.current });
-        lastSavedKeyRef.current = key;
-        setLastSavedKey(key);
-        setSavedAt(new Date());
-        setSaveState("saved");
-        qc.invalidateQueries({ queryKey: ["hitl2-snapshots", runId] });
-        return "saved";
-      } catch {
-        setSaveState("error");
-        return "error";
-      }
-    },
-    [runId, qc],
-  );
-
-  const handleManualSave = useCallback(async () => {
-    const result = await saveSnapshot("manual");
-    if (result === "saved") toast.success("Saved version");
-    else if (result === "error") toast.error("Couldn't save — try again");
-    else toast("Already up to date");
-  }, [saveSnapshot]);
-
-  // Every 5 minutes, persist a snapshot if anything changed.
-  useEffect(() => {
-    const id = setInterval(() => void saveSnapshot("interval"), AUTOSAVE_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [saveSnapshot]);
-
-  // Leaving the page — client-side nav, link click, or unmount — flushes a save.
-  useEffect(() => () => void saveSnapshot("navigate"), [saveSnapshot]);
-
-  // Tab close / reload: an awaited fetch would be cancelled, so beacon instead.
-  useEffect(() => {
-    const handler = () => {
-      if (submittedRef.current || lastSavedKeyRef.current == null) return;
-      const snap = snapshotRef.current;
-      if (isBlankBody(snap.html_body)) return;
-      if (snapshotKey(snap) === lastSavedKeyRef.current) return;
-      api.beaconHitl2Snapshot(runId, { ...snap, trigger: "unload", editor_email: editorEmailRef.current });
-    };
-    window.addEventListener("pagehide", handler);
-    return () => window.removeEventListener("pagehide", handler);
-  }, [runId]);
-
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
     setHtml(s.html_body);
     setComments(s.comments ?? []);
@@ -351,39 +262,18 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     }));
   }, [setComments]);
 
-  // On load, reopen the editor at the most recent saved snapshot (autosave or
-  // manual) rather than the pristine render, and treat it as the clean baseline.
-  useEffect(() => {
-    if (hydrationDoneRef.current || !render.data) return;
-    let cancelled = false;
-    void (async () => {
-      // Pull a FRESH list, not the reactive cache: returning via client-side nav
-      // (e.g. from the index page) would otherwise hydrate from a stale cache that
-      // predates the navigate-away autosave, loading an older version.
-      const list = await qc.fetchQuery({
-        queryKey: ["hitl2-snapshots", runId],
-        queryFn: () => api.listHitl2Snapshots(runId),
-        staleTime: 0,
-      });
-      // Mark done only after the fetch resolves so StrictMode's double-invoke
-      // (which cancels the first pass) doesn't leave hydration permanently skipped.
-      if (cancelled || hydrationDoneRef.current) return;
-      hydrationDoneRef.current = true;
-      // Skip any blank-body rows left by the teardown bug; load the newest real save.
-      const latest = list.find((s) => !isBlankBody(s.html_body));
-      if (!latest) return;
-      hydratedFromSnapshotRef.current = true;
-      applySnapshot(latest);
-      const key = snapshotKey(snapshotInFromSaved(latest));
-      lastSavedKeyRef.current = key;
-      setLastSavedKey(key);
-      setSavedAt(new Date(latest.created_at));
-      setSaveState("saved");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [render.data, runId, qc, applySnapshot]);
+  const { saveState, isDirty, saveStatusLabel, saveSnapshot, handleManualSave } =
+    useSnapshotAutosave({
+      runId,
+      ready: renderReady,
+      snapshotIn,
+      baselineKey,
+      editorEmailRef,
+      submittedRef,
+      hydrateEnabled: true,
+      hydratedFromSnapshotRef,
+      onHydrate: applySnapshot,
+    });
 
   // Restoring first preserves current work, then loads the chosen version.
   // Modelled as a mutation so the version-history Restore buttons can disable
@@ -400,17 +290,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     },
     onError: () => toast.error("Couldn't restore — try again"),
   });
-
-  const saveStatusLabel =
-    saveState === "saving"
-      ? "Saving…"
-      : saveState === "error"
-      ? "Autosave failed"
-      : isDirty
-      ? "Unsaved changes"
-      : savedAt
-      ? `Saved ${savedAt.toLocaleTimeString()}`
-      : "Autosave on";
 
   return (
     <RunEditorShell
@@ -443,36 +322,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       hed="Editor's review"
       dek="Final pass on the draft. Approve and push to WordPress as draft, request changes, or reject."
       headerActions={
-        <div className="flex items-center gap-3">
-          <span
-            className={`font-mono text-[11px] uppercase tracking-wider ${
-              saveState === "error"
-                ? "text-accent-deep"
-                : isDirty
-                ? "text-accent"
-                : "text-ink-faint"
-            }`}
-          >
-            {saveState === "saving" && "↻ "}
-            {saveStatusLabel}
-          </span>
-          <button
-            type="button"
-            onClick={handleManualSave}
-            disabled={!isDirty || saveState === "saving" || !canEdit}
-            title={!canEdit ? "Author role required to save edits." : undefined}
-            className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-ink-faint"
-          >
-            {saveState === "saving" ? "↻ Saving…" : "⤓ Save"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setHistoryOpen(true)}
-            className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-          >
-            ⟲ Version history
-          </button>
-        </div>
+        <RunEditorHeaderActions
+          saveStatusLabel={saveStatusLabel}
+          saveState={saveState}
+          isDirty={isDirty}
+          canEdit={canEdit}
+          onSave={handleManualSave}
+          onOpenHistory={() => setHistoryOpen(true)}
+        />
       }
       actionBar={
         gateResolved ? (

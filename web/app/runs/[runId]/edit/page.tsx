@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -23,8 +23,13 @@ import {
   buildArticlePayload,
   buildDryRequest,
   buildSnapshotIn,
+  snapshotKey,
 } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
+import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
+import { RunEditorHeaderActions } from "@/components/run-editor/RunEditorHeaderActions";
+import { useRole } from "@/lib/use-role";
+import { useSession } from "@/lib/auth-client";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +39,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import type { Hitl2Request, Hitl2Snapshot, Outline } from "@/lib/types";
+import type { Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline } from "@/lib/types";
 
 type EditTab = "article" | "outline" | "raw" | "payload";
 
@@ -64,6 +69,18 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
   const wpPrefilledRef = useRef(false);
   const renderSeededRef = useRef(false);
+  const hydratedFromSnapshotRef = useRef(false);
+  // Set once a re-push navigates away, so the exit-flush doesn't double-save.
+  const submittedRef = useRef(false);
+
+  const { can } = useRole();
+  const canEdit = can("edit_article");
+  const { data: session } = useSession();
+  const editorEmail = session?.user?.email ?? "";
+  const editorEmailRef = useRef(editorEmail);
+  useEffect(() => {
+    editorEmailRef.current = editorEmail;
+  }, [editorEmail]);
 
   const {
     comments,
@@ -104,6 +121,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   // operator's in-progress edits or race the WP-metadata prefill below.
   useEffect(() => {
     if (!render.data || renderSeededRef.current) return;
+    if (hydratedFromSnapshotRef.current) return; // a saved snapshot owns the body
     renderSeededRef.current = true;
     setHtml(render.data.html_body);
     setForm((f) => ({
@@ -138,18 +156,64 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     }));
   }, [run.data, existingPost.data, existingPostSettled]);
 
+  const snapshotIn = useMemo<Hitl2SnapshotIn>(
+    () => buildSnapshotIn(html, form, comments, "manual"),
+    [html, form, comments],
+  );
+
+  // Clean baseline mirrors the render seed (body + SEO) and the WP-metadata
+  // prefill (run row first, existing post as fallback), so a freshly-loaded
+  // editor never reads as dirty before a real edit.
+  const baselineKey = useMemo(() => {
+    if (!render.data || !existingPostSettled) return null;
+    const r = run.data;
+    const ep = existingPost.data;
+    return snapshotKey({
+      trigger: "manual",
+      html_body: render.data.html_body,
+      seo_title: render.data.seo_title,
+      meta_description: render.data.meta_description,
+      notes: null,
+      comments: [],
+      wp_publish_status: r?.wp_publish_status ?? "draft",
+      wp_author_id: r?.wp_author_id ?? ep?.wp_author_id ?? null,
+      wp_category_ids:
+        r?.wp_category_ids ?? (ep?.wp_category_id != null ? [ep.wp_category_id] : null),
+      wp_tag_ids: r?.wp_tag_ids ?? null,
+      wp_featured_media_id: r?.wp_featured_media_id ?? null,
+      wp_slug: r?.wp_slug ?? ep?.wp_slug ?? null,
+      wp_excerpt: r?.wp_excerpt ?? render.data.excerpt_suggestion ?? null,
+      wp_publish_at: null,
+    });
+  }, [render.data, run.data, existingPost.data, existingPostSettled]);
+
+  const applySnapshot = useCallback((s: Hitl2Snapshot) => {
+    setHtml(s.html_body);
+    setComments(s.comments ?? []);
+    setForm((f) => applySnapshotToForm(f, s));
+  }, [setComments]);
+
+  const { saveState, isDirty, saveStatusLabel, saveSnapshot, handleManualSave } =
+    useSnapshotAutosave({
+      runId,
+      ready: render.data !== undefined,
+      snapshotIn,
+      baselineKey,
+      editorEmailRef,
+      submittedRef,
+      hydrateEnabled: true,
+      hydratedFromSnapshotRef,
+      onHydrate: applySnapshot,
+    });
+
   async function persist() {
     if (outline && outlineDirty) await api.saveOutline(runId, outline);
     await api.saveArticle(runId, buildArticlePayload(html, form));
     // Capture a version-history snapshot so each save is recoverable, mirroring
-    // the HITL_2 gate's autosave history. Best-effort — a snapshot failure must
-    // not fail the save itself.
-    try {
-      await api.saveHitl2Snapshot(runId, buildSnapshotIn(html, form, comments, "manual"));
-      qc.invalidateQueries({ queryKey: ["hitl2-snapshots", runId] });
-    } catch {
-      // Swallow: the article + outline are already persisted above.
-    }
+    // the HITL_2 gate's autosave history. Routed through the autosave hook so the
+    // header's dirty indicator clears; the hook swallows snapshot failures so they
+    // never fail the save itself.
+    await saveSnapshot("manual");
     qc.invalidateQueries({ queryKey: ["render", runId] });
     qc.invalidateQueries({ queryKey: ["outline", runId] });
   }
@@ -183,6 +247,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const republish = useMutation({
     mutationFn: () => api.republish(runId),
     onSuccess: (res) => {
+      submittedRef.current = true; // re-push already persisted; skip the exit-flush
       setConfirmOpen(false);
       toast.success(`Re-pushed to WordPress (post #${res.wp_post_id})`);
       qc.invalidateQueries({ queryKey: ["run", runId] });
@@ -194,14 +259,11 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const restore = useMutation({
     mutationFn: async (snapshot: Hitl2Snapshot) => {
       // Preserve the current state before overwriting, then hydrate.
-      await api.saveHitl2Snapshot(runId, buildSnapshotIn(html, form, comments, "manual"));
+      await saveSnapshot("manual");
       return snapshot;
     },
     onSuccess: (snapshot) => {
-      setHtml(snapshot.html_body);
-      setComments(snapshot.comments ?? []);
-      setForm((f) => applySnapshotToForm(f, snapshot));
-      qc.invalidateQueries({ queryKey: ["hitl2-snapshots", runId] });
+      applySnapshot(snapshot);
       setHistoryOpen(false);
       toast.success("Restored version — review, then Save to keep it");
     },
@@ -226,6 +288,16 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       kicker={<>Edit · <span className="text-accent">{shortId}</span></>}
       hed="Edit outline & article"
       dek="Revise a finished run's outline and article, then save — or save and re-push the article to WordPress."
+      headerActions={
+        <RunEditorHeaderActions
+          saveStatusLabel={saveStatusLabel}
+          saveState={saveState}
+          isDirty={isDirty}
+          canEdit={canEdit}
+          onSave={handleManualSave}
+          onOpenHistory={() => setHistoryOpen(true)}
+        />
+      }
       actionBar={
         <>
           <RoleButton
@@ -251,21 +323,12 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     >
       <section>
           <Tabs value={tab} onValueChange={onTabChange}>
-            <div className="flex items-center justify-between border-b border-rule">
-              <TabsList>
-                <TabsTrigger value="article">Article</TabsTrigger>
-                <TabsTrigger value="outline">Outline</TabsTrigger>
-                <TabsTrigger value="raw">Raw HTML</TabsTrigger>
-                <TabsTrigger value="payload">WP payload</TabsTrigger>
-              </TabsList>
-              <button
-                type="button"
-                onClick={() => setHistoryOpen(true)}
-                className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider px-2"
-              >
-                ⟲ Version history
-              </button>
-            </div>
+            <TabsList className="border-b border-rule">
+              <TabsTrigger value="article">Article</TabsTrigger>
+              <TabsTrigger value="outline">Outline</TabsTrigger>
+              <TabsTrigger value="raw">Raw HTML</TabsTrigger>
+              <TabsTrigger value="payload">WP payload</TabsTrigger>
+            </TabsList>
             <TabsContent value="article" className="pt-6">
               {render.isPending && (
                 <p className="font-mono text-[11px] text-ink-faint uppercase tracking-wider animate-pulse">

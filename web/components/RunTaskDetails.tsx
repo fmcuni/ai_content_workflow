@@ -1,4 +1,8 @@
 "use client";
+import Link from "next/link";
+
+import { ExternalLink } from "@/components/ExternalLink";
+import { useTopicBatchForRun } from "@/lib/run-editor/useTopicBatchForRun";
 import type { RunSummary } from "@/lib/types";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -10,14 +14,25 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function WideField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="col-span-2 md:col-span-4 min-w-0">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">{label}</dt>
+      <dd className="font-sans text-[13px] text-ink mt-0.5 break-words">{children}</dd>
+    </div>
+  );
+}
+
 /**
- * Task-config readout for a run — focus keywords, voice (persona), mode (rewrite
- * only), advertiser id and widget id. Shown atop the run detail and both HITL
- * gates so the editor sees what the run was commissioned to do.
+ * Task-config readout for a run — source URL (rewrite), focus keywords, voice
+ * (persona), mode (rewrite only), advertiser/widget ids, the operator's edit
+ * note, and the topic batch it was promoted from. Shown atop the run detail and
+ * both HITL gates so the editor sees what the run was commissioned to do.
  */
 export function RunTaskDetails({ run }: { run: RunSummary }) {
   const isCreate = run.start_mode === "create";
   const keywords = run.keywords ?? [];
+  const batch = useTopicBatchForRun(run);
 
   return (
     <section className="border border-rule rounded bg-paper-deep/30 px-4 py-3 mb-8">
@@ -33,6 +48,19 @@ export function RunTaskDetails({ run }: { run: RunSummary }) {
             {run.topic || <span className="text-ink-faint italic">—</span>}
           </dd>
         </div>
+
+        {/* Source article being rewritten — rewrite/refresh runs only. */}
+        {!isCreate && run.article_url && (
+          <WideField label="Source URL">
+            <ExternalLink
+              href={run.article_url}
+              className="text-accent hover:underline underline-offset-2 break-all"
+            >
+              {run.article_url} <span className="text-ink-faint">↗</span>
+            </ExternalLink>
+          </WideField>
+        )}
+
         <div className="col-span-2 md:col-span-4 min-w-0">
           <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
             Focus keywords
@@ -54,10 +82,30 @@ export function RunTaskDetails({ run }: { run: RunSummary }) {
             )}
           </dd>
         </div>
-        <Field label="Voice" value={run.persona ?? "—"} />
+        <Field label="Voice" value={run.persona ?? "none"} />
         {!isCreate && <Field label="Mode" value={run.mode} />}
-        <Field label="Adv ID" value={run.acf_adv_id ?? "—"} />
-        <Field label="Widget ID" value={run.acf_widget_id ?? "—"} />
+        <Field label="Adv ID" value={run.acf_adv_id ?? "none"} />
+        <Field label="Widget ID" value={run.acf_widget_id ?? "none"} />
+
+        {/* Operator's note that seeded / steers this run. */}
+        {run.edit_note && (
+          <WideField label="Edit note">
+            <span className="whitespace-pre-wrap">{run.edit_note}</span>
+          </WideField>
+        )}
+
+        {/* The Expand-Topics batch this run was promoted from, when applicable. */}
+        {batch && (
+          <WideField label="Topic batch">
+            <Link
+              href={`/topic-batches/${batch.batch_id}`}
+              className="text-accent hover:underline underline-offset-2"
+            >
+              №{batch.batch_id.slice(0, 8)} ·{" "}
+              <span className="text-ink">&ldquo;{batch.research_theme}&rdquo;</span>
+            </Link>
+          </WideField>
+        )}
       </dl>
     </section>
   );

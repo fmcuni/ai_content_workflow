@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { RunSummary } from "@/lib/types";
 
@@ -7,6 +9,14 @@ import type { RunSummary } from "@/lib/types";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 
 const RUN_ID = "abcdef12-3456-7890-abcd-ef1234567890";
+
+// RunTaskDetails (rendered inside the shell) resolves the run's topic batch via
+// react-query, so every render needs a client in scope. The batch query is
+// disabled for runs without a topic_candidate_id, so it never hits the network.
+function renderShell(node: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+}
 
 function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
   return {
@@ -26,7 +36,7 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
 
 describe("RunEditorShell", () => {
   it("renders the kicker, hed, dek, children, and action bar", () => {
-    render(
+    renderShell(
       <RunEditorShell
         runId={RUN_ID}
         run={undefined}
@@ -49,7 +59,7 @@ describe("RunEditorShell", () => {
   });
 
   it("links the back-link row to the run detail page with a short id", () => {
-    render(
+    renderShell(
       <RunEditorShell runId={RUN_ID} run={undefined} kicker="k" hed="h" dek="d" actionBar={null}>
         <div />
       </RunEditorShell>,
@@ -60,23 +70,28 @@ describe("RunEditorShell", () => {
   });
 
   it("renders the RunTaskDetails brief only when a run is provided", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = render(
-      <RunEditorShell runId={RUN_ID} run={undefined} kicker="k" hed="h" dek="d" actionBar={null}>
-        <div />
-      </RunEditorShell>,
+      <QueryClientProvider client={client}>
+        <RunEditorShell runId={RUN_ID} run={undefined} kicker="k" hed="h" dek="d" actionBar={null}>
+          <div />
+        </RunEditorShell>
+      </QueryClientProvider>,
     );
     expect(screen.queryByText(/Task brief/)).not.toBeInTheDocument();
 
     rerender(
-      <RunEditorShell runId={RUN_ID} run={makeRun()} kicker="k" hed="h" dek="d" actionBar={null}>
-        <div />
-      </RunEditorShell>,
+      <QueryClientProvider client={client}>
+        <RunEditorShell runId={RUN_ID} run={makeRun()} kicker="k" hed="h" dek="d" actionBar={null}>
+          <div />
+        </RunEditorShell>
+      </QueryClientProvider>,
     );
     expect(screen.getByText(/Task brief/)).toBeInTheDocument();
   });
 
   it("renders headerActions on the right of the back-link row when provided", () => {
-    render(
+    renderShell(
       <RunEditorShell
         runId={RUN_ID}
         run={undefined}

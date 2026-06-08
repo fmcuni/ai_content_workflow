@@ -7,7 +7,6 @@ import Link from "next/link";
 import { AutoAcceptField } from "@/components/AutoAcceptField";
 import { Button } from "@/components/ui/button";
 import { RoleButton } from "@/components/RoleGate";
-import { Textarea } from "@/components/ui/textarea";
 import { SectionHead } from "@/components/SectionHead";
 import { RefreshFindingsPanel } from "@/components/RefreshFindingsPanel";
 import { ExternalLink } from "@/components/ExternalLink";
@@ -17,7 +16,6 @@ import { BriefForm } from "@/components/topics/BriefForm";
 import { CreateLedger } from "@/components/topics/CreateLedger";
 import {
   DEFAULT_PERSONA,
-  type LedgerRow,
   LedgerDoneBanner,
   LedgerFooter,
   LedgerHeader,
@@ -68,11 +66,9 @@ function NewRunForm() {
 
   const [front, setFront] = useState<FrontKey>(() => parseFront(params.get("front")));
   const activeFront = FRONTS.find((f) => f.key === front) ?? FRONTS[0];
-  const { rows, setRows, expanded, setExpanded, newRow, patchRow, addRow, removeRow } =
+  const { rows, setRows, expanded, setExpanded, patchRow, addRow, removeRow } =
     useLedgerRows("r");
   const [autoAccept, setAutoAccept] = useState(false);
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkRaw, setBulkRaw] = useState("");
   const seeded = useRef(false);
 
   const personasQ = useQuery({
@@ -123,28 +119,6 @@ function NewRunForm() {
     [rows],
   );
   const allDone = filledRows.length > 0 && filledRows.every((r) => r.status === "done");
-
-  function applyBulk() {
-    const carriedPersona = rows[0]?.persona ?? DEFAULT_PERSONA;
-    const lines = bulkRaw
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (lines.length === 0) return;
-    const parsed: LedgerRow[] = lines.map((line) => {
-      const cells = line.includes("\t") ? line.split("\t") : line.split(",");
-      const [url = "", topic = "", kws = ""] = cells.map((c) => c.trim());
-      return {
-        ...newRow(carriedPersona),
-        article_url: url,
-        topic,
-        keywords: kws.replace(/;/g, ", "),
-      };
-    });
-    setRows(parsed);
-    setBulkRaw("");
-    setBulkOpen(false);
-  }
 
   const submitMut = useLedgerSubmit({
     rows,
@@ -277,47 +251,11 @@ function NewRunForm() {
               </h2>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setBulkOpen((v) => !v)} type="button">
-                {bulkOpen ? "Close paste tray" : "Paste rows…"}
-              </Button>
               <Button variant="secondary" size="sm" onClick={addRow} type="button">
                 + Add row
               </Button>
             </div>
           </div>
-
-          {bulkOpen && (
-            <div className="bg-paper-deep border border-rule p-4 space-y-3">
-              <div className="flex items-baseline justify-between">
-                <p className="kicker">Bulk paste · one row per line</p>
-                <p className="font-mono text-[10.5px] text-ink-faint">
-                  url, topic, keyword;keyword;keyword
-                </p>
-              </div>
-              <Textarea
-                value={bulkRaw}
-                onChange={(e) => setBulkRaw(e.target.value)}
-                rows={6}
-                placeholder="https://bowtie.com.hk/blog/zh/example, Topic in plain English, kw1;kw2"
-                className="font-mono text-[12px] bg-paper"
-              />
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBulkRaw("");
-                    setBulkOpen(false);
-                  }}
-                  className="text-[12px] text-ink-soft hover:text-ink"
-                >
-                  Cancel
-                </button>
-                <Button size="sm" onClick={applyBulk} disabled={!bulkRaw.trim()}>
-                  Replace rows with paste
-                </Button>
-              </div>
-            </div>
-          )}
 
           <div className="border border-rule overflow-hidden">
             <LedgerHeader variant="refresh" />

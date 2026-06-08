@@ -15,7 +15,8 @@ import { DebugLogPanel } from "@/components/DebugLogPanel";
 import { CostMeter } from "@/components/CostMeter";
 import { RunTaskDetails } from "@/components/RunTaskDetails";
 import { useRunEvents } from "@/lib/sse";
-import { api, topicBatchesApi } from "@/lib/api";
+import { useTopicBatchForRun } from "@/lib/run-editor/useTopicBatchForRun";
+import { api } from "@/lib/api";
 
 // Finished runs whose stored outline / article can still be edited post-hoc
 // and re-pushed. In-flight stages (pending/fetching/strategy/production/
@@ -58,25 +59,9 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["run", runId] }),
   });
 
-  // Run row exposes candidate_id but not batch_id. Walk recent batches to
-  // locate the parent — there is no candidate-lookup endpoint today.
-  const { data: batch } = useQuery({
-    queryKey: ["topic-batch-for-run", run?.topic_candidate_id],
-    queryFn: async () => {
-      const candidateId = run?.topic_candidate_id;
-      if (!candidateId) return null;
-      const list = await topicBatchesApi.list();
-      for (const b of list) {
-        const detail = await topicBatchesApi.detail(b.batch_id);
-        if (detail.candidates?.some((c) => c.candidate_id === candidateId)) {
-          return detail;
-        }
-      }
-      return null;
-    },
-    enabled: !!run?.topic_candidate_id,
-    staleTime: 60_000,
-  });
+  // Run row exposes candidate_id but not batch_id; the shared hook walks recent
+  // batches to locate the parent (no candidate-lookup endpoint today).
+  const batch = useTopicBatchForRun(run);
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">
