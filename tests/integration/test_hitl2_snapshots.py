@@ -235,3 +235,47 @@ async def test_generated_baseline_seeded_from_render(postgres_url):
         )).scalar_one()
     assert n == 1
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_drafts_returns_iterations_newest_first(postgres_url):
+    """GET /{run_id}/drafts returns every iteration that produced a render,
+    newest-first, with the render body + SEO metadata (unified-timeline source)."""
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+    run_id = uuid4()
+    await _seed_run(sf, run_id)
+    await _seed_render(sf, run_id, iteration=1, html_body="<p>draft one</p>")
+    await _seed_render(sf, run_id, iteration=2, html_body="<p>draft two</p>")
+    app = _make_app(sf)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get(f"/runs/{run_id}/drafts")
+
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [r["iteration"] for r in rows] == [2, 1]
+    assert rows[0]["html_body"] == "<p>draft two</p>"
+    assert rows[1]["html_body"] == "<p>draft one</p>"
+    # Render metadata rides along so a draft is restorable from the timeline.
+    assert rows[0]["seo_title"] == "Gen Title"
+    assert rows[0]["meta_description"] == "gen meta"
+    assert {"draft_id", "iteration", "created_at"} <= rows[0].keys()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_drafts_empty_for_run_without_render(postgres_url):
+    """A run with no render yields an empty list (parity: both backends return [])."""
+    engine = make_engine(postgres_url)
+    sf = make_session_factory(engine)
+    run_id = uuid4()
+    await _seed_run(sf, run_id)
+    app = _make_app(sf)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get(f"/runs/{run_id}/drafts")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    await engine.dispose()

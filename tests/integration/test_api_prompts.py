@@ -187,6 +187,38 @@ async def test_put_template_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_put_template_persists_change_note(
+    api_client: AsyncClient,
+    restore_template,
+):
+    """An optional `note` on save is stored on the version row and surfaced in
+    history / version detail (Phase 6 change-note)."""
+    await restore_template("_writer_brand_block")
+    g = await api_client.get("/prompts/templates/_writer_brand_block")
+    sha = g.json()["sha256"]
+    body = g.json()["template"]
+
+    note = "tightened the brand voice intro"
+    r = await api_client.put(
+        "/prompts/templates/_writer_brand_block",
+        json={"template": body + "\n# noted\n", "expected_sha256": sha, "note": note},
+    )
+    assert r.status_code == 200, r.text
+    version_id = r.json()["version_id"]
+
+    hist = await api_client.get("/prompts/templates/_writer_brand_block/history")
+    assert hist.status_code == 200
+    newest = hist.json()["versions"][0]
+    assert newest["note"] == note
+
+    detail = await api_client.get(
+        f"/prompts/templates/_writer_brand_block/versions/{version_id}"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["note"] == note
+
+
+@pytest.mark.asyncio
 async def test_put_template_missing_placeholder_400(
     api_client: AsyncClient, restore_template
 ):

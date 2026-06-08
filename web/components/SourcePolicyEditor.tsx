@@ -7,9 +7,17 @@ import { Button } from "@/components/ui/button";
 import { RoleButton } from "@/components/RoleGate";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { VersionDiff } from "@/components/VersionDiff";
 import { useRole } from "@/lib/use-role";
 import { sourcePolicyApi } from "@/lib/api";
-import type { SourcePolicyDoc } from "@/lib/types";
+import type { PromptVersionSummary, SourcePolicyDoc } from "@/lib/types";
 
 const EMPTY_DOC: SourcePolicyDoc = {
   deny: { domains: [], tlds: [] },
@@ -168,6 +176,17 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
   const [sha, setSha] = useState<string | null>(null);
   const [rendered, setRendered] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Optional one-line change reason recorded on the next save's version row.
+  const [noteInput, setNoteInput] = useState("");
+  // Version-preview dialog: diff the selected version's rendered block against
+  // the current live block.
+  const [openVersion, setOpenVersion] = useState<PromptVersionSummary | null>(null);
+
+  const versionDetailQ = useQuery({
+    queryKey: ["source-policy", voice, "version", openVersion?.version_id],
+    queryFn: () => sourcePolicyApi.version(voice, openVersion!.version_id),
+    enabled: openVersion !== null,
+  });
 
   // Editing source policy is admin-only (server-authoritative).
   const { can } = useRole();
@@ -207,7 +226,11 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
   const saveMut = useMutation({
     mutationFn: () => {
       if (sha === null) throw new Error("policy not loaded yet");
-      return sourcePolicyApi.save(voice, { policy: doc, expected_sha256: sha });
+      return sourcePolicyApi.save(voice, {
+        policy: doc,
+        expected_sha256: sha,
+        note: noteInput.trim() || null,
+      });
     },
     onSuccess: (res) => {
       setError(null);
@@ -215,6 +238,7 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
       setDoc(res.policy);
       setSha(res.sha256);
       setRendered(res.rendered);
+      setNoteInput("");
       void queryClient.invalidateQueries({ queryKey: ["source-policy", voice] });
     },
     onError: (e: unknown) => {
@@ -359,7 +383,17 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 mt-6">
+        <input
+          type="text"
+          value={noteInput}
+          maxLength={500}
+          onChange={(e) => setNoteInput(e.target.value)}
+          disabled={!canEditPolicy}
+          placeholder="Optional change note — why this edit (saved to history)"
+          className="mt-6 w-full font-mono text-[11.5px] text-ink bg-paper-deep/30 border border-rule rounded-sm px-2.5 py-1.5 outline-none focus-visible:border-accent placeholder:text-ink-faint"
+        />
+
+        <div className="flex items-center gap-3 mt-3">
           <RoleButton
             need="edit_source_policy"
             deniedHint="Admin role required to edit the source policy."
@@ -413,21 +447,30 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
                   )}
                   <span>{v.kind} · {shortSha(v.sha256)} · {v.saved_by}</span>
                 </span>
-                <button
-                  type="button"
-                  disabled={revertMut.isPending || !canEditPolicy || v.is_current}
-                  title={
-                    v.is_current
-                      ? "This is the live version."
-                      : !canEditPolicy
-                        ? "Admin role required to revert the source policy."
-                        : undefined
-                  }
-                  onClick={() => revertMut.mutate(v.version_id)}
-                  className="font-sans text-[12px] font-medium text-accent hover:underline underline-offset-2 whitespace-nowrap disabled:opacity-50"
-                >
-                  Revert
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setOpenVersion(v)}
+                    className="font-sans text-[12px] font-medium text-ink-soft hover:text-ink hover:underline underline-offset-2 whitespace-nowrap"
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    disabled={revertMut.isPending || !canEditPolicy || v.is_current}
+                    title={
+                      v.is_current
+                        ? "This is the live version."
+                        : !canEditPolicy
+                          ? "Admin role required to revert the source policy."
+                          : undefined
+                    }
+                    onClick={() => revertMut.mutate(v.version_id)}
+                    className="font-sans text-[12px] font-medium text-accent hover:underline underline-offset-2 whitespace-nowrap disabled:opacity-50"
+                  >
+                    Revert
+                  </button>
+                </div>
               </li>
             ))}
             {versions.length === 0 && (
@@ -436,6 +479,48 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
           </ul>
         </div>
       </aside>
+
+      <Dialog
+        open={openVersion !== null}
+        onOpenChange={(o) => {
+          if (!o) setOpenVersion(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {openVersion ? `v${openVersion.version_number} · ${openVersion.kind}` : "Version"}
+              {openVersion?.is_current ? " · ● Live" : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {openVersion ? (
+                <>
+                  Saved by {openVersion.saved_by} · sha {shortSha(openVersion.sha256)}
+                  {openVersion.note ? ` · ${openVersion.note}` : ""}. Rendered block compared
+                  against the current live policy.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+
+          {versionDetailQ.isPending && (
+            <p className="text-ink-faint text-[12px]">Loading version…</p>
+          )}
+          {versionDetailQ.isError && (
+            <p className="text-accent-deep text-[12px]">
+              Failed to load — {(versionDetailQ.error as Error).message}
+            </p>
+          )}
+          {versionDetailQ.data && (
+            <VersionDiff
+              before={versionDetailQ.data.rendered}
+              after={q.data?.rendered ?? rendered}
+              className="max-h-[55vh]"
+              emptyLabel="This is the current live policy — no differences."
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

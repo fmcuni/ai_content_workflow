@@ -468,6 +468,18 @@ export interface Hitl2Snapshot extends Hitl2SnapshotIn {
   is_current?: boolean;
 }
 
+// One draft iteration that produced a render, for the unified run-history
+// timeline. Mirrors GET /runs/{id}/drafts on both backends (newest-first by
+// iteration). Carries the render body + SEO metadata so a draft is restorable.
+export interface RunDraft {
+  draft_id: string;
+  iteration: number;
+  created_at: string;
+  html_body: string;
+  seo_title: string;
+  meta_description: string;
+}
+
 export interface ArticleEditRequest {
   html_body: string;
   seo_title: string;

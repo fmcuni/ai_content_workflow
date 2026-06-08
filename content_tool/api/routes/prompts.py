@@ -261,6 +261,9 @@ async def template_consumers(
 class _SaveTemplateRequest(BaseModel):
     template: str
     expected_sha256: str = Field(..., min_length=64, max_length=64)
+    # Optional one-line human change reason, stored on the version row. Not part
+    # of the hashed body, so sha/parity are unaffected.
+    note: str | None = Field(default=None, max_length=500)
 
 
 @router.put("/templates/{template_id}")
@@ -378,6 +381,7 @@ async def save_template(
             bytes=len(new_bytes),
             saved_by=editor,
             kind="save",
+            note=body.note,
         )
         session.add(version)
         await session.commit()

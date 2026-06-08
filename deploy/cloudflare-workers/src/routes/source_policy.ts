@@ -14,6 +14,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env } from "../index";
+import { validateNote } from "../util/note";
 import { withDb } from "../db/client";
 import { pgTimestampToIso } from "../db/serialize";
 import {
@@ -150,7 +151,7 @@ sourcePolicyRouter.put("/", async (c) => {
   const voice = resolveVoice(c);
   const editor = resolveEditor(c);
   const body = await c.req
-    .json<{ policy?: unknown; expected_sha256?: unknown }>()
+    .json<{ policy?: unknown; expected_sha256?: unknown; note?: unknown }>()
     .catch(() => null);
   if (
     body === null ||
@@ -163,6 +164,13 @@ sourcePolicyRouter.put("/", async (c) => {
   if (body.expected_sha256.length !== EXPECTED_SHA_LENGTH) {
     return c.json({ detail: "expected_sha256 must be 64 hex characters" }, 422);
   }
+  // Optional one-line change reason (mirrors Python `note`, max 500 chars). Not
+  // part of the canonical/hashed body, so sha parity is unaffected.
+  const noteError = validateNote(body.note);
+  if (noteError !== null) {
+    return c.json({ detail: noteError }, 422);
+  }
+  const note = typeof body.note === "string" ? body.note : null;
   const policy = body.policy as Record<string, unknown>;
   const validationError = validatePolicy(policy);
   if (validationError !== null) {
@@ -221,9 +229,9 @@ sourcePolicyRouter.put("/", async (c) => {
       `;
       const ins = await tx<{ saved_at: string }[]>`
         INSERT INTO content_tool.source_policy_versions
-          (version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind)
+          (version_id, voice_slug, policy_id, sha256, parent_sha256, body, bytes, saved_by, kind, note)
         VALUES
-          (${versionId}, ${voice}, ${POLICY_ID}, ${newSha}, ${parentSha}, ${newBody}, ${newBytes}, ${editor}, 'save')
+          (${versionId}, ${voice}, ${POLICY_ID}, ${newSha}, ${parentSha}, ${newBody}, ${newBytes}, ${editor}, 'save', ${note})
         RETURNING saved_at
       `;
       return { kind: "ok", savedAt: ins[0]?.saved_at ?? null };
