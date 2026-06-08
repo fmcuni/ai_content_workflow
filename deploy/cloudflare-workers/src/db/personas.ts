@@ -14,6 +14,7 @@ export interface PersonaRecord {
   disclaimer_templates: unknown;
   tone_examples: unknown;
   glossary: unknown;
+  publish_target_id: string | null;
   is_archived: boolean;
   created_at: string;
   updated_at: string;
@@ -32,6 +33,7 @@ function normaliseRow(row: PersonaRow): PersonaRecord {
     disclaimer_templates: row.disclaimer_templates,
     tone_examples: row.tone_examples,
     glossary: row.glossary,
+    publish_target_id: row.publish_target_id,
     is_archived: row.is_archived,
     // created_at / updated_at are NOT NULL columns, so the helper never
     // returns null here; assert to keep the non-nullable record shape.
@@ -59,6 +61,7 @@ export async function listPersonas(
           persona_id, slug, name,
           voice_rules, banned_terms, required_phrasings,
           disclaimer_templates, tone_examples, glossary,
+          publish_target_id,
           is_archived, created_at, updated_at, created_by, updated_by
         FROM content_tool.personas
         ORDER BY created_at ASC
@@ -68,6 +71,7 @@ export async function listPersonas(
           persona_id, slug, name,
           voice_rules, banned_terms, required_phrasings,
           disclaimer_templates, tone_examples, glossary,
+          publish_target_id,
           is_archived, created_at, updated_at, created_by, updated_by
         FROM content_tool.personas
         WHERE is_archived = false
@@ -135,6 +139,7 @@ export async function getPersonaBySlug(
       persona_id, slug, name,
       voice_rules, banned_terms, required_phrasings,
       disclaimer_templates, tone_examples, glossary,
+      publish_target_id,
       is_archived, created_at, updated_at, created_by, updated_by
     FROM content_tool.personas
     WHERE slug = ${slug}
@@ -157,6 +162,7 @@ const PERSONA_COLUMNS = [
   "disclaimer_templates",
   "tone_examples",
   "glossary",
+  "publish_target_id",
   "is_archived",
   "created_at",
   "updated_at",
@@ -187,6 +193,9 @@ export interface UpdatePersonaInput {
   disclaimer_templates?: Record<string, { condition: string; disclaimer: string }>;
   tone_examples?: Record<string, string[]>;
   glossary?: unknown[];
+  // CMS publish target. Present-with-uuid assigns it; present-with-null clears
+  // it (→ legacy WP env); absent (key not in patch) preserves the stored value.
+  publish_target_id?: string | null;
 }
 
 /** Postgres unique-violation SQLSTATE — raised when a duplicate slug is inserted. */
@@ -234,6 +243,11 @@ export async function updatePersona(
   slug: string,
   patch: UpdatePersonaInput,
 ): Promise<PersonaRecord | null> {
+  // publish_target_id is nullable AND clearable, so COALESCE (which can't tell
+  // "omitted" from "explicit null") won't do: gate it on a "provided" flag and
+  // let an explicit null clear the assignment.
+  const ptProvided = "publish_target_id" in patch;
+  const ptValue = patch.publish_target_id ?? null;
   const rows = await sql<PersonaRow[]>`
     UPDATE content_tool.personas SET
       name = COALESCE(${patch.name ?? null}, name),
@@ -243,6 +257,7 @@ export async function updatePersona(
       disclaimer_templates = COALESCE(${patch.disclaimer_templates === undefined ? null : toJsonb(sql, patch.disclaimer_templates)}, disclaimer_templates),
       tone_examples = COALESCE(${patch.tone_examples === undefined ? null : toJsonb(sql, patch.tone_examples)}, tone_examples),
       glossary = COALESCE(${patch.glossary === undefined ? null : toJsonb(sql, patch.glossary)}, glossary),
+      publish_target_id = CASE WHEN ${ptProvided} THEN ${ptValue}::uuid ELSE publish_target_id END,
       updated_at = now()
     WHERE slug = ${slug}
     RETURNING ${sql(PERSONA_COLUMNS as unknown as string[])}
@@ -317,6 +332,7 @@ export async function duplicatePersona(
         persona_id, slug, name,
         voice_rules, banned_terms, required_phrasings,
         disclaimer_templates, tone_examples, glossary,
+        publish_target_id,
         is_archived, created_at, updated_at, created_by, updated_by
       FROM content_tool.personas
       WHERE slug = ${sourceSlug}

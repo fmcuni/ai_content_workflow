@@ -42,6 +42,7 @@ from content_tool.db.models import (
     TopicCandidate,
 )
 from content_tool.observability.event_log_query import VALID_LEVELS, query_event_logs
+from content_tool.publishers.wp_factory import resolve_wp_target
 from content_tool.refresh.inventory import upsert_article
 from content_tool.wordpress.client import (
     SCHEMA_JSONLD_META_KEY,
@@ -1174,12 +1175,24 @@ async def dry_publish(
     fields override the persisted Render / Run values so the preview reflects
     unsaved reviewer edits.
     """
-    target_base = request.app.state.wp_client.base_url
-    target_label = request.app.state.wp_target
     seo_plugin = await _active_seo_plugin(request.app.state)
 
     async with sf() as session:
         run = (await session.execute(select(Run).where(Run.run_id == run_id))).scalar_one()
+        # Reflect the voice's actual publish target so the operator verifies the
+        # right CMS before approving HITL_2 (NULL voice → process default).
+        resolved_target = await resolve_wp_target(
+            session=session,
+            persona_slug=run.persona,
+            default_client=request.app.state.wp_client,
+            default_label=request.app.state.wp_target,
+        )
+        target_base = (
+            resolved_target.client.base_url
+            if resolved_target.client is not None
+            else request.app.state.wp_client.base_url
+        )
+        target_label = resolved_target.label
         fa = (await session.execute(
             select(FetchedArticle).where(FetchedArticle.run_id == run_id)
         )).scalar_one_or_none()

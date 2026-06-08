@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import postgres from "postgres";
 
 import { personasRouter } from "./routes/personas";
+import { publishTargetsRouter } from "./routes/publish_targets";
 import { promptsRouter } from "./routes/prompts";
 import { sourcePolicyRouter } from "./routes/source_policy";
 import { articlesRouter } from "./routes/articles";
@@ -76,6 +77,12 @@ export interface Env {
   WP_TARGET?: string;
   WP_USERNAME?: string;
   WP_APP_PASSWORD?: string;
+  // Per-voice CMS publish targets: each non-default target reads its base URL +
+  // credentials from env keyed by the publish_targets.auth_ref prefix, e.g.
+  // VHIS101_WP_BASE_URL / VHIS101_WP_USERNAME / VHIS101_WP_APP_PASSWORD. These
+  // are dynamic (one trio per target), so they are accessed by computed key in
+  // publishers/wp_factory.ts rather than typed individually here. Set each via
+  // `wrangler secret put`.
   // Var — verbose per-step event log persistence toggle for raw *.thinking
   // events. ON by default; "0" / "false" / "off" stream thinking live but skip
   // persisting it to content_tool.run_event_logs. Read by the RunStream DO.
@@ -219,6 +226,7 @@ app.get("/db/ping", requireRole("admin"), async (c) => {
 // frontend rewrites `/api/<group>/* → ${apiBase}/<group>/*`, so the backend
 // serves bare paths.
 app.route("/personas", personasRouter);
+app.route("/publish-targets", publishTargetsRouter);
 app.route("/prompts", promptsRouter);
 app.route("/source-policy", sourcePolicyRouter);
 app.route("/articles", articlesRouter);

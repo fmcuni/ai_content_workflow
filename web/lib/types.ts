@@ -575,11 +575,23 @@ export interface Persona {
   disclaimer_templates: Record<string, DisclaimerTemplate>;
   tone_examples: Record<string, string[]>;
   glossary: GlossaryEntry[];
+  publish_target_id: string | null;
   is_archived: boolean;
   created_at: string;
   updated_at: string;
   created_by: string | null;
   updated_by: string | null;
+}
+
+// A CMS publish destination. Non-secret config only; credentials live in env
+// under the auth_ref prefix on the backend.
+export interface PublishTarget {
+  publish_target_id: string;
+  name: string;
+  kind: string;
+  auth_ref: string;
+  status: string;
+  is_archived: boolean;
 }
 
 export interface PersonaIn {
@@ -601,6 +613,8 @@ export interface PersonaPatch {
   disclaimer_templates?: Record<string, DisclaimerTemplate>;
   tone_examples?: Record<string, string[]>;
   glossary?: GlossaryEntry[];
+  // null clears the assignment (→ backend legacy WP default).
+  publish_target_id?: string | null;
 }
 
 export interface PersonaUsage {

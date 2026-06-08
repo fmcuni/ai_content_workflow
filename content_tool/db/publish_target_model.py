@@ -2,33 +2,33 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import TIMESTAMP, Boolean, String, text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from content_tool.db.base import Base
 
 
-class Persona(Base):
-    __tablename__ = "personas"
+class PublishTarget(Base):
+    """A CMS publish destination (Phase 1: WordPress instances only).
+
+    Holds non-secret config only. The actual base URL + credentials live in the
+    environment under the ``auth_ref`` prefix (``{auth_ref}_BASE_URL`` /
+    ``_USERNAME`` / ``_APP_PASSWORD``) and are resolved at publish time — never
+    stored in the database.
+    """
+
+    __tablename__ = "publish_targets"
     __table_args__ = {"schema": "content_tool"}  # noqa: RUF012
 
-    persona_id: Mapped[UUID] = mapped_column(
+    publish_target_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    voice_rules: Mapped[list] = mapped_column(JSONB, nullable=False)
-    banned_terms: Mapped[list] = mapped_column(JSONB, nullable=False)
-    required_phrasings: Mapped[list] = mapped_column(JSONB, nullable=False)
-    disclaimer_templates: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    tone_examples: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    glossary: Mapped[list] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    auth_ref: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'active'")
     )
-    # CMS publish destination for this voice. NULL → fall back to the legacy
-    # WP_* env target (see content_tool/publishers/wp_factory.py).
-    publish_target_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )

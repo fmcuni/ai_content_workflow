@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { personasApi } from "@/lib/api";
+import { personasApi, publishTargetsApi } from "@/lib/api";
 import type { DisclaimerTemplate, Persona, PersonaIn } from "@/lib/types";
 
 interface ComposeDrawerProps {
@@ -185,6 +185,16 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
   const [form, setForm] = useState<PersonaIn>(
     mode.kind === "create" ? emptyForm() : fromPersona(mode.persona),
   );
+  // CMS publish target for this voice. null = the backend's default (legacy
+  // Bowtie WordPress env). Managed separately from `form` because the create
+  // payload (PersonaIn) has no target field — it's applied via PATCH.
+  const [targetId, setTargetId] = useState<string | null>(
+    mode.kind === "edit" ? mode.persona.publish_target_id : null,
+  );
+  const targetsQuery = useQuery({
+    queryKey: ["publish-targets"],
+    queryFn: () => publishTargetsApi.list(),
+  });
 
   const cleanLists = (body: PersonaIn): PersonaIn => {
     const cleanedDisclaimers: Record<string, DisclaimerTemplate> = {};
@@ -207,7 +217,15 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
   };
 
   const createMut = useMutation({
-    mutationFn: (body: PersonaIn) => personasApi.create(body),
+    // PersonaIn has no target field, so apply the chosen target via a follow-up
+    // PATCH right after the voice is created (skip when left on Default).
+    mutationFn: async (body: PersonaIn) => {
+      const created = await personasApi.create(body);
+      if (targetId !== null) {
+        return personasApi.update(created.slug, { publish_target_id: targetId });
+      }
+      return created;
+    },
     onSuccess: (p) => {
       toast.success(`Voice "${p.name}" created`);
       qc.invalidateQueries({ queryKey: ["personas"] });
@@ -225,6 +243,7 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
         required_phrasings: body.required_phrasings,
         disclaimer_templates: body.disclaimer_templates,
         tone_examples: body.tone_examples,
+        publish_target_id: targetId,
       }),
     onSuccess: (p) => {
       toast.success(`Voice "${p.name}" updated`);
@@ -300,6 +319,27 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 className="w-full border-b border-rule bg-transparent py-1 text-[18px] font-display focus:outline-none focus:border-ink"
               />
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint mb-1">
+                Publish target · CMS
+              </p>
+              <select
+                value={targetId ?? ""}
+                onChange={(e) => setTargetId(e.target.value === "" ? null : e.target.value)}
+                disabled={targetsQuery.isLoading}
+                className="w-full border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
+              >
+                <option value="">Default (Bowtie WordPress)</option>
+                {(targetsQuery.data ?? []).map((t) => (
+                  <option key={t.publish_target_id} value={t.publish_target_id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <p className="font-mono text-[9px] text-ink-faint mt-1">
+                Where articles from this voice publish. Credentials are configured on the server.
+              </p>
             </div>
           </div>
 

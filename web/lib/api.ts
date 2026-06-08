@@ -4,7 +4,7 @@ import type {
   ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
   CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
-  PersonaPatch, PersonaUsage,
+  PersonaPatch, PersonaUsage, PublishTarget,
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListResponse,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
@@ -281,6 +281,15 @@ export const personasApi = {
     http<Persona>(`${PERSONAS_BASE}/${slug}/restore`, { method: "POST" }),
   usage: (slug: string) =>
     http<PersonaUsage>(`${PERSONAS_BASE}/${slug}/usage`),
+};
+
+const PUBLISH_TARGETS_BASE = "/api/publish-targets";
+
+export const publishTargetsApi = {
+  list: (includeArchived = false) =>
+    http<PublishTarget[]>(
+      `${PUBLISH_TARGETS_BASE}${includeArchived ? "?include_archived=true" : ""}`,
+    ),
 };
 
 const TOPIC_BATCHES_BASE = "/api/topic-batches";

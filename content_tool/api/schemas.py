@@ -366,6 +366,8 @@ class PersonaPatch(BaseModel):
     disclaimer_templates: dict[str, DisclaimerTemplate] | None = None
     tone_examples: dict[str, list[str]] | None = None
     glossary: list[GlossaryEntry] | None = None
+    # CMS publish target for this voice; null clears it (→ legacy WP env).
+    publish_target_id: UUID | None = None
 
 
 class PersonaOut(BaseModel):
@@ -378,6 +380,7 @@ class PersonaOut(BaseModel):
     disclaimer_templates: dict[str, DisclaimerTemplate]
     tone_examples: dict[str, list[str]]
     glossary: list[GlossaryEntry] = Field(default_factory=list)
+    publish_target_id: UUID | None = None
     is_archived: bool
     created_at: datetime
     updated_at: datetime
@@ -389,6 +392,15 @@ class PersonaUsage(BaseModel):
     slug: str
     by_status: dict[str, int]
     total: int
+
+
+class PublishTargetOut(BaseModel):
+    publish_target_id: UUID
+    name: str
+    kind: str
+    auth_ref: str
+    status: str
+    is_archived: bool
 
 
 # --- Topic batches ----------------------------------------------------------

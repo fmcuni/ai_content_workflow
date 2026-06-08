@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from content_tool.db.models import Draft, FetchedArticle, GapAnalysisRow, OutlineRow, Run
@@ -24,6 +24,7 @@ from content_tool.gemini.streaming import set_thought_emitter
 from content_tool.graph.checkpointer import make_checkpointer
 from content_tool.graph.root import build_root_graph
 from content_tool.observability.event_log import RunEventLogWriter, set_event_emitter
+from content_tool.publishers.wp_factory import resolve_wp_target
 from content_tool.wordpress.client import WordPressClient
 from content_tool.wordpress.seo_plugin import SeoPluginResolver
 
@@ -84,12 +85,18 @@ class RunExecutor:
         gemini: GeminiClient,
         wp_client: WordPressClient | None = None,
         seo_resolver: SeoPluginResolver | None = None,
+        wp_target: str = "",
+        wp_timeout: float = 15.0,
     ) -> None:
         self._postgres_url = postgres_url
         self._sf = session_factory
         self._gemini = gemini
         self._wp_client = wp_client
         self._seo_resolver = seo_resolver
+        # Display label + timeout for the process-default (legacy) WP target,
+        # used when a run's voice has no per-voice publish target assigned.
+        self._wp_target = wp_target
+        self._wp_timeout = wp_timeout
         self._subscribers: dict[UUID, list[asyncio.Queue[str]]] = {}
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._history: dict[UUID, deque[str]] = {}
@@ -304,16 +311,42 @@ class RunExecutor:
         set_run_context(RunContext(run_id=str(run_id)))
         self._event_log.start()
         try:
+            # Resolve which CMS this run publishes to from its voice (persona).
+            # An unassigned voice (NULL FK) or unknown persona falls back to the
+            # process-default WordPress client + SEO resolver — unchanged
+            # behaviour. An assigned voice gets a client built from that
+            # target's env credentials.
+            async with self._sf() as session:
+                persona_slug = (
+                    await session.execute(
+                        select(Run.persona).where(Run.run_id == run_id)
+                    )
+                ).scalar_one_or_none()
+                target = await resolve_wp_target(
+                    session=session,
+                    persona_slug=persona_slug,
+                    default_client=self._wp_client,
+                    default_label=self._wp_target,
+                    timeout=self._wp_timeout,
+                )
             # Re-detect the SEO plugin against the live WP target as the run
             # builds (on HITL_2 resume this is effectively publish time), rather
-            # than trusting a value cached once at process startup.
-            seo_plugin = (
-                await self._seo_resolver.resolve() if self._seo_resolver is not None else None
-            )
+            # than trusting a value cached once at process startup. For a
+            # per-voice target we auto-detect against THAT instance.
+            if target.is_default:
+                seo_resolver = self._seo_resolver
+            else:
+                seo_resolver = SeoPluginResolver(
+                    target.base_url or "",
+                    username=target.username or "",
+                    app_password=target.app_password or "",
+                    override=None,
+                )
+            seo_plugin = await seo_resolver.resolve() if seo_resolver is not None else None
             async with make_checkpointer(self._postgres_url) as cp:
                 graph = build_root_graph(
                     session_factory=self._sf, gemini=self._gemini, checkpointer=cp,
-                    wp_client=self._wp_client, seo_plugin=seo_plugin,
+                    wp_client=target.client, seo_plugin=seo_plugin,
                 )
                 config = {"configurable": {"thread_id": str(run_id)}}
 

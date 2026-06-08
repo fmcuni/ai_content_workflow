@@ -62,6 +62,8 @@ const nextConfig = {
       { source: "/api/wp-options/:path*", destination: `${apiBase}/wp-options/:path*` },
       { source: "/api/personas", destination: `${apiBase}/personas` },
       { source: "/api/personas/:path*", destination: `${apiBase}/personas/:path*` },
+      { source: "/api/publish-targets", destination: `${apiBase}/publish-targets` },
+      { source: "/api/publish-targets/:path*", destination: `${apiBase}/publish-targets/:path*` },
       { source: "/api/prompts", destination: `${apiBase}/prompts` },
       { source: "/api/prompts/:path*", destination: `${apiBase}/prompts/:path*` },
       { source: "/api/source-policy", destination: `${apiBase}/source-policy` },

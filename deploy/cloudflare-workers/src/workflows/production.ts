@@ -49,6 +49,7 @@ import {
   type SeoPlugin,
 } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
+import { resolvePublishTarget, buildTargetEnv } from "../publishers/wp_factory";
 import { writeComplianceLog } from "../compliance/log";
 
 // ---------------------------------------------------------------------------
@@ -763,9 +764,20 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
   private async publish(runId: string, run: RunLoadRow, step: WorkflowStep): Promise<void> {
     const isRefresh = run.start_mode === "refresh";
 
-    // SEO plugin detection is a network probe — its own durable step.
+    // Resolve which CMS this run publishes to from its voice (persona). Only the
+    // non-secret descriptor (auth_ref prefix + label) is persisted by this step;
+    // the actual base URL + credentials are read from env at use time below.
+    const target = await step.do("resolve-publish-target", async () =>
+      this.withSql((sql) =>
+        resolvePublishTarget(sql, run.persona, this.env.WP_TARGET ?? ""),
+      ),
+    );
+    const targetEnv = buildTargetEnv(this.env, target);
+
+    // SEO plugin detection is a network probe — its own durable step. Detect
+    // against the resolved target instance, not always the default WP.
     const seoPlugin = await step.do("detect-seo", async () =>
-      detectSeoPlugin(this.env),
+      detectSeoPlugin(targetEnv),
     );
 
     await step.do("publish", async () =>
@@ -809,7 +821,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           template: WP_DEFAULT_PAGE_TEMPLATE,
         };
 
-        const wpClient = new WordPressClient(this.env);
+        const wpClient = new WordPressClient(targetEnv);
         const result = await wpClient.upsert(payload);
 
         // Backfill the WP post id + flip to published. Create surfaces the freshly

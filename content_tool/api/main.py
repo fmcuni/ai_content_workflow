@@ -22,6 +22,7 @@ from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
 from content_tool.api.routes.personas import router as personas_router
 from content_tool.api.routes.prompts import router as prompts_router
+from content_tool.api.routes.publish_targets import router as publish_targets_router
 from content_tool.api.routes.refresh import router as refresh_router
 from content_tool.api.routes.runs import router as runs_router
 from content_tool.api.routes.setup import router as setup_router
@@ -95,6 +96,8 @@ async def init_runtime(app: FastAPI, settings: Settings) -> None:
         gemini=gemini,
         wp_client=wp_client,
         seo_resolver=seo_resolver,
+        wp_target=settings.wp_target,
+        wp_timeout=settings.wp_timeout,
     )
     try:
         await executor.recover_orphaned()
@@ -173,6 +176,7 @@ def create_app() -> FastAPI:
     app.include_router(compliance_router)
     app.include_router(costs_router)
     app.include_router(personas_router)
+    app.include_router(publish_targets_router)
     app.include_router(prompts_router)
     app.include_router(source_policy_router)
     app.include_router(refresh_router)

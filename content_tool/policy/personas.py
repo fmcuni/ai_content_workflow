@@ -31,6 +31,7 @@ _PERSONA_PATCH_KEYS = {
     "disclaimer_templates",
     "tone_examples",
     "glossary",
+    "publish_target_id",
     "is_archived",
 }
 

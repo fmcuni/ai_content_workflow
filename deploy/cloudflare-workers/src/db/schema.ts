@@ -15,11 +15,24 @@ export interface PersonaRow {
   disclaimer_templates: unknown;
   tone_examples: unknown;
   glossary: unknown;
+  publish_target_id: string | null;
   is_archived: boolean;
   created_at: string;
   updated_at: string;
   created_by: string | null;
   updated_by: string | null;
+}
+
+// content_tool.publish_targets — non-secret CMS target config. Credentials live
+// in env under the auth_ref prefix ({auth_ref}_BASE_URL / _USERNAME /
+// _APP_PASSWORD); never stored here.
+export interface PublishTargetRow {
+  publish_target_id: string;
+  name: string;
+  kind: string;
+  auth_ref: string;
+  status: string;
+  is_archived: boolean;
 }
 
 export interface PromptTemplateRow {

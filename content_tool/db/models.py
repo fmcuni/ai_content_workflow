@@ -586,9 +586,10 @@ class RunEventLog(Base):
 
 
 from content_tool.db.persona_model import Persona  # noqa: E402
+from content_tool.db.publish_target_model import PublishTarget  # noqa: E402
 from content_tool.db.topic_batch_model import (  # noqa: E402
     TopicBatch,
     TopicCandidate,
 )
 
-__all__ = ["Persona", "TopicBatch", "TopicCandidate"]
+__all__ = ["Persona", "PublishTarget", "TopicBatch", "TopicCandidate"]

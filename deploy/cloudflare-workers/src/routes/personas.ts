@@ -195,6 +195,12 @@ personasRouter.put("/:slug", async (c) => {
     patch.tone_examples = body.tone_examples;
   }
   if (Array.isArray(body.glossary)) patch.glossary = body.glossary;
+  // Clearable: present-with-uuid assigns the target, present-with-null resets
+  // to the default; absent preserves. Mirrors the Python exclude_unset path.
+  if ("publish_target_id" in body) {
+    patch.publish_target_id =
+      typeof body.publish_target_id === "string" ? body.publish_target_id : null;
+  }
 
   const ctx = c.executionCtx as ExecutionContext;
   const persona = await withDb(c.env, ctx, (sql) => updatePersona(sql, slug, patch));
