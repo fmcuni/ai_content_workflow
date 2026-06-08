@@ -22,7 +22,6 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "Runs", exact: true },
   { href: "/runs", label: "Ledger", exact: true },
-  { href: "/library", label: "Library" },
   { href: "/voices", label: "Voices" },
   { href: "/prompts", label: "Prompts" },
 ];
