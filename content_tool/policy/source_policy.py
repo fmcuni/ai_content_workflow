@@ -54,6 +54,11 @@ class SourcePolicy:
         self.prefer_domains: set[str] = set(_str_list(prefer, "domains"))
         self.community_topic_categories: set[str] = set(_str_list(ce, "topic_categories"))
         self.community_allowed_domains: set[str] = set(_str_list(ce, "allowed_domains"))
+        # Optional editable prompt-block template. When non-empty, ``to_prompt_block``
+        # renders this (with tokens substituted) instead of the hard-coded default,
+        # so editors control the prose — not just the lists. Empty ⇒ default block.
+        pb = raw.get("prompt_block", "")
+        self.prompt_block: str = pb.strip() if isinstance(pb, str) else ""
 
     @classmethod
     def load_from(cls, path: str | Path) -> "SourcePolicy":
@@ -98,16 +103,22 @@ class SourcePolicy:
         domains = "、".join(sorted(self.prefer_domains)) if self.prefer_domains else "（未設定）"
         cats = "、".join(sorted(self.community_topic_categories)) or "（未設定）"
         comm_domains = "、".join(sorted(self.community_allowed_domains)) or "（未設定）"
+        denied_tlds = " / ".join(self.deny_tlds)
+        denied_tld_line = (
+            f"- 額外硬性禁止：不可引用屬於以下頂級域名（TLD）的來源：{denied_tlds}。"
+            if self.deny_tlds
+            else ""
+        )
+        # Editor-supplied template wins: substitute the same token values the
+        # default block computes, so prose and the citation-gating lists never
+        # drift. Token substitution must mirror the TS ``toPromptBlock`` exactly.
+        if self.prompt_block:
+            return self._render_template(
+                tlds, domains, cats, comm_domains, denied_tlds, denied_tld_line
+            )
         # Denied-TLD line is emitted only when configured, so the default
         # rendered block (and its prompt sha) is unchanged for empty policies.
-        denied_tld_lines = (
-            [
-                f"- 額外硬性禁止：不可引用屬於以下頂級域名（TLD）的來源："
-                f"{' / '.join(self.deny_tlds)}。"
-            ]
-            if self.deny_tlds
-            else []
-        )
+        denied_tld_lines = [denied_tld_line] if self.deny_tlds else []
         return "\n".join(
             [
                 "引用與資料來源規則（由 source_policy 統一管理）：",
@@ -129,4 +140,33 @@ class SourcePolicy:
                 "- 不要在 markup 中手寫 `## 資訊來源` 區塊；該區塊由後處理流程根據 grounding "
                 "metadata 自動生成。",
             ]
+        )
+
+    def _render_template(
+        self,
+        tlds: str,
+        domains: str,
+        cats: str,
+        comm_domains: str,
+        denied_tlds: str,
+        denied_tld_line: str,
+    ) -> str:
+        """Substitute policy tokens into the editor-supplied ``prompt_block``.
+
+        Token semantics + order MUST match the Workers ``SourcePolicy.toPromptBlock``
+        template path byte-for-byte (prompt sha parity). ``{denied_tlds_line}`` is
+        resolved first; its empty case also consumes one trailing newline so an
+        unset denied-TLD line leaves no blank line behind.
+        """
+        out = self.prompt_block
+        if denied_tld_line:
+            out = out.replace("{denied_tlds_line}", denied_tld_line)
+        else:
+            out = out.replace("{denied_tlds_line}\n", "").replace("{denied_tlds_line}", "")
+        return (
+            out.replace("{prefer_tlds}", tlds)
+            .replace("{prefer_domains}", domains)
+            .replace("{community_categories}", cats)
+            .replace("{community_domains}", comm_domains)
+            .replace("{denied_tlds}", denied_tlds)
         )
