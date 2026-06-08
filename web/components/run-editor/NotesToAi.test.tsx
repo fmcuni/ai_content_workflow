@@ -2,14 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// The module under test does NOT exist yet — this import drives the RED state.
 import { NotesToAi } from "@/components/run-editor/NotesToAi";
 
 describe("NotesToAi", () => {
-  it("renders the kicker label and the current value in the textarea", () => {
+  it("renders the default kicker label and the current value in the textarea", () => {
     render(<NotesToAi value="tighten the lede" onChange={() => {}} />);
     expect(screen.getByText("Notes to AI")).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toHaveValue("tighten the lede");
+  });
+
+  it("renders a custom label when provided", () => {
+    render(<NotesToAi value="" onChange={() => {}} label="Whole article change" />);
+    expect(screen.getByText("Whole article change")).toBeInTheDocument();
   });
 
   it("calls onChange as the operator types", async () => {
@@ -19,29 +23,8 @@ describe("NotesToAi", () => {
     expect(onChange).toHaveBeenCalledWith("x");
   });
 
-  it("omits the Apply button when onApply is undefined (regenerate case)", () => {
+  it("never renders an apply button (the rail owns the request action)", () => {
     render(<NotesToAi value="some notes" onChange={() => {}} />);
-    expect(screen.queryByRole("button", { name: /apply/i })).not.toBeInTheDocument();
-  });
-
-  it("renders the Apply button when onApply is provided and fires it on click", async () => {
-    const onApply = vi.fn();
-    render(<NotesToAi value="some notes" onChange={() => {}} onApply={onApply} />);
-    const button = screen.getByRole("button", { name: /apply to article/i });
-    expect(button).toBeEnabled();
-    await userEvent.click(button);
-    expect(onApply).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables the Apply button when the notes are blank", () => {
-    render(<NotesToAi value="   " onChange={() => {}} onApply={() => {}} />);
-    expect(screen.getByRole("button", { name: /apply to article/i })).toBeDisabled();
-  });
-
-  it("shows 'Applying…' and disables the button while applying", () => {
-    render(<NotesToAi value="some notes" onChange={() => {}} onApply={() => {}} applying />);
-    const button = screen.getByRole("button", { name: /applying/i });
-    expect(button).toBeDisabled();
-    expect(button).toHaveTextContent("Applying…");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

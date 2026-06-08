@@ -14,7 +14,6 @@ import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 import { EditorRail } from "@/components/run-editor/EditorRail";
-import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
@@ -37,8 +36,6 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import type { ExistingPost, Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn } from "@/lib/types";
-
-const MAX_ROUNDS = 3;
 
 export default function Hitl2Page({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -75,6 +72,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   const prefilledRef = useRef<ExistingPost | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Captured when the confirm dialog opens so the description can show which
+  // fields would be overwritten without reading the prefill ref during render.
+  const [dirtyFields, setDirtyFields] = useState<("Author" | "Category" | "Slug")[]>([]);
   // Set once a HITL_2 decision is submitted, so autosave-on-exit doesn't write a
   // redundant snapshot as the page navigates away after approve/request/reject.
   const submittedRef = useRef(false);
@@ -110,9 +110,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   }
 
   function handleRereadClick() {
-    if (getDirtyFields().length === 0) {
+    const dirty = getDirtyFields();
+    if (dirty.length === 0) {
       refresh.mutate();
     } else {
+      setDirtyFields(dirty);
       setConfirmOpen(true);
     }
   }
@@ -134,17 +136,33 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     onAddComment: () => setRightTab("comments"),
     onFocusComment: () => setRightTab("comments"),
   });
-  const { applyComment, applyNotes, applyingCommentId } = useApplyEdits(runId, {
-    onCommentApplied: (commentId, newHtml) => {
-      setHtml(stripCommentSpan(newHtml, commentId));
-      setComments((cs) => cs.filter((c) => c.id !== commentId));
-      setFocusedCommentId((f) => (f === commentId ? null : f));
-    },
-    onNotesApplied: (newHtml) => {
-      setHtml(newHtml);
-      setForm((f) => ({ ...f, notes: "" }));
+  const { requestEdit, requesting } = useApplyEdits(runId, {
+    onApplied: (newHtml, ctx) => {
+      if (ctx.commentIds.length > 0) {
+        // Strip the addressed comments' anchor spans and drop them from the list.
+        const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
+        const sent = new Set(ctx.commentIds);
+        setHtml(cleaned);
+        setComments((cs) => cs.filter((c) => !sent.has(c.id)));
+        setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
+      } else {
+        setHtml(newHtml);
+        setForm((f) => ({ ...f, notes: "" }));
+      }
     },
   });
+
+  // Highlight comments take priority over the whole-article note. The single
+  // "Request AI to edit" button sends whichever is present.
+  const liveComments = comments.filter((c) => c.body.trim().length > 0);
+  const requestEnabled = liveComments.length > 0 || (form.notes ?? "").trim().length > 0;
+  const requestAiEdit = () => {
+    if (liveComments.length > 0) {
+      requestEdit.mutate({ html, comments: liveComments, notes: null });
+    } else if ((form.notes ?? "").trim().length > 0) {
+      requestEdit.mutate({ html, comments: [], notes: form.notes ?? "" });
+    }
+  };
   const [galleyTab, setGalleyTab] = useState<"edit" | "diff" | "audit" | "raw" | "payload">("edit");
   const wpPayload = useWpPayloadPreview(runId, () => buildDryRequest(html, form));
 
@@ -184,27 +202,18 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // / Approve actions while the run is genuinely paused at HITL_2.
   const atGate = run.data?.status === "hitl_2";
   const gateResolved = run.data != null && !atGate;
-  const round = run.data?.hitl_2_iteration ?? 0;
-  const capReached = round >= MAX_ROUNDS;
-  const hasFeedback =
-    comments.some((c) => c.body.trim().length > 0) || (form.notes ?? "").trim().length > 0;
 
   const submit = useMutation({
-    mutationFn: (decision: Hitl2Request["decision"]) => {
-      // Drop orphaned comments — those whose mark no longer exists in the HTML
-      // (reviewer deleted the span). Other decisions don't send comments.
-      const liveComments =
-        decision === "request_changes"
-          ? comments.filter((c) => html.includes(`data-comment-id="${c.id}"`))
-          : [];
-      return api.resumeHitl2(runId, {
+    // Inline AI edits happen at the gate via "Request AI to edit"; the remaining
+    // decisions (approve / reject) carry the current edited HTML, no comments.
+    mutationFn: (decision: Hitl2Request["decision"]) =>
+      api.resumeHitl2(runId, {
         ...form,
         decision,
         edited_html_body: html,
-        comments: liveComments,
+        comments: [],
         editor_email: editorEmail,
-      });
-    },
+      }),
     onSuccess: () => {
       submittedRef.current = true;
       router.push(`/runs/${runId}`);
@@ -347,11 +356,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           </>
         ) : (
           <>
-            {round > 0 && (
-              <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint mr-auto">
-                Round {round + 1} of {MAX_ROUNDS}
-              </span>
-            )}
             <RoleButton
               need="hitl2_decide"
               deniedHint="Reviewer role required to reject."
@@ -361,25 +365,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               onClick={() => submit.mutate("reject")}
             >
               {submit.isPending && submit.variables === "reject" ? "↻ Rejecting…" : "Reject ✕"}
-            </RoleButton>
-            <RoleButton
-              need="hitl2_decide"
-              deniedHint="Reviewer role required to request changes."
-              variant="secondary"
-              size="sm"
-              disabled={!renderReady || submit.isPending || capReached || !hasFeedback || !atGate}
-              title={
-                capReached
-                  ? "Cap reached — approve or reject."
-                  : !hasFeedback
-                  ? "Add a comment or note first."
-                  : ""
-              }
-              onClick={() => submit.mutate("request_changes")}
-            >
-              {submit.isPending && submit.variables === "request_changes"
-                ? "↻ Sending…"
-                : "Request changes ↺"}
             </RoleButton>
             <RoleButton
               need="publish"
@@ -495,17 +480,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               />
             </TabsContent>
           </Tabs>
-
-          {/* Notes to AI — overall inline edit of the existing article */}
-          <NotesToAi
-            value={form.notes ?? ""}
-            onChange={(v) => setForm((f) => ({ ...f, notes: v }))}
-            onApply={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
-            applying={applyNotes.isPending}
-          />
         </section>
 
-        {/* Right rail — WP metadata ↔ Comments tab switcher */}
+        {/* Right rail — WP metadata ↔ "AI to edit" tab switcher */}
         <EditorRail
           tab={rightTab}
           onTabChange={setRightTab}
@@ -518,11 +495,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           onCommentChange={updateComment}
           onCommentDelete={deleteComment}
           onCommentFocus={focusComment}
-          onCommentApply={(id) => {
-            const c = comments.find((x) => x.id === id);
-            if (c) applyComment.mutate({ comment: c, html });
-          }}
-          applyingCommentId={applyingCommentId}
+          notesValue={form.notes ?? ""}
+          onNotesChange={(v) => setForm((f) => ({ ...f, notes: v }))}
+          onRequestEdit={requestAiEdit}
+          requesting={requesting}
+          requestEnabled={requestEnabled}
         />
 
       <Hitl2VersionHistory
@@ -539,7 +516,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           <DialogHeader>
             <DialogTitle>Re-read from WordPress?</DialogTitle>
             <DialogDescription>
-              This will overwrite your edits to: {getDirtyFields().join(", ")}.
+              This will overwrite your edits to: {dirtyFields.join(", ")}.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

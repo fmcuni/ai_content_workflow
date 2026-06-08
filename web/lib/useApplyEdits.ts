@@ -5,43 +5,49 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Hitl2Comment } from "@/lib/types";
 
+/** What the operator asked the AI to act on for this request. */
+interface AppliedContext {
+  /** Ids of the comments sent (empty when the request was a whole-article note). */
+  commentIds: string[];
+  /** True when a whole-article "Whole article change" note was sent. */
+  hadNotes: boolean;
+}
+
 interface ApplyEditsCallbacks {
-  /** Called with the revised HTML after a single comment's edit is applied. */
-  onCommentApplied: (commentId: string, html: string) => void;
-  /** Called with the revised HTML after the overall "Notes to AI" edit. */
-  onNotesApplied: (html: string) => void;
+  /** Called with the revised HTML after the AI edit returns. */
+  onApplied: (html: string, ctx: AppliedContext) => void;
+}
+
+interface RequestEditVars {
+  html: string;
+  comments: Hitl2Comment[];
+  notes: string | null;
 }
 
 /**
- * Inline AI-edit mutations shared by the review and edit pages. A per-comment
- * apply revises just that highlighted span; the overall apply revises the whole
- * article from the notes. Both return revised HTML the host page swaps into the
- * editor — no pipeline re-run.
+ * The single inline AI-edit mutation shared by the review and edit pages. The
+ * "Request AI to edit" button drives it: when the operator has highlight
+ * comments those take priority and are sent as `comments`; otherwise the
+ * whole-article note is sent as `notes`. The agent returns revised HTML the host
+ * page swaps into the editor — no pipeline re-run.
  */
 export function useApplyEdits(runId: string, cb: ApplyEditsCallbacks) {
-  const applyComment = useMutation({
-    mutationFn: (v: { comment: Hitl2Comment; html: string }) =>
-      api.applyEdits(runId, { html_body: v.html, comments: [v.comment], notes: null }),
+  const requestEdit = useMutation({
+    mutationFn: (v: RequestEditVars) =>
+      api.applyEdits(runId, {
+        html_body: v.html,
+        comments: v.comments.length > 0 ? v.comments : null,
+        notes: v.notes,
+      }),
     onSuccess: (res, v) => {
-      cb.onCommentApplied(v.comment.id, res.html_body);
-      toast.success("Applied edit to highlight");
+      cb.onApplied(res.html_body, {
+        commentIds: v.comments.map((c) => c.id),
+        hadNotes: (v.notes ?? "").trim().length > 0,
+      });
+      toast.success("Applied AI edit");
     },
     onError: (e: Error) => toast.error(`Couldn't apply edit — ${e.message}`),
   });
 
-  const applyNotes = useMutation({
-    mutationFn: (v: { notes: string; html: string }) =>
-      api.applyEdits(runId, { html_body: v.html, comments: null, notes: v.notes }),
-    onSuccess: (res) => {
-      cb.onNotesApplied(res.html_body);
-      toast.success("Applied notes to article");
-    },
-    onError: (e: Error) => toast.error(`Couldn't apply notes — ${e.message}`),
-  });
-
-  const applyingCommentId = applyComment.isPending
-    ? applyComment.variables?.comment.id ?? null
-    : null;
-
-  return { applyComment, applyNotes, applyingCommentId };
+  return { requestEdit, requesting: requestEdit.isPending };
 }

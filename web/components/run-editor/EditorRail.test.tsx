@@ -15,7 +15,6 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-// The module under test does NOT exist yet — this import drives the RED state.
 import { EditorRail } from "@/components/run-editor/EditorRail";
 
 function wrap(node: ReactNode) {
@@ -28,15 +27,21 @@ const FORM: Hitl2Request = { decision: "approve", wp_publish_status: "draft" };
 interface RailHarnessProps {
   tab?: "wp" | "comments";
   comments?: Hitl2Comment[];
+  notesValue?: string;
   onTabChange?: (t: "wp" | "comments") => void;
-  onCommentApply?: (id: string) => void;
+  onRequestEdit?: () => void;
+  requesting?: boolean;
+  requestEnabled?: boolean;
 }
 
 function renderRail({
   tab = "wp",
   comments = [],
+  notesValue = "",
   onTabChange = () => {},
-  onCommentApply = () => {},
+  onRequestEdit = () => {},
+  requesting = false,
+  requestEnabled = false,
 }: RailHarnessProps = {}) {
   return wrap(
     <EditorRail
@@ -51,8 +56,11 @@ function renderRail({
       onCommentChange={() => {}}
       onCommentDelete={() => {}}
       onCommentFocus={() => {}}
-      onCommentApply={onCommentApply}
-      applyingCommentId={null}
+      notesValue={notesValue}
+      onNotesChange={() => {}}
+      onRequestEdit={onRequestEdit}
+      requesting={requesting}
+      requestEnabled={requestEnabled}
     />,
   );
 }
@@ -61,31 +69,48 @@ describe("EditorRail", () => {
   it("renders both tab triggers, defaulting to the WP metadata form", () => {
     renderRail({ tab: "wp" });
     expect(screen.getByRole("tab", { name: /WP metadata/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Comments/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /AI to edit/ })).toBeInTheDocument();
     expect(screen.getByText("SEO title")).toBeInTheDocument();
   });
 
-  it("shows the comment count badge on the Comments tab", () => {
+  it("shows the comment count badge on the AI-to-edit tab", () => {
     const comments: Hitl2Comment[] = [
       { id: "c1", anchor_text: "lede", body: "fix" },
       { id: "c2", anchor_text: "kicker", body: "tighten" },
     ];
     renderRail({ comments });
-    expect(screen.getByRole("tab", { name: /Comments/ })).toHaveTextContent("(2)");
+    expect(screen.getByRole("tab", { name: /AI to edit/ })).toHaveTextContent("(2)");
   });
 
-  it("calls onTabChange when the Comments tab is clicked", async () => {
+  it("calls onTabChange when the AI-to-edit tab is clicked", async () => {
     const onTabChange = vi.fn();
     renderRail({ onTabChange });
-    await userEvent.click(screen.getByRole("tab", { name: /Comments/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /AI to edit/ }));
     expect(onTabChange).toHaveBeenCalledWith("comments");
   });
 
-  it("wires onCommentApply with the right id from the comments tab", async () => {
-    const onCommentApply = vi.fn();
-    const comments: Hitl2Comment[] = [{ id: "c1", anchor_text: "lede", body: "punch this up" }];
-    renderRail({ tab: "comments", comments, onCommentApply });
-    await userEvent.click(screen.getByRole("button", { name: /apply edit/i }));
-    expect(onCommentApply).toHaveBeenCalledWith("c1");
+  it("renders the whole-article-change field on the AI-to-edit tab", () => {
+    renderRail({ tab: "comments", notesValue: "punchier lede" });
+    expect(screen.getByText("Whole article change")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("punchier lede");
+  });
+
+  it("disables Request AI to edit when there is nothing to act on", () => {
+    renderRail({ tab: "comments", requestEnabled: false });
+    expect(screen.getByRole("button", { name: /request ai to edit/i })).toBeDisabled();
+  });
+
+  it("fires onRequestEdit when the enabled button is clicked", async () => {
+    const onRequestEdit = vi.fn();
+    renderRail({ tab: "comments", requestEnabled: true, onRequestEdit });
+    await userEvent.click(screen.getByRole("button", { name: /request ai to edit/i }));
+    expect(onRequestEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows 'Requesting…' and disables the button while in flight", () => {
+    renderRail({ tab: "comments", requestEnabled: true, requesting: true });
+    const button = screen.getByRole("button", { name: /requesting/i });
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Requesting…");
   });
 });

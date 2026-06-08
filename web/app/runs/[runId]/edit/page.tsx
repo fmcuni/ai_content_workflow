@@ -14,7 +14,6 @@ import { WpPayloadView } from "@/components/WpPayloadView";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 import { EditorRail } from "@/components/run-editor/EditorRail";
-import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import { useArticleComments } from "@/lib/useArticleComments";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
@@ -95,17 +94,33 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     onAddComment: () => setRightTab("comments"),
     onFocusComment: () => setRightTab("comments"),
   });
-  const { applyComment, applyNotes, applyingCommentId } = useApplyEdits(runId, {
-    onCommentApplied: (commentId, newHtml) => {
-      setHtml(stripCommentSpan(newHtml, commentId));
-      setComments((cs) => cs.filter((c) => c.id !== commentId));
-      setFocusedCommentId((f) => (f === commentId ? null : f));
-    },
-    onNotesApplied: (newHtml) => {
-      setHtml(newHtml);
-      setForm((f) => ({ ...f, notes: "" }));
+  const { requestEdit, requesting } = useApplyEdits(runId, {
+    onApplied: (newHtml, ctx) => {
+      if (ctx.commentIds.length > 0) {
+        // Strip the addressed comments' anchor spans and drop them from the list.
+        const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
+        const sent = new Set(ctx.commentIds);
+        setHtml(cleaned);
+        setComments((cs) => cs.filter((c) => !sent.has(c.id)));
+        setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
+      } else {
+        setHtml(newHtml);
+        setForm((f) => ({ ...f, notes: "" }));
+      }
     },
   });
+
+  // Highlight comments take priority over the whole-article note. The single
+  // "Request AI to edit" button sends whichever is present.
+  const liveComments = comments.filter((c) => c.body.trim().length > 0);
+  const requestEnabled = liveComments.length > 0 || (form.notes ?? "").trim().length > 0;
+  const requestAiEdit = () => {
+    if (liveComments.length > 0) {
+      requestEdit.mutate({ html, comments: liveComments, notes: null });
+    } else if ((form.notes ?? "").trim().length > 0) {
+      requestEdit.mutate({ html, comments: [], notes: form.notes ?? "" });
+    }
+  };
 
   // Seed the outline editor from the human-edited copy when present, else the
   // original AI payload.
@@ -384,14 +399,6 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
               />
             </TabsContent>
           </Tabs>
-
-          {/* Notes to AI — overall inline edit of the existing article */}
-          <NotesToAi
-            value={form.notes ?? ""}
-            onChange={(v) => setForm((f) => ({ ...f, notes: v }))}
-            onApply={() => applyNotes.mutate({ notes: form.notes ?? "", html })}
-            applying={applyNotes.isPending}
-          />
         </section>
 
         <EditorRail
@@ -406,11 +413,11 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
           onCommentChange={updateComment}
           onCommentDelete={deleteComment}
           onCommentFocus={focusComment}
-          onCommentApply={(id) => {
-            const c = comments.find((x) => x.id === id);
-            if (c) applyComment.mutate({ comment: c, html });
-          }}
-          applyingCommentId={applyingCommentId}
+          notesValue={form.notes ?? ""}
+          onNotesChange={(v) => setForm((f) => ({ ...f, notes: v }))}
+          onRequestEdit={requestAiEdit}
+          requesting={requesting}
+          requestEnabled={requestEnabled}
         />
 
       <Hitl2VersionHistory

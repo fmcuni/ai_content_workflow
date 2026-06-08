@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { Sparkles, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import type { Hitl2Comment } from "@/lib/types";
 
@@ -10,10 +10,6 @@ interface Props {
   onChange: (id: string, body: string) => void;
   onDelete: (id: string) => void;
   onFocus: (id: string) => void;
-  /** Apply this comment's edit to its highlighted span via AI (in place). */
-  onApply?: (id: string) => void;
-  /** The comment currently being applied (disables all Apply buttons). */
-  applyingId?: string | null;
 }
 
 export function CommentsSidebar({
@@ -22,8 +18,6 @@ export function CommentsSidebar({
   onChange,
   onDelete,
   onFocus,
-  onApply,
-  applyingId,
 }: Props) {
   const refs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
@@ -66,28 +60,7 @@ export function CommentsSidebar({
             placeholder="What needs to change?"
             className="w-full resize-y text-[13px] text-ink bg-transparent focus:outline-none border-b border-rule focus:border-accent pb-1"
           />
-          <div className="flex items-center justify-between mt-2">
-            {onApply ? (
-              <button
-                type="button"
-                disabled={c.body.trim().length === 0 || applyingId != null}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onApply(c.id);
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-mono uppercase tracking-wider text-accent hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-accent"
-                title={
-                  c.body.trim().length === 0
-                    ? "Write what needs to change first."
-                    : "Let AI edit this highlight in place."
-                }
-              >
-                <Sparkles className="h-3 w-3" />
-                {applyingId === c.id ? "Applying…" : "Apply edit"}
-              </button>
-            ) : (
-              <span />
-            )}
+          <div className="flex items-center justify-end mt-2">
             <button
               type="button"
               onClick={(e) => {

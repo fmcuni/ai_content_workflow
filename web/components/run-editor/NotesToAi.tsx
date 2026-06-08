@@ -1,43 +1,33 @@
 "use client";
-import { Sparkles } from "lucide-react";
 
 interface NotesToAiProps {
   value: string;
   onChange: (value: string) => void;
-  /** undefined → no Apply button (regenerate case). */
-  onApply?: () => void;
-  /** Shows "Applying…" + disables the Apply button. */
-  applying?: boolean;
+  /** Kicker label above the textarea. */
+  label?: string;
+  /** Placeholder shown when the textarea is empty. */
+  placeholder?: string;
 }
 
 /**
- * The "Notes to AI" block shared by /hitl2, /edit, and /regenerate. Lets the
- * operator give overall direction for a whole-article AI revision. The "Apply
- * to article" button is omitted when `onApply` is undefined (regenerate).
+ * A whole-article direction textarea used inside the run-editor "AI to edit"
+ * rail on /hitl2 and /edit. It is purely presentational — the AI request is
+ * triggered by the rail's single "Request AI to edit" button, not here.
  */
-export function NotesToAi({ value, onChange, onApply, applying = false }: NotesToAiProps) {
+export function NotesToAi({
+  value,
+  onChange,
+  label = "Notes to AI",
+  placeholder = "Overall direction — e.g. 'lede should be punchier, lead with the surgery question.'",
+}: NotesToAiProps) {
   return (
-    <div className="mt-6">
-      <div className="mb-2 flex items-center justify-between">
-        <p className="kicker">Notes to AI</p>
-        {onApply && (
-          <button
-            type="button"
-            disabled={value.trim().length === 0 || applying}
-            onClick={onApply}
-            className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-accent"
-            title="Let AI revise the whole article from these notes."
-          >
-            <Sparkles className="h-3 w-3" />
-            {applying ? "Applying…" : "Apply to article"}
-          </button>
-        )}
-      </div>
+    <div>
+      {label && <p className="kicker mb-2">{label}</p>}
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={3}
-        placeholder="Overall direction — e.g. 'lede should be punchier, lead with the surgery question.'"
+        placeholder={placeholder}
         className="w-full resize-y border border-rule bg-paper rounded px-3 py-2 text-[14px] text-ink focus:outline-none focus:border-accent"
       />
     </div>

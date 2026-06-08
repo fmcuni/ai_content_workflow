@@ -7,6 +7,13 @@
 export function stripCommentSpan(html: string, id: string): string {
   // Escape regex metacharacters in the id (defensive — ids are `c-<hex>` today).
   const safe = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`<span data-comment-id="${safe}">(.*?)</span>`, "gs");
+  // Match the wrapper regardless of other attributes or their order — TipTap
+  // serialises the anchor with a `class="comment-anchor"` alongside
+  // `data-comment-id`, so a bare `<span data-comment-id="…">` match would miss
+  // it and leave the highlight behind after the comment was deleted.
+  const re = new RegExp(
+    `<span\\b[^>]*\\bdata-comment-id="${safe}"[^>]*>(.*?)</span>`,
+    "gs",
+  );
   return html.replace(re, "$1");
 }
