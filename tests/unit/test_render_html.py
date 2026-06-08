@@ -333,6 +333,41 @@ def test_inline_defterm_still_emits_definedtermset_jsonld():
     assert names == ["回南天", "春困", "自願醫保"]
 
 
+# Regression for runs e509ceb3 / 0bc89ae6 (Malaysia zh-MY / en-MY voices): the
+# writer emitted block-form defterms with multi-word names ("Surat Rujukan",
+# "Klinik Kesihatan"). The old `name=(\S+?)` stopped at the first space, so the
+# block never matched, survived stripping, and tripped the residue guard —
+# erroring the whole run with "unhandled defterm marker survived stripping".
+MULTIWORD_DEFTERM_SAMPLE = """\
+# Panduan Rujukan Pesakit
+%%meta desc=Cara mendapatkan rujukan pakar di Malaysia%%
+
+Pesakit perlu mengimbas mesin atau beratur untuk mengambil nombor giliran.
+
+%%defterm name=Surat Rujukan%%
+Surat daripada doktor yang merujuk pesakit kepada pakar.
+%%end%%
+
+Bawa surat ini supaya pakar dapat memahami sejarah perubatan anda.
+
+%%defterm name=Klinik Kesihatan%%
+Klinik kerajaan yang menyediakan rawatan kesihatan asas.
+%%end%%
+
+%%page_widget id=2%%
+"""
+
+
+def test_multiword_defterm_name_is_stripped_and_schema_emitted():
+    r = render_html(MULTIWORD_DEFTERM_SAMPLE)
+    assert "%%defterm" not in r.html_body
+    assert "%%end%%" not in r.html_body
+    dts = _defterm_piece(r)
+    assert dts is not None
+    names = [t["name"] for t in dts["hasDefinedTerm"]]
+    assert names == ["Surat Rujukan", "Klinik Kesihatan"]
+
+
 def test_orphan_defterm_open_marker_refuses_render():
     """Half-broken shortcode (open without close) must hard-fail rather than
     silently leak the marker into the published HTML."""

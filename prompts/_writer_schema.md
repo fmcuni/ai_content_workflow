@@ -13,7 +13,7 @@ JSON-LD Schema 規則（去重 / dedup against Yoast）：
    一句解釋（≤ 60 字，香港繁體中文）
    %%end%%
    ```
-   - `name` 為單一字串，不含空格與引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
+   - `name` 為單行字串，可含空格（多字詞術語如 `Surat Rujukan`、`Klinik Kesihatan` 可接受），但不可含 `%` 或引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
    - 全文最多 6 個 `defterm`；如全文無真正需要解釋的術語，可不輸出
    - 不要為已在 H2 標題出現的常用詞重複定義
    - 不要在 description 內嵌 HTML / Markdown 連結 / 表情符號

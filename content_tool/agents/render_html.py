@@ -48,12 +48,16 @@ _FAQ_HEADING_RESIDUE_RE = re.compile(
     r"^##[ \t]*(?:常見問題|常见问题)[ \t]*\n", re.MULTILINE
 )
 # %%defterm name=<term>%%\n<description>\n%%end%%
-# `name` is a single token (no spaces / quotes) per the writer-prompt contract.
+# `name` may contain spaces — Malay/English voices emit multi-word terms like
+# "Surat Rujukan" or "Klinik Kesihatan", so we match anything up to the closing
+# `%%` except `%` itself and a newline (keeps the name on one line). A too-strict
+# `\S+?` here silently failed to match multi-word names, so the block survived
+# stripping and tripped the residue guard below — erroring whole runs.
 # Newlines around the description are optional: writers sometimes inline the
 # whole block inside CJK quotes (e.g. 「%%defterm name=X%%desc%%end%%」), and
 # we'd rather strip cleanly than leak raw markers into the published HTML.
 _DEFTERM_BLOCK_RE = re.compile(
-    r"%%defterm name=(\S+?)%%[ \t]*\n?[ \t]*(.*?)[ \t]*\n?[ \t]*%%end%%",
+    r"%%defterm name=([^%\n]+?)%%[ \t]*\n?[ \t]*(.*?)[ \t]*\n?[ \t]*%%end%%",
     re.DOTALL,
 )
 # Catches any residual marker fragment after well-formed blocks were stripped.

@@ -30,9 +30,13 @@ const RAW_HTML_RE = /<\s*(script|style|iframe|object|embed)\b/i;
 const FAQ_BLOCK_RE =
   /%%acf_faq type=q%%[ \t]*\n([\s\S]*?)\n[ \t]*%%acf_faq type=a%%[ \t]*\n([\s\S]*?)\n[ \t]*%%end%%/g;
 // %%defterm name=<term>%%\n<description>\n%%end%%
-// `name` is a single no-space token per the writer-prompt contract.
+// `name` may contain spaces — Malay/English voices emit multi-word terms like
+// "Surat Rujukan" or "Klinik Kesihatan", so match anything up to the closing
+// `%%` except `%` itself and a newline. A too-strict `\S+?` here silently failed
+// to match multi-word names, so the block survived stripping and tripped the
+// residue guard below — erroring whole runs.
 const DEFTERM_BLOCK_RE =
-  /%%defterm name=(\S+?)%%[ \t]*\n?[ \t]*([\s\S]*?)[ \t]*\n?[ \t]*%%end%%/g;
+  /%%defterm name=([^%\n]+?)%%[ \t]*\n?[ \t]*([\s\S]*?)[ \t]*\n?[ \t]*%%end%%/g;
 // Catches any residual marker fragment after well-formed blocks were stripped.
 const DEFTERM_RESIDUE_RE = /%%defterm\b|%%end%%/;
 // The model writes its own FAQ heading right before the first FAQ shortcode;

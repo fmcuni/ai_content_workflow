@@ -174,6 +174,50 @@ describe("renderHtml", () => {
     ]);
   });
 
+  it("strips a block-form defterm whose name has spaces (Malaysia voices)", () => {
+    // Regression for runs e509ceb3 / 0bc89ae6: Malay multi-word names like
+    // "Surat Rujukan" / "Klinik Kesihatan" broke the old `name=(\S+?)` (it
+    // stopped at the first space), so the block survived and tripped the residue
+    // guard, erroring the whole run.
+    const markup = [
+      "# Panduan Rujukan",
+      "%%meta desc=d%%",
+      "",
+      "Pesakit perlu mengambil nombor giliran.",
+      "",
+      "%%defterm name=Surat Rujukan%%",
+      "Surat daripada doktor kepada pakar.",
+      "%%end%%",
+      "",
+      "%%defterm name=Klinik Kesihatan%%",
+      "Klinik kerajaan untuk rawatan asas.",
+      "%%end%%",
+    ].join("\n");
+
+    const out = renderHtml(markup);
+
+    expect(out.htmlBody).not.toContain("%%defterm");
+    expect(out.htmlBody).not.toContain("%%end%%");
+    expect(out.schemaJsonld).toEqual([
+      {
+        "@context": "https://schema.org",
+        "@type": "DefinedTermSet",
+        hasDefinedTerm: [
+          {
+            "@type": "DefinedTerm",
+            name: "Surat Rujukan",
+            description: "Surat daripada doktor kepada pakar.",
+          },
+          {
+            "@type": "DefinedTerm",
+            name: "Klinik Kesihatan",
+            description: "Klinik kerajaan untuk rawatan asas.",
+          },
+        ],
+      },
+    ]);
+  });
+
   it("throws when a half-formed defterm marker survives stripping", () => {
     const markup = "# T\n%%meta desc=d%%\n\nBroken %%defterm name=X%% with no close.";
     expect(() => renderHtml(markup)).toThrow(/unhandled defterm marker survived stripping/);
