@@ -80,6 +80,28 @@ test.describe("per-voice prompt library (prod smoke)", () => {
     await page.screenshot({ path: "test-results/pvpl-voices.png", fullPage: true });
   });
 
+  test("selected voice survives navigating into a template and back", async ({ page }) => {
+    await login(page);
+
+    // Land on the list with an explicit voice in the URL.
+    await page.goto(`${BASE}/prompts?voice=bowtie-editor`);
+    await expect(page.getByLabel("Voice")).toHaveValue("bowtie-editor");
+
+    // Open the first editable template — its link must carry the voice.
+    const firstTemplate = page.getByRole("link", { name: /Edit →/i }).first();
+    await expect(firstTemplate).toBeVisible();
+    await firstTemplate.click();
+    await page.waitForURL((url) => /\/prompts\/[^/]+/.test(url.pathname));
+    expect(new URL(page.url()).searchParams.get("voice")).toBe("bowtie-editor");
+
+    // Back link must return to the list with the voice preserved (regression:
+    // it used to drop the voice and reset the selector to the default).
+    await page.getByRole("link", { name: /Prompt Library/i }).click();
+    await page.waitForURL((url) => url.pathname === "/prompts");
+    expect(new URL(page.url()).searchParams.get("voice")).toBe("bowtie-editor");
+    await expect(page.getByLabel("Voice")).toHaveValue("bowtie-editor");
+  });
+
   test("duplicate-voice deep-copies templates + policy", async ({ page }) => {
     test.skip(!MUTATE, "set PVPL_SMOKE_MUTATE=1 to exercise the mutating duplicate flow");
     await login(page);

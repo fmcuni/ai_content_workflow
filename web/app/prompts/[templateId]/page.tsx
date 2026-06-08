@@ -215,7 +215,7 @@ function PromptEditorContent({
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">
       <Link
-        href="/prompts"
+        href={`/prompts?voice=${encodeURIComponent(voice)}`}
         className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint hover:text-accent inline-block mb-3"
       >
         ← Prompt Library

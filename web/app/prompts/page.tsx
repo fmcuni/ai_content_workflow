@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { SectionHead } from "@/components/SectionHead";
 import { SourcePolicyEditor } from "@/components/SourcePolicyEditor";
@@ -128,21 +129,42 @@ function JudgesSection({ items }: { items: JudgeTemplateListItem[] }) {
   );
 }
 
+// The selected voice is stored in `?voice=` (not local state) so it survives
+// navigating into a template and back — both via the in-page back link and the
+// browser back button. `useSearchParams` requires a Suspense boundary in
+// Next 16 (mirrors app/prompts/[templateId] + app/runs/new).
 export default function PromptsListPage() {
+  return (
+    <Suspense fallback={null}>
+      <PromptsListContent />
+    </Suspense>
+  );
+}
+
+function PromptsListContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const voiceParam = searchParams.get("voice");
+
   const personasQ = useQuery({
     queryKey: ["personas", false],
     queryFn: () => personasApi.list(false),
   });
 
-  const [selectedVoice, setSelectedVoice] = useState<string | null>(null);
-
   const personas = useMemo(() => personasQ.data ?? [], [personasQ.data]);
-  // Default to bowtie-editor when present, else the first available voice.
+  // URL wins; otherwise default to bowtie-editor when present, else the first
+  // available voice.
   const activeVoice = useMemo(() => {
-    if (selectedVoice) return selectedVoice;
+    if (voiceParam) return voiceParam;
     if (personas.some((p) => p.slug === DEFAULT_VOICE)) return DEFAULT_VOICE;
     return personas[0]?.slug ?? DEFAULT_VOICE;
-  }, [selectedVoice, personas]);
+  }, [voiceParam, personas]);
+
+  // Stamp the chosen voice into the URL so the list's own history entry carries
+  // it — `replace` avoids piling up a history entry per toggle.
+  const handleVoiceChange = (slug: string) => {
+    router.replace(`/prompts?voice=${encodeURIComponent(slug)}`, { scroll: false });
+  };
 
   const q = useQuery({
     queryKey: ["prompts", "templates", activeVoice],
@@ -164,7 +186,7 @@ export default function PromptsListPage() {
 
       <div className="mt-6">
         {personas.length > 0 && (
-          <VoiceSelector personas={personas} value={activeVoice} onChange={setSelectedVoice} />
+          <VoiceSelector personas={personas} value={activeVoice} onChange={handleVoiceChange} />
         )}
       </div>
 
