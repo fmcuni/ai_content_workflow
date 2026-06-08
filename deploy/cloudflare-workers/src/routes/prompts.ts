@@ -209,13 +209,18 @@ promptsRouter.get("/templates/:id/history", async (c) => {
     limit = parsed;
   }
 
-  const versions = await withDb(c.env, c.executionCtx, (sql) =>
+  const history = await withDb(c.env, c.executionCtx, (sql) =>
     getTemplateHistory(sql, templateId, voice, limit),
   );
-  if (!versions) {
+  if (!history) {
     return c.json({ detail: `unknown template_id '${templateId}'` }, 404);
   }
-  return c.json({ template_id: templateId, voice, versions });
+  return c.json({
+    template_id: templateId,
+    voice,
+    current_sha256: history.current_sha256,
+    versions: history.versions,
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -617,13 +617,87 @@ async def save_hitl2_snapshot(
         return snap
 
 
+async def _ensure_generated_baseline(session: AsyncSession, run_id: UUID) -> None:
+    """Idempotently seed a ``trigger='generated'`` baseline snapshot from the
+    run's latest render, so the AI's original draft is always the v1 entry in
+    the version-history panel (diffable + restorable).
+
+    No-op when a ``generated`` row already exists or the run has no render yet.
+    The body byte-equals the render's ``html_body`` so the "● Live" match works
+    until the reviewer edits.
+    """
+    exists = (
+        await session.execute(
+            select(Hitl2Snapshot.snapshot_id).where(
+                Hitl2Snapshot.run_id == run_id,
+                Hitl2Snapshot.trigger == "generated",
+            )
+        )
+    ).first()
+    if exists is not None:
+        return
+    latest_draft = (
+        await session.execute(
+            select(Draft)
+            .where(Draft.run_id == run_id)
+            .order_by(Draft.iteration.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_draft is None:
+        return
+    render = (
+        await session.execute(
+            select(Render).where(Render.draft_id == latest_draft.draft_id)
+        )
+    ).scalar_one_or_none()
+    if render is None:
+        return
+    session.add(
+        Hitl2Snapshot(
+            snapshot_id=uuid4(),
+            run_id=run_id,
+            created_by="system:generated",
+            trigger="generated",
+            html_body=render.html_body,
+            seo_title=render.seo_title,
+            meta_description=render.meta_description,
+        )
+    )
+    await session.commit()
+
+
 @router.get("/{run_id}/hitl2-snapshots", response_model=list[Hitl2SnapshotOut])
 async def list_hitl2_snapshots(
     run_id: UUID,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
-) -> list[Hitl2Snapshot]:
-    """List the run's autosave / version-history snapshots, newest first."""
+) -> list[Hitl2SnapshotOut]:
+    """List the run's autosave / version-history snapshots, newest first.
+
+    Lazily seeds the ``generated`` baseline (the original AI draft) and stamps
+    each row with a stable ``version_number`` (oldest = 1) plus ``is_current``
+    (its ``html_body`` matches the live render).
+    """
     async with sf() as session:
+        await _ensure_generated_baseline(session, run_id)
+        # The live content the run would publish (latest render's body), used to
+        # flag the "● Live" snapshot.
+        live_body = (
+            await session.execute(
+                select(Render.html_body)
+                .join(Draft, Render.draft_id == Draft.draft_id)
+                .where(Draft.run_id == run_id)
+                .order_by(Draft.iteration.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        total = (
+            await session.execute(
+                select(func.count())
+                .select_from(Hitl2Snapshot)
+                .where(Hitl2Snapshot.run_id == run_id)
+            )
+        ).scalar_one()
         rows = (
             await session.execute(
                 select(Hitl2Snapshot)
@@ -632,7 +706,29 @@ async def list_hitl2_snapshots(
                 .limit(_HITL2_SNAPSHOT_KEEP)
             )
         ).scalars().all()
-        return list(rows)
+    current_id = _current_snapshot_id(rows, live_body)
+    return [
+        Hitl2SnapshotOut.model_validate(r).model_copy(
+            update={
+                "version_number": total - i,
+                "is_current": r.snapshot_id == current_id,
+            }
+        )
+        for i, r in enumerate(rows)
+    ]
+
+
+def _current_snapshot_id(
+    rows: list[Hitl2Snapshot], live_body: str | None
+) -> UUID | None:
+    """The newest snapshot whose ``html_body`` equals the live render body, if
+    any. Newest-first ``rows`` means the first match is the freshest live one."""
+    if live_body is None:
+        return None
+    for r in rows:
+        if r.html_body == live_body:
+            return r.snapshot_id
+    return None
 
 
 @router.get("/{run_id}/gap-analysis")

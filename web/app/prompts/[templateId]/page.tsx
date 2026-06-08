@@ -358,8 +358,7 @@ function PromptEditorContent({
               )}
               {historyQ.data && historyQ.data.versions.length === 0 && (
                 <p className="text-ink-faint text-[12px]">
-                  No saves yet. The first save creates a version row you can
-                  revert to.
+                  No history yet.
                 </p>
               )}
               {historyQ.data && historyQ.data.versions.length > 0 && (
@@ -369,25 +368,40 @@ function PromptEditorContent({
                       <button
                         type="button"
                         onClick={() => setOpenVersion(v)}
-                        className="w-full text-left border border-rule hover:border-accent rounded-sm px-2 py-1.5 transition-colors group"
+                        className={cn(
+                          "w-full text-left border rounded-sm px-2 py-1.5 transition-colors group",
+                          v.is_current
+                            ? "border-accent bg-accent/5"
+                            : "border-rule hover:border-accent",
+                        )}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-[10.5px] text-ink-soft">
-                            {relativeTime(v.saved_at)}
+                          <span className="font-mono text-[10.5px] text-ink-soft tabular-nums">
+                            v{v.version_number} · {relativeTime(v.saved_at)}
                           </span>
-                          <span
-                            className={cn(
-                              "font-mono text-[10px] uppercase tracking-wider px-1 py-px rounded-sm",
-                              v.kind === "revert"
-                                ? "bg-accent/10 text-accent"
-                                : "bg-paper-deep/50 text-ink-faint",
+                          <span className="flex items-center gap-1">
+                            {v.is_current && (
+                              <span className="font-mono text-[10px] uppercase tracking-wider px-1 py-px rounded-sm bg-accent/15 text-accent">
+                                ● Live
+                              </span>
                             )}
-                          >
-                            {v.kind}
+                            <span
+                              className={cn(
+                                "font-mono text-[10px] uppercase tracking-wider px-1 py-px rounded-sm",
+                                v.kind === "revert"
+                                  ? "bg-accent/10 text-accent"
+                                  : v.kind === "seed"
+                                    ? "bg-info/10 text-info"
+                                    : "bg-paper-deep/50 text-ink-faint",
+                              )}
+                            >
+                              {v.kind}
+                            </span>
                           </span>
                         </div>
                         <div className="font-mono text-[10px] text-ink-faint mt-0.5 truncate">
                           {v.saved_by} · {v.sha256.slice(0, 7)}
+                          {v.note ? ` · ${v.note}` : ""}
                         </div>
                       </button>
                     </li>

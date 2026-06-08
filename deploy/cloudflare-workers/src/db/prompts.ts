@@ -26,12 +26,22 @@ const EDITABLE_CATEGORIES = new Set<string>(["agent", "partial"]);
 /** One history entry — mirrors the Python history item (no body, no voice). */
 export interface VersionSummary {
   version_id: string;
+  // Stable display number (oldest = 1) + "● Live" flag (sha == live sha).
+  version_number: number;
+  is_current: boolean;
   sha256: string;
   parent_sha256: string | null;
   bytes: number;
   saved_by: string;
   saved_at: string;
   kind: string;
+  note: string | null;
+}
+
+/** History payload — versions plus the live sha the editor is showing. */
+export interface TemplateHistory {
+  versions: VersionSummary[];
+  current_sha256: string | null;
 }
 
 /** Full version detail returned by the single-version endpoint (no voice). */
@@ -45,6 +55,7 @@ export interface VersionDetail {
   saved_by: string;
   saved_at: string;
   kind: string;
+  note: string | null;
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -82,17 +93,43 @@ export async function getTemplateHistory(
   templateId: string,
   voiceSlug: string,
   limit: number,
-): Promise<VersionSummary[] | null> {
+): Promise<TemplateHistory | null> {
   if (!(await isEditableInVoice(sql, templateId, voiceSlug))) return null;
 
-  const rows = await sql<VersionSummary[]>`
-    SELECT version_id, sha256, parent_sha256, bytes, saved_by, saved_at, kind
+  // The live sha the editor shows for this voice (its own row, else __shared__),
+  // used to flag the "● Live" history entry. Mirrors the route's voice view.
+  const liveRows = await sql<{ sha256: string }[]>`
+    SELECT sha256
+    FROM content_tool.prompt_templates
+    WHERE template_id = ${templateId}
+      AND voice_slug IN (${voiceSlug}, '__shared__')
+    ORDER BY (voice_slug = ${voiceSlug}) DESC
+    LIMIT 1
+  `;
+  const currentSha = liveRows[0]?.sha256 ?? null;
+
+  // Total lineage size → stable oldest=1 numbering even when older rows fall
+  // outside `limit` (newest-first offset).
+  const countRows = await sql<{ n: string }[]>`
+    SELECT count(*)::text AS n
+    FROM content_tool.prompt_versions
+    WHERE voice_slug = ${voiceSlug} AND template_id = ${templateId}
+  `;
+  const total = parseInt(countRows[0]?.n ?? "0", 10);
+
+  const rows = await sql<Omit<VersionSummary, "version_number" | "is_current">[]>`
+    SELECT version_id, sha256, parent_sha256, bytes, saved_by, saved_at, kind, note
     FROM content_tool.prompt_versions
     WHERE voice_slug = ${voiceSlug} AND template_id = ${templateId}
     ORDER BY saved_at DESC
     LIMIT ${limit}
   `;
-  return rows;
+  const versions = rows.map((r, i) => ({
+    ...r,
+    version_number: total - i,
+    is_current: r.sha256 === currentSha,
+  }));
+  return { versions, current_sha256: currentSha };
 }
 
 /**
@@ -109,7 +146,7 @@ export async function getVersion(
   if (!(await isEditableInVoice(sql, templateId, voiceSlug))) return null;
 
   const rows = await sql<VersionDetail[]>`
-    SELECT version_id, template_id, sha256, parent_sha256, body, bytes, saved_by, saved_at, kind
+    SELECT version_id, template_id, sha256, parent_sha256, body, bytes, saved_by, saved_at, kind, note
     FROM content_tool.prompt_versions
     WHERE version_id = ${versionId}
       AND voice_slug = ${voiceSlug}

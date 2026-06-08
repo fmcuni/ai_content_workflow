@@ -432,7 +432,12 @@ export interface ApplyEditsResponse {
   html_body: string;
 }
 
-export type Hitl2SnapshotTrigger = "interval" | "navigate" | "unload" | "manual";
+export type Hitl2SnapshotTrigger =
+  | "interval"
+  | "navigate"
+  | "unload"
+  | "manual"
+  | "generated";
 
 export interface Hitl2SnapshotIn {
   trigger: Hitl2SnapshotTrigger;
@@ -457,6 +462,10 @@ export interface Hitl2Snapshot extends Hitl2SnapshotIn {
   snapshot_id: string;
   created_at: string;
   created_by: string | null;
+  /** Stable display number (oldest = 1); null on the single-row POST response. */
+  version_number?: number | null;
+  /** True for the snapshot whose body matches the live render. */
+  is_current?: boolean;
 }
 
 export interface ArticleEditRequest {
@@ -733,16 +742,22 @@ export interface PromptPreviewResponse {
   voice?: string;
 }
 
-export type PromptVersionKind = "save" | "revert";
+export type PromptVersionKind = "save" | "revert" | "seed";
 
 export interface PromptVersionSummary {
   version_id: string;
+  /** Stable display number, oldest = 1. */
+  version_number: number;
+  /** True for the entry whose body matches the live (current) template. */
+  is_current: boolean;
   sha256: string;
   parent_sha256: string | null;
   bytes: number;
   saved_by: string;
   saved_at: string;
   kind: PromptVersionKind;
+  /** Optional human-supplied change reason (null for autosaves/seed/revert). */
+  note: string | null;
 }
 
 export interface PromptVersionDetail extends PromptVersionSummary {
@@ -753,6 +768,8 @@ export interface PromptVersionDetail extends PromptVersionSummary {
 export interface PromptVersionsResponse {
   template_id: string;
   voice?: string;
+  /** sha of the live body the editor is showing (matches the is_current row). */
+  current_sha256?: string | null;
   versions: PromptVersionSummary[];
 }
 
@@ -810,6 +827,8 @@ export interface SourcePolicySaveResponse {
 
 export interface SourcePolicyVersionsResponse {
   voice: string;
+  /** sha of the live policy the editor is showing (matches the is_current row). */
+  current_sha256?: string | null;
   versions: PromptVersionSummary[];
 }
 
