@@ -33,3 +33,26 @@ export function useWpCategories(runId?: string) {
     ...WP_OPTION_QUERY,
   });
 }
+
+/**
+ * Authors scoped by voice (persona slug). The /runs board uses this so its many
+ * rows resolve author names + options against each row's own CMS instance, while
+ * N rows of the *same* voice share a single react-query entry (keyed on the
+ * slug) — one network fetch per distinct voice, not per row.
+ */
+export function useWpUsersForPersona(persona?: string) {
+  return useQuery<WpUserOption[]>({
+    queryKey: ["wp-users", "persona", persona ?? null],
+    queryFn: () => api.listWpUsers(undefined, persona),
+    ...WP_OPTION_QUERY,
+  });
+}
+
+/** Categories scoped by voice (persona slug). See {@link useWpUsersForPersona}. */
+export function useWpCategoriesForPersona(persona?: string) {
+  return useQuery<WpCategoryOption[]>({
+    queryKey: ["wp-categories", "persona", persona ?? null],
+    queryFn: () => api.listWpCategories(undefined, persona),
+    ...WP_OPTION_QUERY,
+  });
+}

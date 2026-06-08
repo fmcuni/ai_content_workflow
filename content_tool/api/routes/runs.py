@@ -47,6 +47,7 @@ from content_tool.refresh.inventory import upsert_article
 from content_tool.wordpress.client import (
     SCHEMA_JSONLD_META_KEY,
     WP_DEFAULT_PAGE_TEMPLATE,
+    WordPressClient,
 )
 from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
 from content_tool.wordpress.slug import canonicalize_slug
@@ -1076,6 +1077,9 @@ async def republish(
     wp_client = getattr(request.app.state, "wp_client", None)
     if wp_client is None:
         raise HTTPException(503, "WordPress client not configured")
+    # SEO-plugin detection stays on the process default — matches the dry-publish
+    # preview's simplification; the per-voice WP *client* below is what routes the
+    # actual push to the correct instance.
     seo_plugin = await _active_seo_plugin(request.app.state)
 
     draft_q = select(Draft).where(Draft.run_id == run_id).order_by(Draft.iteration.desc()).limit(1)
@@ -1094,11 +1098,25 @@ async def republish(
         if not render:
             raise HTTPException(409, "run has no render to publish")
 
+        # Re-push to the run's own voice CMS. A misconfigured / archived target
+        # surfaces as 503 — never a silent push to the default (Bowtie) instance.
+        try:
+            resolved = await resolve_wp_target(
+                session=session,
+                persona_slug=run.persona,
+                default_client=wp_client,
+                default_label=getattr(request.app.state, "wp_target", ""),
+            )
+        except (ValueError, OSError) as e:
+            logger.warning("WP target resolution failed for run %s: %s", run_id, e)
+            raise HTTPException(503, "WordPress client not configured") from e
+        target_client = resolved.client or wp_client
+
         try:
             result = await publish_to_wordpress(
                 session=session,
                 run_id=run_id,
-                wp_client=wp_client,
+                wp_client=target_client,
                 seo_plugin=seo_plugin,
                 if_unmodified_since=None,
             )
@@ -1414,40 +1432,79 @@ async def dry_publish(
     }
 
 
+async def _resolve_run_wp_client(
+    session: AsyncSession,
+    request: Request,
+    persona_slug: str | None,
+) -> tuple[WordPressClient | None, str]:
+    """Best-effort: resolve a run's voice to its WordPress client + a cache-key
+    prefix (the target base URL).
+
+    For cosmetic name lookups. An archived/missing target or absent credentials
+    falls back to the process-default client (names degrade to raw ids) rather
+    than failing the request. Publish paths resolve strictly instead.
+    """
+    default_client = getattr(request.app.state, "wp_client", None)
+    try:
+        resolved = await resolve_wp_target(
+            session=session,
+            persona_slug=persona_slug,
+            default_client=default_client,
+            default_label=getattr(request.app.state, "wp_target", ""),
+        )
+    except (ValueError, OSError) as e:
+        logger.warning("WP target resolution failed for voice %r: %s", persona_slug, e)
+        return default_client, ""
+    client = resolved.client or default_client
+    prefix = getattr(client, "base_url", "") or ""
+    return client, prefix
+
+
 async def _resolve_wp_names(
     request: Request,
     author_id: int | None,
     category_id: int | None,
+    *,
+    wp: WordPressClient | None = None,
+    cache_prefix: str = "",
 ) -> tuple[str | None, str | None]:
     """Best-effort resolution of WP author / category display names.
 
     Uses single-resource GETs (cached on app.state.wp_options_cache) so a
     blocked /wp-json/wp/v2/users list endpoint doesn't take out the page.
     Any upstream failure → None so the UI falls back to the raw ID.
+
+    ``wp`` is the per-voice WordPress client to read names from (defaults to the
+    process client); ``cache_prefix`` (the target's base URL) keys the cache so
+    ids don't collide across CMS instances — author #5 on Bowtie and #5 on
+    VHIS101 are distinct people.
     """
     from content_tool.wordpress.client import WordPressError
 
     cache = request.app.state.wp_options_cache
-    wp = request.app.state.wp_client
+    client = wp if wp is not None else request.app.state.wp_client
 
     async def _author() -> str | None:
         if author_id is None:
             return None
+        uid = author_id  # narrowed to int for the deferred lambda
         try:
             user = await cache.get_or_set(
-                f"user:{author_id}", lambda: wp.get_user(author_id)
+                f"{cache_prefix}:user:{uid}", lambda: client.get_user(uid)
             )
         except WordPressError as e:
-            logger.warning("WP get_user(%s) failed: %s", author_id, e)
+            logger.warning("WP get_user(%s) failed: %s", uid, e)
             return None
         return user.name if user else None
 
     async def _category() -> str | None:
         if category_id is None:
             return None
+        cid = category_id  # narrowed to int for the deferred lambda
         try:
             cat = await cache.get_or_set(
-                f"category:{category_id}", lambda: wp.get_category(category_id)
+                f"{cache_prefix}:category:{cid}",
+                lambda: client.get_category(cid),
             )
         except WordPressError as e:
             logger.warning("WP get_category(%s) failed: %s", category_id, e)
@@ -1472,8 +1529,15 @@ async def get_existing_post(
         fa = (await session.execute(
             select(FetchedArticle).where(FetchedArticle.run_id == run_id)
         )).scalar_one_or_none()
-    if fa is None or fa.wp_post_id is None:
-        raise HTTPException(status_code=404, detail="No existing post")
+        if fa is None or fa.wp_post_id is None:
+            raise HTTPException(status_code=404, detail="No existing post")
+        run = (await session.execute(
+            select(Run).where(Run.run_id == run_id)
+        )).scalar_one_or_none()
+        # Resolve names against the run's voice CMS (best-effort).
+        wp, cache_prefix = await _resolve_run_wp_client(
+            session, request, run.persona if run else None
+        )
 
     cats = fa.wp_categories or []
     first_cat_id = (
@@ -1483,7 +1547,7 @@ async def get_existing_post(
     )
 
     author_name, category_name = await _resolve_wp_names(
-        request, fa.wp_author_id, first_cat_id
+        request, fa.wp_author_id, first_cat_id, wp=wp, cache_prefix=cache_prefix
     )
 
     return {
@@ -1517,7 +1581,26 @@ async def refresh_existing_post(
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
 
-        wp = request.app.state.wp_client
+        # Re-read the post from the run's own voice CMS. A misconfigured /
+        # archived target surfaces as 503 — never a silent read of the default
+        # (Bowtie) instance for a non-default voice.
+        try:
+            resolved = await resolve_wp_target(
+                session=session,
+                persona_slug=run.persona,
+                default_client=request.app.state.wp_client,
+                default_label=getattr(request.app.state, "wp_target", ""),
+            )
+        except (ValueError, OSError) as e:
+            logger.warning("WP target resolution failed for run %s: %s", run_id, e)
+            raise HTTPException(
+                status_code=503, detail="WordPress client not configured"
+            ) from e
+        wp = resolved.client
+        if wp is None:
+            raise HTTPException(status_code=503, detail="WordPress client not configured")
+        cache_prefix = getattr(wp, "base_url", "") or ""
+
         try:
             post = await wp.fetch_post_by_url(run.article_url)
         except WordPressError as e:
@@ -1543,7 +1626,7 @@ async def refresh_existing_post(
 
     first_cat_id = post.categories[0] if post.categories else None
     author_name, category_name = await _resolve_wp_names(
-        request, post.author, first_cat_id
+        request, post.author, first_cat_id, wp=wp, cache_prefix=cache_prefix
     )
     return {
         "wp_post_id": post.id,

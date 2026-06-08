@@ -19,6 +19,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.db.models import Run, WpCategoryCache, WpUserCache
 from content_tool.db.persona_model import Persona
@@ -45,23 +46,18 @@ def _id_or_name_filter(model, q: str):  # noqa: ANN001, ANN202
     return or_(*clauses)
 
 
-async def _auth_ref_for_run(session, run_id: str | None) -> str:  # noqa: ANN001
-    """Resolve which CMS instance's cached taxonomy a run should read.
+async def _auth_ref_for_persona(session: AsyncSession, persona_slug: str | None) -> str:
+    """Resolve which CMS instance's cached taxonomy a voice should read.
 
-    Returns the publish-target ``auth_ref`` of the run's voice, or 'WP' when
-    there's no run_id, the run/voice is unknown, or the voice has no target.
-    An archived target still resolves to its ``auth_ref`` — the picker just
-    reads that instance's snapshot.
+    Returns the publish-target ``auth_ref`` of the voice, or 'WP' when there's
+    no slug, the voice is unknown, or the voice has no target. An archived
+    target still resolves to its ``auth_ref`` — the picker just reads that
+    instance's snapshot.
     """
-    if not run_id:
-        return DEFAULT_AUTH_REF
-    run = (
-        await session.execute(select(Run).where(Run.run_id == run_id))
-    ).scalar_one_or_none()
-    if run is None or not run.persona:
+    if not persona_slug:
         return DEFAULT_AUTH_REF
     persona = (
-        await session.execute(select(Persona).where(Persona.slug == run.persona))
+        await session.execute(select(Persona).where(Persona.slug == persona_slug))
     ).scalar_one_or_none()
     if persona is None or persona.publish_target_id is None:
         return DEFAULT_AUTH_REF
@@ -69,14 +65,44 @@ async def _auth_ref_for_run(session, run_id: str | None) -> str:  # noqa: ANN001
     return target.auth_ref if target is not None else DEFAULT_AUTH_REF
 
 
+async def _auth_ref_for_run(session: AsyncSession, run_id: str | None) -> str:
+    """Resolve a run's CMS instance by looking up its voice, then delegating.
+
+    Returns 'WP' when there's no run_id or the run is unknown.
+    """
+    if not run_id:
+        return DEFAULT_AUTH_REF
+    run = (
+        await session.execute(select(Run).where(Run.run_id == run_id))
+    ).scalar_one_or_none()
+    if run is None:
+        return DEFAULT_AUTH_REF
+    return await _auth_ref_for_persona(session, run.persona)
+
+
+async def _resolve_auth_ref(
+    session: AsyncSession,
+    run_id: str | None,
+    persona: str | None,
+) -> str:
+    """Scope by ``persona`` (voice slug) when given — the /runs board does this so
+    N rows of the same voice share one option lookup — else by ``run_id`` (the
+    HITL_2 picker). ``persona`` wins when both are present.
+    """
+    if persona:
+        return await _auth_ref_for_persona(session, persona)
+    return await _auth_ref_for_run(session, run_id)
+
+
 @router.get("/users")
 async def list_users(
     q: str | None = Query(default=None, max_length=100),
     run_id: str | None = Query(default=None),
+    persona: str | None = Query(default=None),
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
 ) -> list[dict]:
     async with sf() as session:
-        auth_ref = await _auth_ref_for_run(session, run_id)
+        auth_ref = await _resolve_auth_ref(session, run_id, persona)
         stmt = (
             select(WpUserCache)
             .where(WpUserCache.auth_ref == auth_ref)
@@ -92,10 +118,11 @@ async def list_users(
 async def list_categories(
     q: str | None = Query(default=None, max_length=100),
     run_id: str | None = Query(default=None),
+    persona: str | None = Query(default=None),
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
 ) -> list[dict]:
     async with sf() as session:
-        auth_ref = await _auth_ref_for_run(session, run_id)
+        auth_ref = await _resolve_auth_ref(session, run_id, persona)
         stmt = (
             select(WpCategoryCache)
             .where(WpCategoryCache.auth_ref == auth_ref)

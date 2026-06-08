@@ -1222,6 +1222,7 @@ interface RunWpMetaPatchBody {
 
 interface RepublishRunRow {
   start_mode: string;
+  persona: string | null;
   created_by: string | null;
   wp_pushed_post_id: number | null;
   wp_publish_status: string | null;
@@ -1318,6 +1319,21 @@ async function ensureGeneratedBaseline(sql: Sql, runId: string): Promise<void> {
 }
 
 /**
+ * Resolve the WP-credentials Env for a run's voice: read the run's persona,
+ * resolve its publish target, and build an Env whose WP_* point at that CMS
+ * instance (the default env for an unassigned voice). Throws for an archived
+ * target or a missing credential env var so a publish path surfaces an error
+ * rather than silently writing to the wrong (default) instance.
+ */
+async function targetEnvForRun(sql: Sql, env: Env, runId: string): Promise<Env> {
+  const rows = await sql<{ persona: string | null }[]>`
+    SELECT persona FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+  `;
+  const target = await resolvePublishTarget(sql, rows[0]?.persona ?? "", env.WP_TARGET ?? "");
+  return buildTargetEnv(env, target);
+}
+
+/**
  * Best-effort resolution of WP author / category display names. Any upstream
  * failure (WP unreachable, not configured, 404) collapses to null so the UI
  * falls back to the raw id. Mirrors `_resolve_wp_names` in the Python route.
@@ -1355,7 +1371,7 @@ async function resolveWpNames(
 // ---------------------------------------------------------------------------
 runsRouter.get("/:id/existing-post", async (c) => {
   const runId = c.req.param("id");
-  const fa = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+  const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<
       {
         wp_post_id: number | null;
@@ -1370,9 +1386,22 @@ runsRouter.get("/:id/existing-post", async (c) => {
       WHERE run_id = ${runId}
       LIMIT 1
     `;
-    return rows[0] ?? null;
+    const fa = rows[0] ?? null;
+    if (fa === null || fa.wp_post_id === null) {
+      return { fa: null, targetEnv: c.env };
+    }
+    // Resolve names against the run's voice CMS. Best-effort: a mis-credentialed
+    // or archived target just falls back to the default env (names → raw ids).
+    let targetEnv = c.env;
+    try {
+      targetEnv = await targetEnvForRun(sql, c.env, runId);
+    } catch {
+      targetEnv = c.env;
+    }
+    return { fa, targetEnv };
   });
 
+  const fa = data.fa;
   if (fa === null || fa.wp_post_id === null) {
     return c.json({ detail: "No existing post" }, 404);
   }
@@ -1384,7 +1413,7 @@ runsRouter.get("/:id/existing-post", async (c) => {
       : null;
 
   const [authorName, categoryName] = await resolveWpNames(
-    c.env,
+    data.targetEnv,
     fa.wp_author_id,
     firstCatId,
   );
@@ -1406,22 +1435,38 @@ runsRouter.get("/:id/existing-post", async (c) => {
 runsRouter.post("/:id/existing-post/refresh", requireRole("editor"), async (c) => {
   const runId = c.req.param("id");
 
-  const run = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+  const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const rows = await sql<{ article_url: string | null }[]>`
       SELECT article_url FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
     `;
-    return rows[0] ?? null;
+    const run = rows[0] ?? null;
+    if (run === null) {
+      return { run: null, targetEnv: null };
+    }
+    // Re-read the post from the voice's own WP instance. A mis-credentialed or
+    // archived target → null targetEnv → 503 (don't silently read the default).
+    let targetEnv: Env | null;
+    try {
+      targetEnv = await targetEnvForRun(sql, c.env, runId);
+    } catch {
+      targetEnv = null;
+    }
+    return { run, targetEnv };
   });
-  if (run === null) {
+  if (data.run === null) {
     return c.json({ detail: "Run not found" }, 404);
   }
+  const run = data.run;
   if (!run.article_url) {
     return c.json({ detail: "Existing post not found on WordPress" }, 404);
   }
 
   let client: WordPressClient;
   try {
-    client = new WordPressClient(c.env);
+    if (data.targetEnv === null) {
+      throw new Error("target not configured");
+    }
+    client = new WordPressClient(data.targetEnv);
   } catch {
     return c.json({ detail: "WordPress client not configured" }, 503);
   }
@@ -1953,7 +1998,7 @@ runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<RepublishRunRow[]>`
       SELECT
-        start_mode, created_by, wp_pushed_post_id, wp_publish_status, wp_author_id,
+        start_mode, persona, created_by, wp_pushed_post_id, wp_publish_status, wp_author_id,
         wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt
       FROM content_tool.runs
       WHERE run_id = ${runId}
@@ -1976,6 +2021,15 @@ runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
       return { error: "no_render" as const };
     }
 
+    // Re-push to the voice's own WP instance. An archived target or a missing
+    // credential env var → "target" error → 503, never a silent push to Bowtie.
+    let targetEnv: Env;
+    try {
+      targetEnv = await targetEnvForRun(sql, c.env, runId);
+    } catch {
+      return { error: "target" as const };
+    }
+
     let fetchedPostId: number | null = null;
     if (run.start_mode === "refresh" && run.wp_pushed_post_id === null) {
       const faRows = await sql<{ wp_post_id: number | null }[]>`
@@ -1983,22 +2037,25 @@ runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
       `;
       fetchedPostId = faRows[0]?.wp_post_id ?? null;
     }
-    return { run, render, fetchedPostId };
+    return { run, render, fetchedPostId, targetEnv };
   });
 
   if ("error" in data) {
     if (data.error === "not_found") {
       return c.json({ detail: "run not found" }, 404);
     }
+    if (data.error === "target") {
+      return c.json({ detail: "WordPress client not configured" }, 503);
+    }
     return c.json({ detail: "run has no render to publish" }, 409);
   }
 
-  const { run, render, fetchedPostId } = data;
+  const { run, render, fetchedPostId, targetEnv } = data;
   const isRefresh = run.start_mode === "refresh";
 
   let client: WordPressClient;
   try {
-    client = new WordPressClient(c.env);
+    client = new WordPressClient(targetEnv);
   } catch {
     return c.json({ detail: "WordPress client not configured" }, 503);
   }
@@ -2006,7 +2063,7 @@ runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
   // SEO plugin detection is best-effort — a WP outage must not block the push.
   let seoPlugin: SeoPlugin | null = null;
   try {
-    seoPlugin = await detectSeoPlugin(c.env);
+    seoPlugin = await detectSeoPlugin(targetEnv);
   } catch {
     seoPlugin = null;
   }

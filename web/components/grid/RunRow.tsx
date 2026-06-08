@@ -4,30 +4,28 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { IdentityCell } from "@/components/grid/IdentityCell";
-import {
-  type CellOption,
-  DateCell,
-  MultiSelectCell,
-  NumberCell,
-  SelectCell,
-  SlugCell,
-} from "@/components/grid/InlineCells";
+import { type CellOption, NumberCell } from "@/components/grid/InlineCells";
 import { RunExpand } from "@/components/grid/RunExpand";
+import {
+  BoardAuthorCell,
+  BoardCategoryCell,
+  BoardPostDateCell,
+  BoardPublishCell,
+  BoardSlugCell,
+} from "@/components/grid/voice-cells";
 import { runToItem } from "@/lib/desk-items";
 import type { RunColumn } from "@/lib/runs-grid/columns";
-import { decodeSlug, isLivePublish, ledgerDate, publishLabel } from "@/lib/runs-grid/display";
 import type { RunSummary, RunWpMetaPatch, TopicBatchDefaultsPatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-// Shared display + edit context threaded to every run row. WP id→name maps come
-// from the cached wp-options queries; missing ids fall back to `#id` / "—".
-// `canEdit` gates the inline editors (editor+); viewers see read-only text.
+// Shared display + edit context threaded to every run row. WordPress
+// author/category names + option lists are resolved per-voice inside the board
+// cells (voice-cells.tsx) so each run reads its own CMS instance. `canEdit`
+// gates the inline editors (editor+); viewers see read-only text.
 export interface RowView {
   columns: RunColumn[];
   showWordpress: boolean;
   compact: boolean;
-  wpUsers: ReadonlyMap<number, string>;
-  wpCategories: ReadonlyMap<number, string>;
   // Inline-edit wiring (Phase 3).
   canEdit: boolean;
   pendingRunId: string | null;
@@ -39,35 +37,6 @@ export interface RowView {
 }
 
 const EMPTY = "—";
-
-const PUBLISH_OPTIONS: readonly CellOption[] = [
-  { value: "draft", label: "Draft" },
-  { value: "future", label: "Scheduled" },
-  { value: "publish", label: "Publish" },
-];
-
-function authorName(view: RowView, id: number | null | undefined): string {
-  if (id == null) return EMPTY;
-  return view.wpUsers.get(id) ?? `#${id}`;
-}
-
-function categoryNames(view: RowView, ids: number[] | null | undefined): string {
-  if (!ids || ids.length === 0) return EMPTY;
-  return ids.map((id) => view.wpCategories.get(id) ?? `#${id}`).join(", ");
-}
-
-function optionsFromMap(map: ReadonlyMap<number, string>): CellOption[] {
-  return Array.from(map.entries()).map(([id, name]) => ({ value: String(id), label: name }));
-}
-
-/** Author options + an "unassigned" sentinel + the current id when off-list. */
-function authorOptions(view: RowView, current: number | null | undefined): CellOption[] {
-  const opts = optionsFromMap(view.wpUsers);
-  if (current != null && !view.wpUsers.has(current)) {
-    opts.unshift({ value: String(current), label: `#${current}` });
-  }
-  return [{ value: "", label: EMPTY }, ...opts];
-}
 
 /** Cell content for a run column — inline editor when editable, else plain text. */
 function cellContent(run: RunSummary, col: RunColumn, view: RowView): ReactNode {
@@ -96,71 +65,17 @@ function cellContent(run: RunSummary, col: RunColumn, view: RowView): ReactNode 
         run.acf_widget_id || "none"
       );
 
+    // WordPress metadata cells resolve names + option lists per-voice.
     case "author":
-      return view.canEdit ? (
-        <SelectCell
-          ariaLabel="WordPress author"
-          value={run.wp_author_id != null ? String(run.wp_author_id) : ""}
-          options={authorOptions(view, run.wp_author_id)}
-          pending={pending}
-          onChange={(v) => {
-            if (v !== "") patch({ wp_author_id: Number(v) });
-          }}
-        />
-      ) : (
-        authorName(view, run.wp_author_id)
-      );
+      return <BoardAuthorCell run={run} view={view} />;
     case "category":
-      return view.canEdit ? (
-        <MultiSelectCell
-          ariaLabel="WordPress categories"
-          selected={run.wp_category_ids ?? []}
-          options={optionsFromMap(view.wpCategories)}
-          pending={pending}
-          onChange={(ids) => patch({ wp_category_ids: ids })}
-        />
-      ) : (
-        categoryNames(view, run.wp_category_ids)
-      );
+      return <BoardCategoryCell run={run} view={view} />;
     case "slug":
-      return view.canEdit ? (
-        <SlugCell slug={run.wp_slug} pending={pending} onCommit={(raw) => patch({ wp_slug: raw })} />
-      ) : (
-        decodeSlug(run.wp_slug) || EMPTY
-      );
-    case "publish": {
-      if (view.canEdit) {
-        return (
-          <SelectCell
-            ariaLabel="Publish status"
-            value={run.wp_publish_status ?? "draft"}
-            options={PUBLISH_OPTIONS}
-            pending={pending}
-            onChange={(v) =>
-              patch({ wp_publish_status: v as "draft" | "future" | "publish" })
-            }
-          />
-        );
-      }
-      const live = isLivePublish(run.wp_publish_status);
-      return (
-        <span className={cn(live && "text-accent-deep font-medium")}>
-          {publishLabel(run.wp_publish_status)}
-        </span>
-      );
-    }
+      return <BoardSlugCell run={run} view={view} />;
+    case "publish":
+      return <BoardPublishCell run={run} view={view} />;
     case "postDate":
-      return view.canEdit ? (
-        <DateCell
-          isoValue={run.wp_publish_at}
-          pending={pending}
-          onChange={(iso) => patch({ wp_publish_at: iso })}
-        />
-      ) : run.wp_publish_at ? (
-        ledgerDate(run.wp_publish_at)
-      ) : (
-        EMPTY
-      );
+      return <BoardPostDateCell run={run} view={view} />;
     default:
       return EMPTY;
   }
@@ -282,7 +197,7 @@ export function RunRow({
           </Link>
         </td>
       </tr>
-      {expanded ? <RunExpand run={run} view={view} colSpan={colSpan} /> : null}
+      {expanded ? <RunExpand run={run} colSpan={colSpan} /> : null}
     </>
   );
 }

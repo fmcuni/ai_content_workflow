@@ -91,8 +91,6 @@ export function RunsBoard() {
       columns: columnsForTab(board.tab, board.showWordpress),
       showWordpress: board.showWordpress,
       compact: board.density === "compact",
-      wpUsers: toMap(wpUsersQ.data),
-      wpCategories: toMap(wpCatsQ.data),
       canEdit,
       pendingRunId: runPatch.pendingRunId,
       pendingBatchId: batchPatch.pendingBatchId,
@@ -101,7 +99,7 @@ export function RunsBoard() {
       personaOptions,
     }),
     [
-      board.tab, board.showWordpress, board.density, wpUsersQ.data, wpCatsQ.data,
+      board.tab, board.showWordpress, board.density,
       canEdit, runPatch.pendingRunId, batchPatch.pendingBatchId,
       runPatch.patch, batchPatch.patch, personaOptions,
     ],

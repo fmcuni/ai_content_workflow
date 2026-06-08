@@ -24,6 +24,7 @@ import click
 from dotenv import dotenv_values
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.config import get_settings
 from content_tool.db.connection import make_engine, make_session_factory
@@ -50,6 +51,88 @@ def _build_env(env_file: str) -> dict[str, str]:
     """
     file_vals = {k: v for k, v in dotenv_values(env_file).items() if v is not None}
     return {**file_vals, **os.environ}
+
+
+async def _refresh_target(
+    session: AsyncSession,
+    auth_ref: str,
+    client: WordPressClient,
+    now: datetime,
+) -> tuple[int, int]:
+    """Hard-refresh one target's cached users/categories.
+
+    Fetches the upstream lists, then clears *only this ``auth_ref``'s* rows and
+    re-inserts them (so other instances' snapshots are untouched). Returns
+    ``(user_count, category_count)``. Propagates :class:`WordPressError` on an
+    upstream failure so the caller can skip just this target.
+    """
+    users = await client.list_users()
+    cats = await client.list_categories()
+
+    await session.execute(delete(WpUserCache).where(WpUserCache.auth_ref == auth_ref))
+    if users:
+        await session.execute(
+            insert(WpUserCache).values(
+                [
+                    {
+                        "auth_ref": auth_ref,
+                        "id": u.id,
+                        "name": u.name,
+                        "slug": u.slug,
+                        "synced_at": now,
+                    }
+                    for u in users
+                ]
+            )
+        )
+    await session.execute(
+        delete(WpCategoryCache).where(WpCategoryCache.auth_ref == auth_ref)
+    )
+    if cats:
+        await session.execute(
+            insert(WpCategoryCache).values(
+                [
+                    {
+                        "auth_ref": auth_ref,
+                        "id": c.id,
+                        "name": c.name,
+                        "slug": c.slug,
+                        "synced_at": now,
+                    }
+                    for c in cats
+                ]
+            )
+        )
+    return len(users), len(cats)
+
+
+async def _run_targets(
+    session: AsyncSession,
+    specs: list[tuple[str, WordPressClient]],
+    now: datetime,
+) -> int:
+    """Refresh each ``(auth_ref, client)`` spec.
+
+    One upstream WP failure (e.g. WAF blocking the outbound IP) is logged and
+    skipped so the remaining targets still refresh. Returns 2 when at least one
+    target failed upstream, else 0.
+    """
+    rc = 0
+    for auth_ref, client in specs:
+        try:
+            n_users, n_cats = await _refresh_target(session, auth_ref, client, now)
+        except WordPressError as e:
+            logger.error("WordPress upstream failed for target %s: %s", auth_ref, e)
+            logger.error(
+                "This usually means CloudFront/WAF is challenging the backend's "
+                "outbound IP. Get the backend allowlisted on the WP side."
+            )
+            rc = 2
+            continue
+        logger.info(
+            "Target %s: fetched %d users, %d categories", auth_ref, n_users, n_cats
+        )
+    return rc
 
 
 async def _sync() -> int:
@@ -122,60 +205,9 @@ async def _sync() -> int:
                 logger.error("No active WordPress targets and no WP_BASE_URL — nothing to sync")
                 return 1
 
-            for auth_ref, client in specs:
-                try:
-                    users = await client.list_users()
-                    cats = await client.list_categories()
-                except WordPressError as e:
-                    logger.error("WordPress upstream failed for target %s: %s", auth_ref, e)
-                    logger.error(
-                        "This usually means CloudFront/WAF is challenging the backend's "
-                        "outbound IP. Get the backend allowlisted on the WP side."
-                    )
-                    rc = 2
-                    continue
-
-                logger.info(
-                    "Target %s: fetched %d users, %d categories", auth_ref, len(users), len(cats)
-                )
-
-                # Per-target hard refresh: clear just this auth_ref's rows, re-insert.
-                await session.execute(
-                    delete(WpUserCache).where(WpUserCache.auth_ref == auth_ref)
-                )
-                if users:
-                    await session.execute(
-                        insert(WpUserCache).values(
-                            [
-                                {
-                                    "auth_ref": auth_ref,
-                                    "id": u.id,
-                                    "name": u.name,
-                                    "slug": u.slug,
-                                    "synced_at": now,
-                                }
-                                for u in users
-                            ]
-                        )
-                    )
-                await session.execute(
-                    delete(WpCategoryCache).where(WpCategoryCache.auth_ref == auth_ref)
-                )
-                if cats:
-                    await session.execute(
-                        insert(WpCategoryCache).values(
-                            [
-                                {
-                                    "auth_ref": auth_ref,
-                                    "id": c.id,
-                                    "name": c.name,
-                                    "slug": c.slug,
-                                    "synced_at": now,
-                                }
-                                for c in cats
-                            ]
-                        )
-                    )
+            # One upstream WP failure is skipped (rc=2) so other targets still
+            # refresh; combine with any build-failure rc already recorded above.
+            rc = max(rc, await _run_targets(session, specs, now))
             await session.commit()
             logger.info("Sync complete (rc=%d) — %d target(s) processed", rc, len(specs))
     finally:

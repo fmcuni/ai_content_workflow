@@ -23,6 +23,20 @@ import { authClient } from "./auth-client";
 
 const BASE = "/api/runs";
 
+/**
+ * Build the `?run_id=…&persona=…` query for the /wp-options endpoints. Either
+ * scopes the lookup to one CMS instance: `persona` (voice slug — the /runs board
+ * uses this so rows of the same voice share a cache entry) takes precedence over
+ * `runId` (the HITL_2 picker). Neither → the legacy Bowtie default.
+ */
+function wpOptionsQuery(runId?: string, persona?: string): string {
+  const params = new URLSearchParams();
+  if (runId) params.set("run_id", runId);
+  if (persona) params.set("persona", persona);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
 // Build-time fallback only (local dev). In production the signed-in editor's
 // better-auth session email is the primary source — see `resolveEditorEmail`.
 const PROMPT_EDITOR_EMAIL = process.env.NEXT_PUBLIC_PROMPT_EDITOR_EMAIL;
@@ -183,14 +197,10 @@ export const api = {
     http<ExistingPost>(`${BASE}/${runId}/existing-post`),
   refreshExistingPost: (runId: string) =>
     http<ExistingPost>(`${BASE}/${runId}/existing-post/refresh`, { method: "POST" }),
-  listWpUsers: (runId?: string) =>
-    http<WpUserOption[]>(
-      `/api/wp-options/users${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
-    ),
-  listWpCategories: (runId?: string) =>
-    http<WpCategoryOption[]>(
-      `/api/wp-options/categories${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
-    ),
+  listWpUsers: (runId?: string, persona?: string) =>
+    http<WpUserOption[]>(`/api/wp-options/users${wpOptionsQuery(runId, persona)}`),
+  listWpCategories: (runId?: string, persona?: string) =>
+    http<WpCategoryOption[]>(`/api/wp-options/categories${wpOptionsQuery(runId, persona)}`),
   saveHitl2Snapshot: (runId: string, body: Hitl2SnapshotIn) =>
     http<Hitl2Snapshot>(`${BASE}/${runId}/hitl2-snapshots`, {
       method: "POST",

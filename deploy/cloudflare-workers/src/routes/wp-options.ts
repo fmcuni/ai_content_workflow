@@ -24,18 +24,28 @@ const DEFAULT_AUTH_REF = "WP";
  * publish-target auth_ref of the run's voice, or 'WP' (the Bowtie default) when
  * there's no run, no voice, or an unassigned voice. Archived targets still
  * resolve to their auth_ref — the picker just reads that instance's snapshot.
+ *
+ * A caller may scope by `persona` (voice slug) directly — the /runs board does
+ * this so N rows of the same voice share one option lookup — or by `runId` (the
+ * HITL_2 picker, which knows the run but not the voice). `persona` wins when
+ * both are given; with neither, the legacy Bowtie default applies.
  */
 async function resolveAuthRef(
   sql: ReturnType<typeof getSql>,
   runId: string | undefined,
+  persona: string | undefined,
 ): Promise<string> {
+  if (persona) {
+    const target = await getPublishTargetForVoice(sql, persona);
+    return target?.auth_ref ?? DEFAULT_AUTH_REF;
+  }
   if (!runId) return DEFAULT_AUTH_REF;
   const rows = await sql<{ persona: string | null }[]>`
     SELECT persona FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
   `;
-  const persona = rows[0]?.persona;
-  if (!persona) return DEFAULT_AUTH_REF;
-  const target = await getPublishTargetForVoice(sql, persona);
+  const runPersona = rows[0]?.persona;
+  if (!runPersona) return DEFAULT_AUTH_REF;
+  const target = await getPublishTargetForVoice(sql, runPersona);
   return target?.auth_ref ?? DEFAULT_AUTH_REF;
 }
 
@@ -63,25 +73,27 @@ async function fetchOptionsWithRetry(
   throw lastErr;
 }
 
-// GET /wp-options/users?q=&run_id=
-// Returns a bare array of { id, name, slug } for the run's CMS target.
+// GET /wp-options/users?q=&run_id=&persona=
+// Returns a bare array of { id, name, slug } for the run's / voice's CMS target.
 wpOptionsRouter.get("/users", async (c) => {
   const q = c.req.query("q");
   const runId = c.req.query("run_id");
+  const persona = c.req.query("persona");
   const items = await fetchOptionsWithRetry(c.env, c.executionCtx, async (sql) => {
-    const authRef = await resolveAuthRef(sql, runId);
+    const authRef = await resolveAuthRef(sql, runId, persona);
     return queryWpUsers(sql, q, authRef);
   });
   return c.json(items);
 });
 
-// GET /wp-options/categories?q=&run_id=
-// Returns a bare array of { id, name, slug } for the run's CMS target.
+// GET /wp-options/categories?q=&run_id=&persona=
+// Returns a bare array of { id, name, slug } for the run's / voice's CMS target.
 wpOptionsRouter.get("/categories", async (c) => {
   const q = c.req.query("q");
   const runId = c.req.query("run_id");
+  const persona = c.req.query("persona");
   const items = await fetchOptionsWithRetry(c.env, c.executionCtx, async (sql) => {
-    const authRef = await resolveAuthRef(sql, runId);
+    const authRef = await resolveAuthRef(sql, runId, persona);
     return queryWpCategories(sql, q, authRef);
   });
   return c.json(items);
