@@ -186,13 +186,17 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     if (!existingPost.data) return;
     if (prefilledRef.current !== null) return; // already prefilled
     prefilledRef.current = existingPost.data; // WP baseline for "Re-read from WP"
-    if (hydratedFromSnapshotRef.current) return; // snapshot already set the form
     const ep = existingPost.data;
+    // Backfill the WP baseline only where the field is still empty. A snapshot
+    // hydration that didn't carry author/category/slug must not leave them blank
+    // (the "auto-filled then cleared" bug); a value the snapshot DID carry is
+    // preserved. Works whichever query wins the race vs snapshot hydration.
     setForm((f) => ({
       ...f,
-      wp_author_id: ep.wp_author_id,
-      wp_category_ids: ep.wp_category_id != null ? [ep.wp_category_id] : null,
-      wp_slug: ep.wp_slug,
+      wp_author_id: f.wp_author_id ?? ep.wp_author_id,
+      wp_category_ids:
+        f.wp_category_ids ?? (ep.wp_category_id != null ? [ep.wp_category_id] : null),
+      wp_slug: f.wp_slug ?? ep.wp_slug,
     }));
   }, [existingPost.data]);
 
@@ -261,11 +265,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       edited_seo_title: s.seo_title ?? null,
       edited_meta_description: s.meta_description ?? null,
       wp_publish_status: (s.wp_publish_status as Hitl2Request["wp_publish_status"]) ?? "draft",
-      wp_author_id: s.wp_author_id ?? null,
-      wp_category_ids: s.wp_category_ids ?? null,
+      // Author/category/slug fall back to the current form value (the WP
+      // prefill) when the snapshot didn't capture them, so hydrating an older
+      // snapshot never clears a known author/category/slug.
+      wp_author_id: s.wp_author_id ?? f.wp_author_id ?? null,
+      wp_category_ids: s.wp_category_ids ?? f.wp_category_ids ?? null,
       wp_tag_ids: s.wp_tag_ids ?? null,
       wp_featured_media_id: s.wp_featured_media_id ?? null,
-      wp_slug: s.wp_slug ?? null,
+      wp_slug: s.wp_slug ?? f.wp_slug ?? null,
       wp_excerpt: s.wp_excerpt ?? null,
       wp_publish_at: s.wp_publish_at ?? null,
     }));

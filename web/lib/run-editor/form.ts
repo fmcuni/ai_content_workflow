@@ -154,11 +154,13 @@ export function applySnapshotToForm(form: Hitl2Request, s: Hitl2Snapshot): Hitl2
     edited_meta_description: s.meta_description ?? form.edited_meta_description,
     notes: s.notes ?? form.notes,
     wp_publish_status: asPublishStatus(s.wp_publish_status) ?? form.wp_publish_status,
-    wp_author_id: s.wp_author_id ?? null,
-    wp_category_ids: s.wp_category_ids ?? null,
+    // Fall back to the current form (WP prefill) when the snapshot didn't carry
+    // these, so hydrating a snapshot never clears a known author/category/slug.
+    wp_author_id: s.wp_author_id ?? form.wp_author_id ?? null,
+    wp_category_ids: s.wp_category_ids ?? form.wp_category_ids ?? null,
     wp_tag_ids: s.wp_tag_ids ?? null,
     wp_featured_media_id: s.wp_featured_media_id ?? null,
-    wp_slug: s.wp_slug ?? null,
+    wp_slug: s.wp_slug ?? form.wp_slug ?? null,
     wp_excerpt: s.wp_excerpt ?? null,
     wp_publish_at: s.wp_publish_at ?? null,
   };

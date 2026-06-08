@@ -397,4 +397,20 @@ describe("applySnapshotToForm", () => {
     const result = applySnapshotToForm(form, makeSnapshot());
     expect(result.decision).toBe("request_changes");
   });
+
+  it("keeps the form's author/category/slug when the snapshot omits them", () => {
+    // Regression: a snapshot that never captured author/category/slug must not
+    // null them out over the WP prefill ("auto-filled then cleared" bug).
+    const form = makeForm({ wp_author_id: 7, wp_category_ids: [3, 4], wp_slug: "my-slug" });
+    const snapshot = makeSnapshot({
+      wp_author_id: null,
+      wp_category_ids: null,
+      wp_slug: null,
+    });
+    const result = applySnapshotToForm(form, snapshot);
+
+    expect(result.wp_author_id).toBe(7);
+    expect(result.wp_category_ids).toEqual([3, 4]);
+    expect(result.wp_slug).toBe("my-slug");
+  });
 });
