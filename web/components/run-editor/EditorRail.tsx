@@ -14,6 +14,8 @@ interface EditorRailProps {
   onTabChange: (t: "wp" | "comments") => void;
   form: Hitl2Request;
   onFormChange: Dispatch<SetStateAction<Hitl2Request>>;
+  /** Scopes the WP metadata pickers to this run's CMS target (per-voice). */
+  runId: string;
   existingAuthorName: string | null;
   existingCategoryName: string | null;
   comments: Hitl2Comment[];
@@ -43,6 +45,7 @@ export function EditorRail({
   onTabChange,
   form,
   onFormChange,
+  runId,
   existingAuthorName,
   existingCategoryName,
   comments,
@@ -73,6 +76,7 @@ export function EditorRail({
             <WordPressMetaForm
               form={form}
               onChange={onFormChange}
+              runId={runId}
               existingAuthorName={existingAuthorName}
               existingCategoryName={existingCategoryName}
             />

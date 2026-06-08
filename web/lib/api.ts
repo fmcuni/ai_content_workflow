@@ -183,8 +183,14 @@ export const api = {
     http<ExistingPost>(`${BASE}/${runId}/existing-post`),
   refreshExistingPost: (runId: string) =>
     http<ExistingPost>(`${BASE}/${runId}/existing-post/refresh`, { method: "POST" }),
-  listWpUsers: () => http<WpUserOption[]>("/api/wp-options/users"),
-  listWpCategories: () => http<WpCategoryOption[]>("/api/wp-options/categories"),
+  listWpUsers: (runId?: string) =>
+    http<WpUserOption[]>(
+      `/api/wp-options/users${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
+    ),
+  listWpCategories: (runId?: string) =>
+    http<WpCategoryOption[]>(
+      `/api/wp-options/categories${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
+    ),
   saveHitl2Snapshot: (runId: string, body: Hitl2SnapshotIn) =>
     http<Hitl2Snapshot>(`${BASE}/${runId}/hitl2-snapshots`, {
       method: "POST",

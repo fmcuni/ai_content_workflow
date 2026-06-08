@@ -92,22 +92,26 @@ function WpPicker({
 }
 
 export function WordPressMetaForm({
-  form, onChange, existingAuthorName, existingCategoryName,
+  form, onChange, existingAuthorName, existingCategoryName, runId,
 }: {
   form: Hitl2Request;
   onChange: (f: Hitl2Request) => void;
   existingAuthorName?: string | null;
   existingCategoryName?: string | null;
+  /** Scopes author/category options to this run's CMS target (per-voice). */
+  runId?: string;
 }) {
+  // Keyed by runId so switching runs (which may target different CMS instances)
+  // refetches the correct instance's author/category lists.
   const users = useQuery<WpUserOption[]>({
-    queryKey: ["wp-users"],
-    queryFn: api.listWpUsers,
+    queryKey: ["wp-users", runId ?? null],
+    queryFn: () => api.listWpUsers(runId),
     staleTime: TEN_MIN,
     gcTime: THIRTY_MIN,
   });
   const categories = useQuery<WpCategoryOption[]>({
-    queryKey: ["wp-categories"],
-    queryFn: api.listWpCategories,
+    queryKey: ["wp-categories", runId ?? null],
+    queryFn: () => api.listWpCategories(runId),
     staleTime: TEN_MIN,
     gcTime: THIRTY_MIN,
   });

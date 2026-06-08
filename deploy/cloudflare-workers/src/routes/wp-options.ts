@@ -3,6 +3,7 @@ import type { Env } from "../index";
 import { getSql } from "../db/client";
 import { queryWpCategories, queryWpUsers } from "../db/wp";
 import type { WpOptionItem } from "../db/wp";
+import { getPublishTargetForVoice } from "../db/publish_targets";
 
 const wpOptionsRouter = new Hono<{ Bindings: Env }>();
 
@@ -13,6 +14,30 @@ const wpOptionsRouter = new Hono<{ Bindings: Env }>();
 // a FRESH connection per attempt. A persistent failure still surfaces as a 500.
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 100;
+
+// Env-prefix of the legacy Bowtie target. A run with no voice/target (or no
+// run_id at all) resolves here, matching the cache's default rows.
+const DEFAULT_AUTH_REF = "WP";
+
+/**
+ * Resolve which CMS instance's cached taxonomy a request should read: the
+ * publish-target auth_ref of the run's voice, or 'WP' (the Bowtie default) when
+ * there's no run, no voice, or an unassigned voice. Archived targets still
+ * resolve to their auth_ref — the picker just reads that instance's snapshot.
+ */
+async function resolveAuthRef(
+  sql: ReturnType<typeof getSql>,
+  runId: string | undefined,
+): Promise<string> {
+  if (!runId) return DEFAULT_AUTH_REF;
+  const rows = await sql<{ persona: string | null }[]>`
+    SELECT persona FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+  `;
+  const persona = rows[0]?.persona;
+  if (!persona) return DEFAULT_AUTH_REF;
+  const target = await getPublishTargetForVoice(sql, persona);
+  return target?.auth_ref ?? DEFAULT_AUTH_REF;
+}
 
 async function fetchOptionsWithRetry(
   env: Env,
@@ -38,23 +63,27 @@ async function fetchOptionsWithRetry(
   throw lastErr;
 }
 
-// GET /wp-options/users?q=
-// Returns a bare array of { id, name, slug } matching the filter.
+// GET /wp-options/users?q=&run_id=
+// Returns a bare array of { id, name, slug } for the run's CMS target.
 wpOptionsRouter.get("/users", async (c) => {
   const q = c.req.query("q");
-  const items = await fetchOptionsWithRetry(c.env, c.executionCtx, (sql) =>
-    queryWpUsers(sql, q),
-  );
+  const runId = c.req.query("run_id");
+  const items = await fetchOptionsWithRetry(c.env, c.executionCtx, async (sql) => {
+    const authRef = await resolveAuthRef(sql, runId);
+    return queryWpUsers(sql, q, authRef);
+  });
   return c.json(items);
 });
 
-// GET /wp-options/categories?q=
-// Returns a bare array of { id, name, slug } matching the filter.
+// GET /wp-options/categories?q=&run_id=
+// Returns a bare array of { id, name, slug } for the run's CMS target.
 wpOptionsRouter.get("/categories", async (c) => {
   const q = c.req.query("q");
-  const items = await fetchOptionsWithRetry(c.env, c.executionCtx, (sql) =>
-    queryWpCategories(sql, q),
-  );
+  const runId = c.req.query("run_id");
+  const items = await fetchOptionsWithRetry(c.env, c.executionCtx, async (sql) => {
+    const authRef = await resolveAuthRef(sql, runId);
+    return queryWpCategories(sql, q, authRef);
+  });
   return c.json(items);
 });
 

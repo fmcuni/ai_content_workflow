@@ -488,6 +488,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           onTabChange={setRightTab}
           form={form}
           onFormChange={setForm}
+          runId={runId}
           existingAuthorName={existingPost.data?.wp_author_name ?? null}
           existingCategoryName={existingPost.data?.wp_category_name ?? null}
           comments={comments}

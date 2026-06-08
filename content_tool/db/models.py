@@ -392,6 +392,12 @@ class _WpEntityCache(Base):
 
     __abstract__ = True
 
+    # Publish-target discriminator (the publish_targets env-prefix, e.g. 'WP' or
+    # 'VHIS101_WP'). Part of the composite PK so the same WP id can recur across
+    # CMS instances; defaults to 'WP' (the legacy Bowtie target).
+    auth_ref: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=text("'WP'")
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, nullable=False)
