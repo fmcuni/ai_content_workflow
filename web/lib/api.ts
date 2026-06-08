@@ -89,6 +89,13 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  // A 204 No Content (or any empty body) carries no JSON — DELETE routes return
+  // `204` with a null body. Calling `r.json()` on it throws "Unexpected end of
+  // JSON input", which silently failed mutations like deleting a review thread.
+  // Callers of these endpoints type `T` as `void`, so returning undefined is safe.
+  if (r.status === 204 || r.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return (await r.json()) as T;
 }
 
