@@ -427,7 +427,13 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     await this.emitStep(step, "emit-fetch-start", runId, "strategy.fetch_article.start", {});
     const fetched = await step.do("fetch-article", async () =>
       this.withSql<{ markdown: string; wpPostId: number | null; source: string }>(async (sql) => {
-        const result = await runFetchArticle(sql, this.env, { runId, articleUrl });
+        // Look up the existing post on the voice's OWN CMS, not the default WP.
+        // Otherwise a non-default voice (e.g. VHIS101) never finds its post →
+        // wp_post_id stays NULL → publish mints a NEW post instead of updating
+        // the article being refreshed. Mirror the target the publish step uses.
+        const target = await resolvePublishTarget(sql, run.persona, this.env.WP_TARGET ?? "");
+        const fetchEnv = buildTargetEnv(this.env, target);
+        const result = await runFetchArticle(sql, fetchEnv, { runId, articleUrl });
         // Persist only what the outline + done-event need — keep the step
         // checkpoint small.
         return { markdown: result.markdown, wpPostId: result.wpPostId, source: result.source };

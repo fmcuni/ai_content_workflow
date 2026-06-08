@@ -8,6 +8,8 @@ from sqlalchemy import select
 
 from content_tool.agents.fetch_article import fetch_article
 from content_tool.db.models import FetchedArticle, Run
+from content_tool.db.persona_model import Persona
+from content_tool.db.publish_target_model import PublishTarget
 from content_tool.wordpress.client import WordPressClient
 
 _WP_BASE = "https://www.bowtie.com.hk/blog"
@@ -90,6 +92,96 @@ async def test_fetch_article_resolves_via_slug_and_writes(db_session):
     assert row.wp_author_id == 5
     assert row.wp_slug == "cancer-screening"
     assert row.wp_link == "https://www.bowtie.com.hk/blog/zh/cancer-screening/"
+
+
+@pytest.mark.asyncio
+async def test_fetch_article_routes_to_voice_publish_target(db_session, monkeypatch):
+    """A refresh run whose voice is mapped to a non-default CMS must look up the
+    existing post on THAT WordPress — not the default Bowtie WP. Otherwise the
+    post is never found, wp_post_id stays NULL, and publish mints a new post
+    instead of updating the article being refreshed (the VHIS101 bug)."""
+    vhis_base = "https://vhis101.example.com"
+    monkeypatch.setenv("VHIS101_WP_BASE_URL", vhis_base)
+    monkeypatch.setenv("VHIS101_WP_USERNAME", "editor")
+    monkeypatch.setenv("VHIS101_WP_APP_PASSWORD", "secret-app-pw")
+
+    target = PublishTarget(
+        name="VHIS101 WordPress",
+        kind="wordpress",
+        auth_ref="VHIS101_WP",
+        is_archived=False,
+    )
+    db_session.add(target)
+    await db_session.flush()
+    db_session.add(
+        Persona(
+            slug="vhis101",
+            name="VHIS101",
+            voice_rules=[],
+            banned_terms=[],
+            required_phrasings=[],
+            disclaimer_templates={},
+            tone_examples={},
+            publish_target_id=target.publish_target_id,
+        )
+    )
+    run_id = uuid4()
+    article_url = f"{vhis_base}/some-existing-post/"
+    db_session.add(
+        Run(
+            run_id=run_id,
+            created_by="x",
+            status="fetching",
+            article_url=article_url,
+            topic="x",
+            keywords=["x"],
+            mode="auto",
+            acf_adv_id=1,
+            acf_widget_id=2,
+            persona="vhis101",
+            today_date=date(2026, 5, 21),
+        )
+    )
+    await db_session.commit()
+
+    with respx.mock(assert_all_called=True) as router:
+        # Only the VHIS101 base is mocked. assert_all_called=True means the test
+        # FAILS if fetch_article queries the default Bowtie base instead.
+        router.get(f"{vhis_base}/wp-json/wp/v2/posts").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 6264,
+                        "slug": "some-existing-post",
+                        "categories": [1982],
+                        "link": article_url,
+                        "title": {"rendered": "Existing VHIS101 article"},
+                        "status": "publish",
+                        "author": 223685593,
+                        "modified_gmt": "2026-01-22T02:01:00",
+                        "content": {"rendered": "<h2>Body</h2><p>existing</p>"},
+                    }
+                ],
+            )
+        )
+        router.get(f"{vhis_base}/wp-json/wp/v2/categories").mock(
+            return_value=Response(200, json=[{"id": 1982, "name": "兒童", "slug": "kids"}])
+        )
+
+        # No wp_client passed → fetch_article must resolve the voice's target.
+        result = await fetch_article(
+            session=db_session,
+            run_id=run_id,
+            article_url=article_url,
+        )
+
+    assert result["wp_post_id"] == 6264
+
+    row = (
+        await db_session.execute(select(FetchedArticle).where(FetchedArticle.run_id == run_id))
+    ).scalar_one()
+    assert row.wp_post_id == 6264
 
 
 @pytest.mark.asyncio

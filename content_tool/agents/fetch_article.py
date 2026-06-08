@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.config import get_settings
-from content_tool.db.models import FetchedArticle
+from content_tool.db.models import FetchedArticle, Run
+from content_tool.publishers.wp_factory import resolve_wp_target
 from content_tool.wordpress.client import WordPressClient
 
 _WP_BASE_DEFAULT = "https://www.bowtie.com.hk/blog/wp-json/wp/v2"
@@ -77,15 +78,32 @@ async def fetch_article(
             "markdown": existing.markdown,
         }
 
-    # Build WordPressClient from settings if not provided
+    # Build WordPressClient from settings if not provided. Resolve the voice's
+    # OWN CMS (via the run's persona) so a refresh looks up the existing post on
+    # the right WordPress. Otherwise a non-default voice (e.g. VHIS101) never
+    # finds its post → wp_post_id stays NULL → publish mints a NEW post instead
+    # of updating the article being refreshed. Mirrors the publish target.
     if wp_client is None:
         settings = get_settings()
-        wp_client = WordPressClient(
+        default_client = WordPressClient(
             settings.wp_base_url,
             username=settings.wp_username,
             app_password=settings.wp_app_password,
             timeout=settings.wp_timeout,
         )
+        persona_slug = (
+            await session.execute(
+                select(Run.persona).where(Run.run_id == run_id)
+            )
+        ).scalar_one_or_none()
+        resolved = await resolve_wp_target(
+            session=session,
+            persona_slug=persona_slug,
+            default_client=default_client,
+            default_label=settings.wp_target,
+            timeout=settings.wp_timeout,
+        )
+        wp_client = resolved.client or default_client
 
     # Fetch post via slug. A transient/transport error is treated like
     # "not found" so a CMS hiccup never hard-blocks the run.
