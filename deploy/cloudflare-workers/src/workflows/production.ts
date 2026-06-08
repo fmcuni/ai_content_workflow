@@ -51,6 +51,7 @@ import {
 import { resolvePublishStatus } from "../wordpress/publish_status";
 import { resolvePublishTarget, buildTargetEnv } from "../publishers/wp_factory";
 import { writeComplianceLog } from "../compliance/log";
+import { CITATIONS_STEP_CONFIG } from "./step_config";
 
 // ---------------------------------------------------------------------------
 // Constants — mirror the Python source exactly.
@@ -590,7 +591,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         {},
         iteration,
       );
-      await step.do(`resolve_citations-${round}-${iteration}`, async () =>
+      await step.do(`resolve_citations-${round}-${iteration}`, CITATIONS_STEP_CONFIG, async () =>
         this.withSql(async (sql) => {
           const draft = await this.loadDraftMarkup(sql, draftId);
           const groundingChunks = toGroundingChunks(draft.grounding_chunks);
