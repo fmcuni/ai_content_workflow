@@ -86,6 +86,32 @@ export function dismissHunk(parts: readonly Change[], index: number): CommitResu
   return { committed: buildCommitted(parts), working };
 }
 
+/**
+ * Render the diff as inline tracked-changes markup for the visual editor:
+ * insertions wrapped in `<ins …>`, deletions in `<del …>`, unchanged parts
+ * emitted verbatim. `<ins>` and `<del>` are the only HTML elements with a
+ * "transparent" content model — they may wrap BOTH inline and block content —
+ * so a word-level diff part that straddles a block boundary (e.g. `</p><p>`)
+ * still yields valid, browser-repairable markup. Each change carries:
+ *   - `data-tc` — `add` | `del` (drives styling)
+ *   - `data-tc-i` — its index into `parts`, so a click resolves back to
+ *     `commitHunk(parts, i)` / `dismissHunk(parts, i)`
+ *   - `tabindex` / `role` / `aria-label` — keyboard-focusable, screen-reader
+ *     labelled, so per-change accept/reject is operable without a mouse.
+ * PURE: no DOM, no mutation — just string assembly from the diff parts.
+ */
+export function buildInlineDiffHtml(parts: readonly Change[]): string {
+  return parts
+    .map((p, i) => {
+      if (p.added)
+        return `<ins data-tc="add" data-tc-i="${i}" tabindex="0" role="button" aria-label="Inserted text — activate to accept or reject">${p.value}</ins>`;
+      if (p.removed)
+        return `<del data-tc="del" data-tc-i="${i}" tabindex="0" role="button" aria-label="Deleted text — activate to accept or reject">${p.value}</del>`;
+      return p.value;
+    })
+    .join("");
+}
+
 /** Accept every pending change — the baseline becomes the working body. */
 export function commitAll(parts: readonly Change[]): CommitResult {
   const working = buildWorking(parts);

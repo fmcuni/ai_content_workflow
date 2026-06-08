@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildInlineDiffHtml,
   commitAll,
   commitHunk,
   computeTrackedChanges,
@@ -112,5 +113,36 @@ describe("commitAll / dismissAll", () => {
     expect((result.committed.match(/<p>/g) ?? []).length).toBe(
       (result.committed.match(/<\/p>/g) ?? []).length,
     );
+  });
+});
+
+describe("buildInlineDiffHtml", () => {
+  it("wraps insertions in <ins> and deletions in <del> with addressable indices", () => {
+    const { parts } = computeTrackedChanges("<p>hello world</p>", "<p>hello there</p>");
+    const html = buildInlineDiffHtml(parts);
+    expect(html).toContain('<del data-tc="del"');
+    expect(html).toContain('<ins data-tc="add"');
+    // Each wrapper carries its parts-array index back to the diff.
+    expect(html).toMatch(/data-tc-i="\d+"/);
+    // The unchanged prefix survives verbatim.
+    expect(html).toContain("hello");
+  });
+
+  it("emits no <ins>/<del> when there are no changes", () => {
+    const { parts } = computeTrackedChanges("<p>same</p>", "<p>same</p>");
+    const html = buildInlineDiffHtml(parts);
+    expect(html).toBe("<p>same</p>");
+    expect(html).not.toContain("data-tc");
+  });
+
+  it("the data-tc-i index resolves back to the correct commit/dismiss hunk", () => {
+    const committed = "<p>hello</p>";
+    const working = "<p>hello world</p>";
+    const { parts } = computeTrackedChanges(committed, working);
+    const html = buildInlineDiffHtml(parts);
+    const i = Number(/data-tc-i="(\d+)"/.exec(html)![1]);
+    // Accepting that exact index clears the only pending change.
+    const result = commitHunk(parts, i);
+    expect(computeTrackedChanges(result.committed, result.working).hunks).toEqual([]);
   });
 });

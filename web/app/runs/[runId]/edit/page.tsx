@@ -8,14 +8,13 @@ import { Button } from "@/components/ui/button";
 import { RoleButton } from "@/components/RoleGate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OutlineEditor } from "@/components/OutlineEditor";
-import { TipTapEditor } from "@/components/TipTapEditor";
+import { ArticleEditor } from "@/components/run-editor/ArticleEditor";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
 import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
-import { TrackedChangesView } from "@/components/TrackedChangesView";
 import { computeTrackedChanges } from "@/lib/tracked-changes";
 import { useArticleComments } from "@/lib/useArticleComments";
 import { useReviewThreads } from "@/lib/useReviewThreads";
@@ -44,7 +43,7 @@ import {
 import { api } from "@/lib/api";
 import type { Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline } from "@/lib/types";
 
-type EditTab = "article" | "outline" | "tracked" | "raw" | "payload";
+type EditTab = "article" | "outline" | "raw" | "payload";
 
 export default function EditRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
@@ -373,10 +372,6 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
             <TabsList className="border-b border-rule">
               <TabsTrigger value="article">Article</TabsTrigger>
               <TabsTrigger value="outline">Outline</TabsTrigger>
-              <TabsTrigger value="tracked">
-                Tracked changes
-                {pendingChanges > 0 && <span className="ml-1 text-accent">({pendingChanges})</span>}
-              </TabsTrigger>
               <TabsTrigger value="raw">Raw HTML</TabsTrigger>
               <TabsTrigger value="payload">WP payload</TabsTrigger>
             </TabsList>
@@ -392,9 +387,16 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                 </p>
               )}
               {render.data && (
-                <TipTapEditor
-                  value={html}
-                  onChange={setHtml}
+                <ArticleEditor
+                  html={html}
+                  committedHtml={committedHtml}
+                  pendingCount={pendingChanges}
+                  onHtmlChange={setHtml}
+                  onTrackedChange={({ committed, working }) => {
+                    setCommittedHtml(committed);
+                    setHtml(working);
+                  }}
+                  onComment={commentOnChange}
                   onAddComment={addComment}
                   onCommentClick={focusComment}
                   onAddReviewNote={onAddReviewNote}
@@ -422,17 +424,6 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                   }}
                 />
               )}
-            </TabsContent>
-            <TabsContent value="tracked" className="pt-6">
-              <TrackedChangesView
-                committed={committedHtml}
-                working={html}
-                onChange={({ committed, working }) => {
-                  setCommittedHtml(committed);
-                  setHtml(working);
-                }}
-                onComment={commentOnChange}
-              />
             </TabsContent>
             <TabsContent value="raw" className="pt-6">
               <RawHtmlView html={html} />

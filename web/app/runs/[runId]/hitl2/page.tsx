@@ -10,11 +10,10 @@ import { RoleButton } from "@/components/RoleGate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalLink } from "@/components/ExternalLink";
 import { PaperStamp } from "@/components/PaperStamp";
-import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
-import { TrackedChangesView } from "@/components/TrackedChangesView";
 import { computeTrackedChanges } from "@/lib/tracked-changes";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
+import { ArticleEditor } from "@/components/run-editor/ArticleEditor";
 import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
 import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
@@ -187,7 +186,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     }
   };
   const [galleyTab, setGalleyTab] = useState<
-    "edit" | "diff" | "tracked" | "audit" | "raw" | "payload"
+    "edit" | "diff" | "audit" | "raw" | "payload"
   >("edit");
   // Pending human tracked changes (committed baseline vs working body).
   const pendingChanges = useMemo(
@@ -445,10 +444,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             <TabsList className="border-b border-rule">
               <TabsTrigger value="edit">Edit</TabsTrigger>
               <TabsTrigger value="diff">Diff vs render</TabsTrigger>
-              <TabsTrigger value="tracked">
-                Tracked changes
-                {pendingChanges > 0 && <span className="ml-1 text-accent">({pendingChanges})</span>}
-              </TabsTrigger>
               <TabsTrigger value="audit">Audit findings</TabsTrigger>
               <TabsTrigger value="raw">Raw HTML</TabsTrigger>
               <TabsTrigger value="payload">WP payload</TabsTrigger>
@@ -465,9 +460,16 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 </p>
               )}
               {renderReady && (
-                <TipTapEditor
-                  value={html}
-                  onChange={setHtml}
+                <ArticleEditor
+                  html={html}
+                  committedHtml={committedHtml}
+                  pendingCount={pendingChanges}
+                  onHtmlChange={setHtml}
+                  onTrackedChange={({ committed, working }) => {
+                    setCommittedHtml(committed);
+                    setHtml(working);
+                  }}
+                  onComment={commentOnChange}
                   onAddComment={addComment}
                   onCommentClick={focusComment}
                   onAddReviewNote={onAddReviewNote}
@@ -477,17 +479,6 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             </TabsContent>
             <TabsContent value="diff" className="pt-6">
               <HtmlDiffView original={originalHtml} updated={html} />
-            </TabsContent>
-            <TabsContent value="tracked" className="pt-6">
-              <TrackedChangesView
-                committed={committedHtml}
-                working={html}
-                onChange={({ committed, working }) => {
-                  setCommittedHtml(committed);
-                  setHtml(working);
-                }}
-                onComment={commentOnChange}
-              />
             </TabsContent>
             <TabsContent value="audit" className="pt-6">
               {audit.data && (
