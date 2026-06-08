@@ -373,6 +373,43 @@ export interface Hitl2Comment {
   body: string;
 }
 
+/**
+ * Review threads — human-only highlight discussions (comment / reply / resolve).
+ * A SEPARATE pipeline from the AI-edit `Hitl2Comment`: review threads are never
+ * dispatched to apply-edits. Persisted in the `review_threads` table.
+ */
+export interface ReviewMessage {
+  id: string;
+  author_email: string | null;
+  author_name: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface ReviewThread {
+  thread_id: string;
+  run_id: string;
+  anchor_id: string;
+  anchor_text: string | null;
+  status: "open" | "resolved";
+  messages: ReviewMessage[];
+  created_by: string | null;
+  created_by_name: string | null;
+  created_at: string;
+  resolved_by: string | null;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  updated_at: string;
+}
+
+export interface CreateReviewThreadIn {
+  anchor_id: string;
+  anchor_text?: string | null;
+  body: string;
+  editor_email?: string | null;
+  editor_name?: string | null;
+}
+
 export interface DryPublishRequest {
   edited_html_body?: string | null;
   edited_seo_title?: string | null;

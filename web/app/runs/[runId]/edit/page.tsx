@@ -13,8 +13,10 @@ import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
-import { EditorRail } from "@/components/run-editor/EditorRail";
+import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
+import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
 import { useArticleComments } from "@/lib/useArticleComments";
+import { useReviewThreads } from "@/lib/useReviewThreads";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
 import {
@@ -65,7 +67,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
-  const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
+  const [rightTab, setRightTab] = useState<EditorRailTab>("wp");
   const wpPrefilledRef = useRef(false);
   const renderSeededRef = useRef(false);
   const hydratedFromSnapshotRef = useRef(false);
@@ -76,6 +78,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   const canEdit = can("edit_article");
   const { data: session } = useSession();
   const editorEmail = session?.user?.email ?? "";
+  const editorName = session?.user?.name ?? "";
   const editorEmailRef = useRef(editorEmail);
   useEffect(() => {
     editorEmailRef.current = editorEmail;
@@ -94,6 +97,16 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     onAddComment: () => setRightTab("comments"),
     onFocusComment: () => setRightTab("comments"),
   });
+  // Human review threads — SEPARATE pipeline from the AI "comments" above.
+  const reviewThreads = useReviewThreads(runId, { email: editorEmail, name: editorName }, setHtml);
+  const onAddReviewNote = (id: string, anchorText: string) => {
+    reviewThreads.beginThread(id, anchorText);
+    setRightTab("review");
+  };
+  const onReviewClick = (anchorId: string) => {
+    reviewThreads.focusByAnchor(anchorId);
+    setRightTab("review");
+  };
   const { requestEdit, requesting } = useApplyEdits(runId, {
     onApplied: (newHtml, ctx) => {
       if (ctx.commentIds.length > 0) {
@@ -361,6 +374,8 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                   onChange={setHtml}
                   onAddComment={addComment}
                   onCommentClick={focusComment}
+                  onAddReviewNote={onAddReviewNote}
+                  onReviewClick={onReviewClick}
                 />
               )}
             </TabsContent>
@@ -419,6 +434,8 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
           onRequestEdit={requestAiEdit}
           requesting={requesting}
           requestEnabled={requestEnabled}
+          reviewPanel={<ReviewPanel rt={reviewThreads} />}
+          reviewCount={reviewThreads.threads.length}
         />
 
       <Hitl2VersionHistory

@@ -15,7 +15,7 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-import { EditorRail } from "@/components/run-editor/EditorRail";
+import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
 
 function wrap(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -25,10 +25,10 @@ function wrap(node: ReactNode) {
 const FORM: Hitl2Request = { decision: "approve", wp_publish_status: "draft" };
 
 interface RailHarnessProps {
-  tab?: "wp" | "comments";
+  tab?: EditorRailTab;
   comments?: Hitl2Comment[];
   notesValue?: string;
-  onTabChange?: (t: "wp" | "comments") => void;
+  onTabChange?: (t: EditorRailTab) => void;
   onRequestEdit?: () => void;
   requesting?: boolean;
   requestEnabled?: boolean;
@@ -62,6 +62,8 @@ function renderRail({
       onRequestEdit={onRequestEdit}
       requesting={requesting}
       requestEnabled={requestEnabled}
+      reviewPanel={<div data-testid="review-panel" />}
+      reviewCount={0}
     />,
   );
 }

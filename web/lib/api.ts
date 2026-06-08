@@ -10,7 +10,8 @@ import type {
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListResponse,
   PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
-  RefreshEvaluation, Render, RepublishResponse, RunCost, RunEventLog, RunSummary,
+  RefreshEvaluation, Render, RepublishResponse, ReviewThread, CreateReviewThreadIn,
+  RunCost, RunEventLog, RunSummary,
   RunWpMetaPatch, ScanResponse,
   SetupConfigureResult, SetupRequest, SetupStatus, SetupVerifyResult,
   SourcePolicyDoc, SourcePolicyPreviewResponse, SourcePolicyResponse, SourcePolicyRevertResponse,
@@ -220,6 +221,35 @@ export const api = {
     const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
     return navigator.sendBeacon(`${BASE}/${runId}/hitl2-snapshots`, blob);
   },
+  // Review threads — human-only highlight discussions. SEPARATE from the AI-edit
+  // `comments` path; never sent to apply-edits.
+  listReviewThreads: (runId: string) =>
+    http<ReviewThread[]>(`${BASE}/${runId}/review-threads`),
+  createReviewThread: (runId: string, body: CreateReviewThreadIn) =>
+    http<ReviewThread>(`${BASE}/${runId}/review-threads`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  replyReviewThread: (
+    runId: string,
+    threadId: string,
+    body: { body: string; editor_email?: string | null; editor_name?: string | null },
+  ) =>
+    http<ReviewThread>(`${BASE}/${runId}/review-threads/${threadId}/replies`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  resolveReviewThread: (
+    runId: string,
+    threadId: string,
+    body: { resolved: boolean; editor_email?: string | null; editor_name?: string | null },
+  ) =>
+    http<ReviewThread>(`${BASE}/${runId}/review-threads/${threadId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteReviewThread: (runId: string, threadId: string) =>
+    http<void>(`${BASE}/${runId}/review-threads/${threadId}`, { method: "DELETE" }),
 };
 
 // Identity + role. `/me` is served by the Workers backend; the local Python dev

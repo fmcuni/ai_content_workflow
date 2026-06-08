@@ -13,11 +13,13 @@ import { PaperStamp } from "@/components/PaperStamp";
 import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
-import { EditorRail } from "@/components/run-editor/EditorRail";
+import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
+import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
 import { useArticleComments } from "@/lib/useArticleComments";
+import { useReviewThreads } from "@/lib/useReviewThreads";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
 import { buildDryRequest, buildSnapshotIn, snapshotKey } from "@/lib/run-editor/form";
@@ -59,6 +61,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // handlers (which run outside render) read the latest without re-subscribing.
   const { data: session } = useSession();
   const editorEmail = session?.user?.email ?? "";
+  const editorName = session?.user?.name ?? "";
   const editorEmailRef = useRef(editorEmail);
   useEffect(() => {
     editorEmailRef.current = editorEmail;
@@ -122,7 +125,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const [html, setHtml] = useState<string>("");
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
   const [originalHtml, setOriginalHtml] = useState("");
-  const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
+  const [rightTab, setRightTab] = useState<EditorRailTab>("wp");
   const {
     comments,
     setComments,
@@ -136,6 +139,16 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     onAddComment: () => setRightTab("comments"),
     onFocusComment: () => setRightTab("comments"),
   });
+  // Human review threads — SEPARATE pipeline from the AI "comments" above.
+  const reviewThreads = useReviewThreads(runId, { email: editorEmail, name: editorName }, setHtml);
+  const onAddReviewNote = (id: string, anchorText: string) => {
+    reviewThreads.beginThread(id, anchorText);
+    setRightTab("review");
+  };
+  const onReviewClick = (anchorId: string) => {
+    reviewThreads.focusByAnchor(anchorId);
+    setRightTab("review");
+  };
   const { requestEdit, requesting } = useApplyEdits(runId, {
     onApplied: (newHtml, ctx) => {
       if (ctx.commentIds.length > 0) {
@@ -422,6 +435,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                   onChange={setHtml}
                   onAddComment={addComment}
                   onCommentClick={focusComment}
+                  onAddReviewNote={onAddReviewNote}
+                  onReviewClick={onReviewClick}
                 />
               )}
             </TabsContent>
@@ -508,6 +523,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           onRequestEdit={requestAiEdit}
           requesting={requesting}
           requestEnabled={requestEnabled}
+          reviewPanel={<ReviewPanel rt={reviewThreads} />}
+          reviewCount={reviewThreads.threads.length}
         />
 
       <Hitl2VersionHistory

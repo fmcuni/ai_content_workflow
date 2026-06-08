@@ -2170,5 +2170,279 @@ runsRouter.delete("/:id", requireRole("admin"), async (c) => {
   return c.json({ ok: true });
 });
 
+// ===========================================================================
+// Review threads — human-only highlight discussions (comment / reply / resolve)
+//
+// A SEPARATE pipeline from the AI-edit `comments` (hitl2_snapshots.comments →
+// apply-edits). Review threads are NEVER dispatched to the AI. Mirrors the
+// Python routes in content_tool/api/routes/runs.py. `review_threads` has an FK
+// to runs ON DELETE CASCADE, so the run-delete route cleans them up implicitly.
+// ===========================================================================
+
+interface ReviewMessage {
+  id: string;
+  author_email: string | null;
+  author_name: string | null;
+  body: string;
+  created_at: string;
+}
+
+interface ReviewThreadRow {
+  thread_id: string;
+  run_id: string;
+  anchor_id: string;
+  anchor_text: string | null;
+  status: string;
+  messages: unknown;
+  created_by: string | null;
+  created_by_name: string | null;
+  created_at: string;
+  resolved_by: string | null;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  updated_at: string;
+}
+
+interface CreateReviewThreadBody {
+  anchor_id?: string;
+  anchor_text?: string | null;
+  body?: string;
+  editor_email?: string | null;
+  editor_name?: string | null;
+}
+
+interface ReviewReplyBody {
+  body?: string;
+  editor_email?: string | null;
+  editor_name?: string | null;
+}
+
+interface ReviewResolveBody {
+  resolved?: boolean;
+  editor_email?: string | null;
+  editor_name?: string | null;
+}
+
+function toReviewThreadOut(row: ReviewThreadRow): Record<string, unknown> {
+  return {
+    thread_id: row.thread_id,
+    run_id: row.run_id,
+    anchor_id: row.anchor_id,
+    anchor_text: row.anchor_text,
+    status: row.status,
+    messages: pgJson(row.messages),
+    created_by: row.created_by,
+    created_by_name: row.created_by_name,
+    created_at: pgTimestampToIso(row.created_at),
+    resolved_by: row.resolved_by,
+    resolved_by_name: row.resolved_by_name,
+    resolved_at: pgTimestampToIso(row.resolved_at),
+    updated_at: pgTimestampToIso(row.updated_at),
+  };
+}
+
+function newReviewMessage(
+  body: string,
+  email: string | null,
+  name: string | null,
+): ReviewMessage {
+  return {
+    id: `m-${crypto.randomUUID().slice(0, 8)}`,
+    author_email: email,
+    author_name: name,
+    body,
+    created_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Append one run-event-log row for a review-thread action (audit trail).
+ * Best-effort: a failure here must never fail the thread mutation. The
+ * INSERT...SELECT computes `seq` atomically so it does not race the streaming
+ * writer's in-memory counter. Mirrors `_write_review_event` in the Python route.
+ */
+async function writeReviewEvent(
+  sql: Sql,
+  runId: string,
+  event: string,
+  payload: unknown,
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO content_tool.run_event_logs
+        (log_id, stream_id, stream_kind, seq, event, level, step, payload, recorded_at)
+      SELECT ${crypto.randomUUID()}, ${runId}, 'run',
+             COALESCE(MAX(seq), -1) + 1, ${event}, 'info', NULL,
+             ${toJsonb(sql, payload)}, now()
+      FROM content_tool.run_event_logs
+      WHERE stream_id = ${runId}
+    `;
+  } catch {
+    // Audit breadcrumb must not break the mutation.
+  }
+}
+
+// GET /:id/review-threads — list a run's review threads, oldest-first.
+runsRouter.get("/:id/review-threads", async (c) => {
+  const runId = c.req.param("id");
+  const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
+    sql<ReviewThreadRow[]>`
+      SELECT thread_id, run_id, anchor_id, anchor_text, status, messages,
+             created_by, created_by_name, created_at, resolved_by,
+             resolved_by_name, resolved_at, updated_at
+      FROM content_tool.review_threads
+      WHERE run_id = ${runId}
+      ORDER BY created_at ASC
+    `,
+  );
+  return c.json(rows.map(toReviewThreadOut));
+});
+
+// POST /:id/review-threads — open a new review thread.
+runsRouter.post("/:id/review-threads", requireRole("viewer"), async (c) => {
+  const runId = c.req.param("id");
+  const body = await c.req
+    .json<CreateReviewThreadBody>()
+    .catch(() => ({}) as CreateReviewThreadBody);
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email ?? null,
+  );
+  const editorName = body.editor_name ?? null;
+
+  const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const runRows = await sql<{ run_id: string }[]>`
+      SELECT run_id FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
+    if (runRows[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+    const threadId = crypto.randomUUID();
+    const message = newReviewMessage(body.body ?? "", editorEmail, editorName);
+    const rows = await sql<ReviewThreadRow[]>`
+      INSERT INTO content_tool.review_threads (
+        thread_id, run_id, anchor_id, anchor_text, status, messages,
+        created_by, created_by_name
+      ) VALUES (
+        ${threadId}, ${runId}, ${body.anchor_id ?? ""}, ${body.anchor_text ?? null},
+        'open', ${toJsonb(sql, [message])}, ${editorEmail}, ${editorName}
+      )
+      RETURNING thread_id, run_id, anchor_id, anchor_text, status, messages,
+                created_by, created_by_name, created_at, resolved_by,
+                resolved_by_name, resolved_at, updated_at
+    `;
+    await writeReviewEvent(sql, runId, "review.thread.created", {
+      anchor_id: body.anchor_id ?? "",
+    });
+    return { thread: rows[0] ?? null };
+  });
+
+  if ("error" in result) {
+    return c.json({ detail: "run not found" }, 404);
+  }
+  if (result.thread === null) {
+    return c.json({ detail: "failed to create thread" }, 500);
+  }
+  return c.json(toReviewThreadOut(result.thread));
+});
+
+// POST /:id/review-threads/:tid/replies — append a reply.
+runsRouter.post("/:id/review-threads/:tid/replies", requireRole("viewer"), async (c) => {
+  const runId = c.req.param("id");
+  const threadId = c.req.param("tid");
+  const body = await c.req.json<ReviewReplyBody>().catch(() => ({}) as ReviewReplyBody);
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email ?? null,
+  );
+  const editorName = body.editor_name ?? null;
+
+  const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const existing = await sql<{ messages: unknown }[]>`
+      SELECT messages FROM content_tool.review_threads
+      WHERE thread_id = ${threadId} AND run_id = ${runId} LIMIT 1
+    `;
+    if (existing[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+    const messages = pgJson<ReviewMessage[]>(existing[0].messages) ?? [];
+    const next = [...messages, newReviewMessage(body.body ?? "", editorEmail, editorName)];
+    const rows = await sql<ReviewThreadRow[]>`
+      UPDATE content_tool.review_threads
+      SET messages = ${toJsonb(sql, next)}, updated_at = now()
+      WHERE thread_id = ${threadId} AND run_id = ${runId}
+      RETURNING thread_id, run_id, anchor_id, anchor_text, status, messages,
+                created_by, created_by_name, created_at, resolved_by,
+                resolved_by_name, resolved_at, updated_at
+    `;
+    return { thread: rows[0] ?? null };
+  });
+
+  if ("error" in result) {
+    return c.json({ detail: "thread not found" }, 404);
+  }
+  if (result.thread === null) {
+    return c.json({ detail: "failed to reply" }, 500);
+  }
+  return c.json(toReviewThreadOut(result.thread));
+});
+
+// POST /:id/review-threads/:tid/resolve — resolve or reopen.
+runsRouter.post("/:id/review-threads/:tid/resolve", requireRole("viewer"), async (c) => {
+  const runId = c.req.param("id");
+  const threadId = c.req.param("tid");
+  const body = await c.req.json<ReviewResolveBody>().catch(() => ({}) as ReviewResolveBody);
+  const resolved = body.resolved === true;
+  const editorEmail = resolveActorIdentity(
+    { userEmail: c.get("userEmail"), userId: c.get("userId") },
+    body.editor_email ?? null,
+  );
+  const editorName = body.editor_name ?? null;
+  const resolvedAt = resolved ? new Date().toISOString() : null;
+
+  const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const rows = await sql<ReviewThreadRow[]>`
+      UPDATE content_tool.review_threads
+      SET status = ${resolved ? "resolved" : "open"},
+          resolved_by = ${resolved ? editorEmail : null},
+          resolved_by_name = ${resolved ? editorName : null},
+          resolved_at = ${resolvedAt},
+          updated_at = now()
+      WHERE thread_id = ${threadId} AND run_id = ${runId}
+      RETURNING thread_id, run_id, anchor_id, anchor_text, status, messages,
+                created_by, created_by_name, created_at, resolved_by,
+                resolved_by_name, resolved_at, updated_at
+    `;
+    if (rows[0] === undefined) {
+      return { error: "not_found" as const };
+    }
+    await writeReviewEvent(
+      sql,
+      runId,
+      resolved ? "review.thread.resolved" : "review.thread.reopened",
+      { thread_id: threadId, by: editorEmail },
+    );
+    return { thread: rows[0] };
+  });
+
+  if ("error" in result) {
+    return c.json({ detail: "thread not found" }, 404);
+  }
+  return c.json(toReviewThreadOut(result.thread));
+});
+
+// DELETE /:id/review-threads/:tid — delete a thread.
+runsRouter.delete("/:id/review-threads/:tid", requireRole("viewer"), async (c) => {
+  const runId = c.req.param("id");
+  const threadId = c.req.param("tid");
+  await withDb(c.env, c.executionCtx, (sql: Sql) =>
+    sql`
+      DELETE FROM content_tool.review_threads
+      WHERE thread_id = ${threadId} AND run_id = ${runId}
+    `,
+  );
+  return c.body(null, 204);
+});
+
 export { runsRouter };
 export default runsRouter;

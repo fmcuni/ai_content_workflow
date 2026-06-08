@@ -212,4 +212,24 @@
     background: color-mix(in srgb, var(--color-accent) 24%, transparent);
     border-bottom-color: var(--color-accent);
   }
+
+  /* Human review-thread anchors — a SEPARATE pipeline from the AI comment
+     anchor, so they use a distinct blue hue. Resolved threads dim to a faint
+     dashed underline. */
+  .editorial-prose .review-anchor {
+    background: color-mix(in srgb, #2563eb 12%, transparent);
+    border-bottom: 2px solid color-mix(in srgb, #2563eb 45%, transparent);
+    cursor: pointer;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .editorial-prose .review-anchor[data-focus="true"] {
+    background: color-mix(in srgb, #2563eb 24%, transparent);
+    border-bottom-color: #2563eb;
+  }
+  .editorial-prose .review-anchor[data-resolved="true"] {
+    background: transparent;
+    border-bottom: 1px dashed color-mix(in srgb, var(--color-ink) 30%, transparent);
+    opacity: 0.6;
+  }
 }

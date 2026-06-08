@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -12,6 +12,7 @@ from content_tool.api.schemas import (
     ApplyEditsRequest,
     ApplyEditsResponse,
     ArticleEditRequest,
+    CreateReviewThreadIn,
     CreateRunRequest,
     CreateRunResponse,
     DryPublishRequest,
@@ -24,6 +25,9 @@ from content_tool.api.schemas import (
     RegenerateRequest,
     RepublishResponse,
     ResumeRequest,
+    ReviewReplyIn,
+    ReviewResolveIn,
+    ReviewThreadOut,
     RunWpMetaPatch,
 )
 from content_tool.api.sse import RunAlreadyExecutingError, sse_stream
@@ -37,6 +41,7 @@ from content_tool.db.models import (
     OutlineRow,
     RefreshEvaluation,
     Render,
+    ReviewThread,
     Run,
     RunEventLog,
     TopicCandidate,
@@ -730,6 +735,196 @@ def _current_snapshot_id(
         if r.html_body == live_body:
             return r.snapshot_id
     return None
+
+
+# --- Review threads (human-only highlight discussions) ---------------------
+# A SEPARATE pipeline from the AI-edit ``comments``: these are never dispatched
+# to apply-edits. comment / reply / resolve, persisted in ``review_threads``.
+
+_REVIEW_EVENT_SQL = text(
+    """
+    INSERT INTO content_tool.run_event_logs
+        (log_id, stream_id, stream_kind, seq, event, level, step, payload, recorded_at)
+    SELECT :log_id, :stream_id, 'run',
+           COALESCE(MAX(seq), -1) + 1, :event, 'info', NULL,
+           CAST(:payload AS jsonb), now()
+    FROM content_tool.run_event_logs
+    WHERE stream_id = CAST(:stream_id AS uuid)
+    """
+)
+
+
+async def _write_review_event(
+    session: AsyncSession, run_id: UUID, event: str, payload: dict[str, object]
+) -> None:
+    """Append one run-event-log row for a review-thread action (audit trail).
+
+    Best-effort: a failure here must never fail the thread mutation. The
+    ``INSERT ... SELECT`` computes ``seq`` atomically within the statement so it
+    does not race the streaming writer's in-memory counter.
+    """
+    try:
+        await session.execute(
+            _REVIEW_EVENT_SQL,
+            {
+                "log_id": str(uuid4()),
+                "stream_id": str(run_id),
+                "event": event,
+                "payload": json.dumps(payload, ensure_ascii=False),
+            },
+        )
+    except Exception:
+        logger.warning("review_event_log_failed run_id=%s event=%s", run_id, event)
+
+
+def _new_review_message(body: str, email: str | None, name: str | None) -> dict[str, object]:
+    """Build one immutable review message dict (stored in the messages jsonb)."""
+    return {
+        "id": f"m-{uuid4().hex[:8]}",
+        "author_email": email,
+        "author_name": name,
+        "body": body,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+
+@router.get("/{run_id}/review-threads", response_model=list[ReviewThreadOut])
+async def list_review_threads(
+    run_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> list[ReviewThreadOut]:
+    """List the run's human review threads, oldest-first (creation order)."""
+    async with sf() as session:
+        rows = (
+            await session.execute(
+                select(ReviewThread)
+                .where(ReviewThread.run_id == run_id)
+                .order_by(ReviewThread.created_at.asc())
+            )
+        ).scalars().all()
+    return [ReviewThreadOut.model_validate(r) for r in rows]
+
+
+@router.post("/{run_id}/review-threads", response_model=ReviewThreadOut)
+async def create_review_thread(
+    run_id: UUID,
+    payload: CreateReviewThreadIn,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> ReviewThreadOut:
+    """Open a new review thread anchored to a highlighted passage."""
+    async with sf() as session:
+        run = (
+            await session.execute(select(Run).where(Run.run_id == run_id))
+        ).scalar_one_or_none()
+        if not run:
+            raise HTTPException(404, "run not found")
+        message = _new_review_message(payload.body, payload.editor_email, payload.editor_name)
+        thread = ReviewThread(
+            thread_id=uuid4(),
+            run_id=run_id,
+            anchor_id=payload.anchor_id,
+            anchor_text=payload.anchor_text,
+            status="open",
+            messages=[message],
+            created_by=payload.editor_email,
+            created_by_name=payload.editor_name,
+        )
+        session.add(thread)
+        await _write_review_event(
+            session, run_id, "review.thread.created", {"anchor_id": payload.anchor_id}
+        )
+        await session.commit()
+        await session.refresh(thread)
+    return ReviewThreadOut.model_validate(thread)
+
+
+async def _load_thread(
+    session: AsyncSession, run_id: UUID, thread_id: UUID
+) -> ReviewThread:
+    thread = (
+        await session.execute(
+            select(ReviewThread).where(
+                ReviewThread.thread_id == thread_id,
+                ReviewThread.run_id == run_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    return thread
+
+
+@router.post(
+    "/{run_id}/review-threads/{thread_id}/replies", response_model=ReviewThreadOut
+)
+async def reply_review_thread(
+    run_id: UUID,
+    thread_id: UUID,
+    payload: ReviewReplyIn,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> ReviewThreadOut:
+    """Append a reply to an existing review thread."""
+    async with sf() as session:
+        thread = await _load_thread(session, run_id, thread_id)
+        message = _new_review_message(payload.body, payload.editor_email, payload.editor_name)
+        # Reassign (don't mutate in place) so SQLAlchemy flags the JSONB dirty.
+        thread.messages = [*thread.messages, message]
+        thread.updated_at = datetime.now(UTC)
+        await session.commit()
+        await session.refresh(thread)
+    return ReviewThreadOut.model_validate(thread)
+
+
+@router.post(
+    "/{run_id}/review-threads/{thread_id}/resolve", response_model=ReviewThreadOut
+)
+async def resolve_review_thread(
+    run_id: UUID,
+    thread_id: UUID,
+    payload: ReviewResolveIn,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> ReviewThreadOut:
+    """Resolve or reopen a review thread (audited in the run event log)."""
+    async with sf() as session:
+        thread = await _load_thread(session, run_id, thread_id)
+        now = datetime.now(UTC)
+        if payload.resolved:
+            thread.status = "resolved"
+            thread.resolved_by = payload.editor_email
+            thread.resolved_by_name = payload.editor_name
+            thread.resolved_at = now
+        else:
+            thread.status = "open"
+            thread.resolved_by = None
+            thread.resolved_by_name = None
+            thread.resolved_at = None
+        thread.updated_at = now
+        await _write_review_event(
+            session,
+            run_id,
+            "review.thread.resolved" if payload.resolved else "review.thread.reopened",
+            {"thread_id": str(thread_id), "by": payload.editor_email},
+        )
+        await session.commit()
+        await session.refresh(thread)
+    return ReviewThreadOut.model_validate(thread)
+
+
+@router.delete("/{run_id}/review-threads/{thread_id}", status_code=204)
+async def delete_review_thread(
+    run_id: UUID,
+    thread_id: UUID,
+    sf=Depends(get_session_factory),  # noqa: ANN001, B008
+) -> None:
+    """Delete a review thread."""
+    async with sf() as session:
+        await session.execute(
+            delete(ReviewThread).where(
+                ReviewThread.thread_id == thread_id,
+                ReviewThread.run_id == run_id,
+            )
+        )
+        await session.commit()
 
 
 @router.get("/{run_id}/drafts")
