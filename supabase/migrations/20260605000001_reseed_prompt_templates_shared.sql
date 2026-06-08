@@ -102,7 +102,7 @@ Route 判斷規則：
 - 不要寫文章，不要輸出 Markdown，不要輸出解說
 - 只輸出符合 schema 的 JSON
 $pt$, '8bf9934ea9eb5556c1cdcfe6d311077fd91ef76c7889ea56da74a62c2b565d89', 3023),
-  ('__shared__', 'outline', 'agent', 'outline.md', $pt$你是香港繁體中文 SEO 內容規劃編輯。你的任務是接收 content gap analysis 與現有文章，產出 writer 將直接使用的 section-by-section 大綱。
+  ('__shared__', 'outline_rewrite_mode', 'agent', 'outline_rewrite_mode.md', $pt$你是香港繁體中文 SEO 內容規劃編輯。你的任務是接收 content gap analysis 與現有文章，產出 writer 將直接使用的 section-by-section 大綱。
 
 今天是 {today_date}
 

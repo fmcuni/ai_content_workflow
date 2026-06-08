@@ -30,8 +30,8 @@ async def build_system_prompt(
     an empty string and only the refresh-mode body applies — identical to
     the pre-Task-4 behaviour.
 
-    Both the ``outline`` and ``outline_create_mode`` templates resolve under
-    ``voice_slug`` (falling back to __shared__ / bundled file).
+    Both the ``outline_rewrite_mode`` and ``outline_create_mode`` templates
+    resolve under ``voice_slug`` (falling back to __shared__ / bundled file).
     """
     block = (
         (
@@ -43,9 +43,11 @@ async def build_system_prompt(
         else ""
     )
     template = await prompts_store.get_assembled(
-        "outline", voice_slug=voice_slug, session=session
+        "outline_rewrite_mode", voice_slug=voice_slug, session=session
     )
-    row = await prompts_store.get_template_row("outline", voice_slug=voice_slug, session=session)
+    row = await prompts_store.get_template_row(
+        "outline_rewrite_mode", voice_slug=voice_slug, session=session
+    )
     if row is not None:
         set_prompt_meta(PromptMeta(
             template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256

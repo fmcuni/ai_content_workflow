@@ -66,7 +66,7 @@ METRIC_PROMPT_ATTRIBUTION: dict[str, tuple[str, ...]] = {
     ),
     "coverage": (
         "gap_analysis",
-        "outline",
+        "outline_rewrite_mode",
         "writer_full_rewrite",
         "writer_small_refresh",
     ),

@@ -75,11 +75,13 @@ def test_judge_resolves_shared_for_any_voice() -> None:
 
 
 def test_file_fallback_when_no_row(tmp_path: pytest.TempPathFactory) -> None:
-    # An empty snapshot falls through to the bundled prompts/*.md file. 'outline'
-    # ships as prompts/outline.md, so the assembled body must be non-empty and
-    # contain the outline template's known placeholder.
+    # An empty snapshot falls through to the bundled prompts/*.md file.
+    # 'outline_rewrite_mode' ships as prompts/outline_rewrite_mode.md, so the
+    # assembled body must be non-empty and contain the template's known placeholder.
     snap: dict[tuple[str, str], TemplateRow] = {}
-    assembled = prompts_store.assemble_from_snapshot("outline", snap, voice_slug="v1")
+    assembled = prompts_store.assemble_from_snapshot(
+        "outline_rewrite_mode", snap, voice_slug="v1"
+    )
     assert "{today_date}" in assembled
 
 
