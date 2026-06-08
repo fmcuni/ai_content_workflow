@@ -66,9 +66,10 @@ export function RunEditorShell({
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">{children}</div>
 
-      {/* Sticky action bar */}
-      <div className="fixed bottom-0 inset-x-0 bg-paper/95 backdrop-blur border-t border-ink z-40">
-        <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-3 flex items-center justify-end gap-3">
+      {/* Sticky action bar — fixed h-16 (4rem) so the rail's
+          max-h-[calc(100vh-4rem)] aligns to it pixel-perfect. */}
+      <div className="fixed bottom-0 inset-x-0 h-16 bg-paper/95 backdrop-blur border-t border-ink z-40">
+        <div className="mx-auto max-w-[1180px] h-full px-5 md:px-10 flex items-center justify-end gap-3">
           {actionBar}
         </div>
       </div>
