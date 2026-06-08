@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -196,6 +196,17 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
     queryFn: () => publishTargetsApi.list(),
   });
 
+  // Lock background scroll while the drawer is open so the wheel/trackpad acts
+  // on the panel, not the page behind it. The drawer mounts only when open, so
+  // unmount restores the prior overflow.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
   const cleanLists = (body: PersonaIn): PersonaIn => {
     const cleanedDisclaimers: Record<string, DisclaimerTemplate> = {};
     for (const [k, v] of Object.entries(body.disclaimer_templates)) {
@@ -290,7 +301,7 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
         }}
         aria-hidden
       />
-      <aside className="fixed right-0 top-0 bottom-0 z-50 w-full md:w-[460px] bg-paper border-l border-rule overflow-y-auto">
+      <aside className="fixed right-0 top-0 bottom-0 z-50 w-full md:w-[460px] bg-paper border-l border-rule overflow-y-auto overscroll-contain">
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <header className="flex items-center justify-between">
             <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint">

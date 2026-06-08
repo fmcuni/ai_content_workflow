@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -51,6 +51,16 @@ export function DuplicateVoiceDialog({
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Lock background scroll while the dialog is open so the page behind it stays
+  // put. The dialog mounts only when open, so unmount restores the prior value.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   const mut = useMutation({
     mutationFn: () => personasApi.duplicate(sourceSlug, { slug, name }),
