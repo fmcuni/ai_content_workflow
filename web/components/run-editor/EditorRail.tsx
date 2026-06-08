@@ -1,5 +1,5 @@
 "use client";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { Sparkles } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -9,9 +9,11 @@ import { CommentsSidebar } from "@/components/CommentsSidebar";
 import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import type { Hitl2Comment, Hitl2Request } from "@/lib/types";
 
+export type EditorRailTab = "wp" | "comments" | "review";
+
 interface EditorRailProps {
-  tab: "wp" | "comments";
-  onTabChange: (t: "wp" | "comments") => void;
+  tab: EditorRailTab;
+  onTabChange: (t: EditorRailTab) => void;
   form: Hitl2Request;
   onFormChange: Dispatch<SetStateAction<Hitl2Request>>;
   /** Scopes the WP metadata pickers to this run's CMS target (per-voice). */
@@ -32,6 +34,10 @@ interface EditorRailProps {
   requesting: boolean;
   /** False when there is neither a highlight comment nor a note to act on. */
   requestEnabled: boolean;
+  /** Human review-thread panel (separate pipeline from "AI to edit"). */
+  reviewPanel: ReactNode;
+  /** Count badge for the Review tab (open + resolved). */
+  reviewCount: number;
 }
 
 /**
@@ -58,17 +64,23 @@ export function EditorRail({
   onRequestEdit,
   requesting,
   requestEnabled,
+  reviewPanel,
+  reviewCount,
 }: EditorRailProps) {
   const hasComments = comments.some((c) => c.body.trim().length > 0);
 
   return (
     <aside className="lg:sticky lg:top-0 self-start lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto">
-      <Tabs value={tab} onValueChange={(v) => onTabChange(v as "wp" | "comments")}>
+      <Tabs value={tab} onValueChange={(v) => onTabChange(v as EditorRailTab)}>
         <TabsList className="border-b border-rule">
           <TabsTrigger value="wp">WP metadata</TabsTrigger>
           <TabsTrigger value="comments">
             AI to edit
             {comments.length > 0 && <span className="ml-1 text-accent">({comments.length})</span>}
+          </TabsTrigger>
+          <TabsTrigger value="review">
+            Review
+            {reviewCount > 0 && <span className="ml-1 text-accent">({reviewCount})</span>}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="wp" className="pt-4">
@@ -151,6 +163,18 @@ export function EditorRail({
                 : "Highlight text or describe a change"}
             </p>
           </div>
+        </TabsContent>
+        <TabsContent value="review" className="pt-4">
+          {/* Human-only review threads — a SEPARATE pipeline from "AI to edit".
+              These are never dispatched to the AI; they are for people to
+              comment, reply, and resolve. */}
+          <div className="mb-3 flex items-baseline justify-between">
+            <p className="kicker">Review notes</p>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-faint">
+              Human only
+            </span>
+          </div>
+          {reviewPanel}
         </TabsContent>
       </Tabs>
     </aside>

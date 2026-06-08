@@ -58,6 +58,60 @@ class Hitl2Comment(BaseModel):
     body: str
 
 
+# --- Review threads (human-only highlight discussions) ---------------------
+# A SEPARATE pipeline from the AI-edit ``Hitl2Comment``: review threads are
+# never dispatched to apply-edits. They support reply + resolve and persist in
+# the ``review_threads`` table independently of snapshot versions.
+
+
+class ReviewMessage(BaseModel):
+    id: str
+    author_email: str | None = None
+    author_name: str | None = None
+    body: str
+    created_at: datetime
+
+
+class ReviewThreadOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    thread_id: UUID
+    run_id: UUID
+    anchor_id: str
+    anchor_text: str | None = None
+    status: Literal["open", "resolved"]
+    messages: list[ReviewMessage]
+    created_by: str | None = None
+    created_by_name: str | None = None
+    created_at: datetime
+    resolved_by: str | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
+    updated_at: datetime
+
+
+class CreateReviewThreadIn(BaseModel):
+    anchor_id: str
+    anchor_text: str | None = Field(default=None, max_length=240)
+    body: str
+    # Author identity (email + display name). The Workers backend overrides the
+    # email from the session; the Python sidecar takes both from the body.
+    editor_email: str | None = None
+    editor_name: str | None = None
+
+
+class ReviewReplyIn(BaseModel):
+    body: str
+    editor_email: str | None = None
+    editor_name: str | None = None
+
+
+class ReviewResolveIn(BaseModel):
+    resolved: bool
+    editor_email: str | None = None
+    editor_name: str | None = None
+
+
 class Hitl2Request(BaseModel):
     decision: Literal["approve", "request_changes", "reject"]
     # Authenticated approver identity (email). In production the Workers backend
@@ -93,6 +147,8 @@ class Hitl2SnapshotIn(BaseModel):
     # Author of this snapshot (email). See Hitl2Request.editor_email.
     editor_email: str | None = None
     html_body: str
+    # Tracked-changes baseline (last committed body). None ⇒ no pending changes.
+    committed_html_body: str | None = None
     seo_title: str | None = None
     meta_description: str | None = None
     notes: str | None = None

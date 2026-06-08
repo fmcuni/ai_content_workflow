@@ -193,6 +193,9 @@ class Hitl2Snapshot(Base):
     created_by: Mapped[str | None] = mapped_column(String)
     trigger: Mapped[str] = mapped_column(String, nullable=False)
     html_body: Mapped[str] = mapped_column(String, nullable=False)
+    # Tracked-changes baseline: the last committed body. NULL ⇒ no pending human
+    # tracked changes (committed == html_body).
+    committed_html_body: Mapped[str | None] = mapped_column(String)
     seo_title: Mapped[str | None] = mapped_column(String)
     meta_description: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(String)
@@ -590,6 +593,54 @@ class RunEventLog(Base):
         JSONB, nullable=False, server_default=text("'{}'")
     )
     recorded_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
+    )
+
+
+class ReviewThread(Base):
+    """Human-only review thread anchored to a passage of the article body.
+
+    A SEPARATE pipeline from the AI-edit ``comments`` (which live inline in
+    ``hitl2_snapshots.comments`` and feed ``apply-edits``). Review threads are
+    never dispatched to the AI; they hold a human discussion — first message,
+    replies, resolve/reopen — persisted independently of snapshot versions.
+
+    ``anchor_id`` matches the ``data-review-id`` attribute on the highlight
+    ``<span>`` in the edited HTML. ``messages`` is an ordered list of
+    ``{id, author_email, author_name, body, created_at}`` dicts.
+    """
+
+    __tablename__ = "review_threads"
+    __table_args__ = (
+        Index("review_threads_run_idx", "run_id", "created_at"),
+        {"schema": "content_tool"},
+    )
+
+    thread_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("content_tool.runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    anchor_id: Mapped[str] = mapped_column(String, nullable=False)
+    anchor_text: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'open'")
+    )
+    messages: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'")
+    )
+    created_by: Mapped[str | None] = mapped_column(String)
+    created_by_name: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
+    )
+    resolved_by: Mapped[str | None] = mapped_column(String)
+    resolved_by_name: Mapped[str | None] = mapped_column(String)
+    resolved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
     )
 

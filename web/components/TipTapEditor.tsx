@@ -20,6 +20,7 @@ import {
   Undo2,
   Redo2,
   MessageSquarePlus,
+  MessagesSquare,
   Table2,
   ChevronDown,
   Copy,
@@ -33,6 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 import { openExternal } from "@/lib/external-link";
 import { CommentAnchor } from "@/components/tiptap/CommentAnchor";
+import { ReviewAnchor } from "@/components/tiptap/ReviewAnchor";
 import { FaqAccordion } from "@/components/tiptap/FaqAccordion";
 import {
   DropdownMenu,
@@ -74,6 +76,15 @@ function ToolbarButton({ onClick, active, disabled, label, children }: ToolbarBu
 
 function Divider() {
   return <span aria-hidden className="mx-1 h-5 w-px bg-rule" />;
+}
+
+/** Short anchor id with a domain prefix (`c-` AI comment, `r-` review note). */
+function genAnchorId(prefix: string): string {
+  const rand =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+  return `${prefix}${rand}`;
 }
 
 function TableMenu({ editor }: { editor: Editor }) {
@@ -389,8 +400,12 @@ function LinkPanel({ state, onSave, onStartEdit, onRemove, onClose }: LinkPanelP
 interface TipTapEditorProps {
   value: string;
   onChange: (html: string) => void;
+  /** AI-edit instruction anchor (existing pipeline — `data-comment-id`). */
   onAddComment?: (id: string, anchorText: string) => void;
   onCommentClick?: (id: string) => void;
+  /** Human review-thread anchor (separate pipeline — `data-review-id`). */
+  onAddReviewNote?: (id: string, anchorText: string) => void;
+  onReviewClick?: (id: string) => void;
 }
 
 export function TipTapEditor({
@@ -398,6 +413,8 @@ export function TipTapEditor({
   onChange,
   onAddComment,
   onCommentClick,
+  onAddReviewNote,
+  onReviewClick,
 }: TipTapEditorProps) {
   const [selectionPill, setSelectionPill] = useState<{ x: number; y: number } | null>(null);
   const [linkPanel, setLinkPanel] = useState<LinkPanelState | null>(null);
@@ -425,6 +442,8 @@ export function TipTapEditor({
       TableHeader,
       TableCell,
       CommentAnchor,
+      // Human review-thread highlight (separate from the AI CommentAnchor).
+      ReviewAnchor,
       // Preserve the Bowtie FAQ accordion (div.editor__faq) — without this the
       // editor flattens the widget to bare <p> tags and publishes it that way.
       FaqAccordion,
@@ -439,7 +458,7 @@ export function TipTapEditor({
         setLinkPanel(null);
       }
       const { from, to } = editor.state.selection;
-      if (from === to || !onAddComment) {
+      if (from === to || (!onAddComment && !onAddReviewNote)) {
         setSelectionPill(null);
         return;
       }
@@ -471,6 +490,11 @@ export function TipTapEditor({
           onCommentClick(span.getAttribute("data-comment-id")!);
           return true;
         }
+        const reviewSpan = target.closest("[data-review-id]");
+        if (reviewSpan && onReviewClick) {
+          onReviewClick(reviewSpan.getAttribute("data-review-id")!);
+          return true;
+        }
         return false;
       },
     },
@@ -496,15 +520,24 @@ export function TipTapEditor({
     const { from, to } = editor.state.selection;
     if (from === to) return;
     const anchorText = editor.state.doc.textBetween(from, to, " ").slice(0, 120);
-    const id = `c-${
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID().slice(0, 8)
-        : Math.random().toString(36).slice(2, 10)
-    }`;
+    const id = genAnchorId("c-");
     editor.chain().focus().setCommentAnchor({ commentId: id }).run();
     onAddComment(id, anchorText);
     setSelectionPill(null);
   }, [editor, onAddComment]);
+
+  // Human review note — a SEPARATE pipeline from the AI comment above. Wraps the
+  // selection in a `reviewAnchor` mark and opens a discussion thread.
+  const addReviewNote = useCallback(() => {
+    if (!editor || !onAddReviewNote) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+    const anchorText = editor.state.doc.textBetween(from, to, " ").slice(0, 120);
+    const id = genAnchorId("r-");
+    editor.chain().focus().setReviewAnchor({ reviewId: id }).run();
+    onAddReviewNote(id, anchorText);
+    setSelectionPill(null);
+  }, [editor, onAddReviewNote]);
 
   // Toolbar link button: open the panel in read mode over an existing link, or
   // in edit mode to create one on the current selection.
@@ -560,21 +593,40 @@ export function TipTapEditor({
           onClose={() => setLinkPanel(null)}
         />
       )}
-      {selectionPill && onAddComment && (
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={addComment}
+      {selectionPill && (onAddComment || onAddReviewNote) && (
+        <div
           style={{
             position: "fixed",
             left: selectionPill.x,
             top: selectionPill.y,
             zIndex: 50,
           }}
-          className="inline-flex items-center gap-1.5 rounded border border-ink bg-paper px-2.5 py-1 text-[12px] font-mono uppercase tracking-wider text-ink shadow-md hover:bg-ink hover:text-paper"
+          className="inline-flex items-center gap-1 rounded border border-ink bg-paper px-1 py-1 shadow-md"
         >
-          <MessageSquarePlus className="h-3.5 w-3.5" /> Comment
-        </button>
+          {onAddComment && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={addComment}
+              title="Ask AI to edit this passage"
+              className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] font-mono uppercase tracking-wider text-ink hover:bg-ink hover:text-paper"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" /> AI edit
+            </button>
+          )}
+          {onAddComment && onAddReviewNote && <Divider />}
+          {onAddReviewNote && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={addReviewNote}
+              title="Start a human review thread on this passage"
+              className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] font-mono uppercase tracking-wider text-ink hover:bg-ink hover:text-paper"
+            >
+              <MessagesSquare className="h-3.5 w-3.5" /> Review
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

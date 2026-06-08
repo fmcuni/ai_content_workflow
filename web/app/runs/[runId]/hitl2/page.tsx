@@ -12,12 +12,16 @@ import { ExternalLink } from "@/components/ExternalLink";
 import { PaperStamp } from "@/components/PaperStamp";
 import { TipTapEditor } from "@/components/TipTapEditor";
 import { HtmlDiffView } from "@/components/HtmlDiffView";
+import { TrackedChangesView } from "@/components/TrackedChangesView";
+import { computeTrackedChanges } from "@/lib/tracked-changes";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
-import { EditorRail } from "@/components/run-editor/EditorRail";
+import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
+import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RawHtmlView } from "@/components/RawHtmlView";
 import { WpPayloadView } from "@/components/WpPayloadView";
 import { useArticleComments } from "@/lib/useArticleComments";
+import { useReviewThreads } from "@/lib/useReviewThreads";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
 import { buildDryRequest, buildSnapshotIn, snapshotKey } from "@/lib/run-editor/form";
@@ -59,6 +63,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // handlers (which run outside render) read the latest without re-subscribing.
   const { data: session } = useSession();
   const editorEmail = session?.user?.email ?? "";
+  const editorName = session?.user?.name ?? "";
   const editorEmailRef = useRef(editorEmail);
   useEffect(() => {
     editorEmailRef.current = editorEmail;
@@ -122,7 +127,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const [html, setHtml] = useState<string>("");
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
   const [originalHtml, setOriginalHtml] = useState("");
-  const [rightTab, setRightTab] = useState<"wp" | "comments">("wp");
+  // Tracked-changes baseline: the last committed body. Human edits to `html`
+  // away from this show as pending tracked changes. Defaults to the render so a
+  // freshly-loaded draft has zero pending; AI edits advance it (no false hunks).
+  const [committedHtml, setCommittedHtml] = useState("");
+  const [rightTab, setRightTab] = useState<EditorRailTab>("wp");
   const {
     comments,
     setComments,
@@ -136,6 +145,16 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     onAddComment: () => setRightTab("comments"),
     onFocusComment: () => setRightTab("comments"),
   });
+  // Human review threads — SEPARATE pipeline from the AI "comments" above.
+  const reviewThreads = useReviewThreads(runId, { email: editorEmail, name: editorName }, setHtml);
+  const onAddReviewNote = (id: string, anchorText: string) => {
+    reviewThreads.beginThread(id, anchorText);
+    setRightTab("review");
+  };
+  const onReviewClick = (anchorId: string) => {
+    reviewThreads.focusByAnchor(anchorId);
+    setRightTab("review");
+  };
   const { requestEdit, requesting } = useApplyEdits(runId, {
     onApplied: (newHtml, ctx) => {
       if (ctx.commentIds.length > 0) {
@@ -143,10 +162,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
         const sent = new Set(ctx.commentIds);
         setHtml(cleaned);
+        // AI edits advance the tracked-changes baseline so they never surface as
+        // pending HUMAN changes (tracked changes are human-only).
+        setCommittedHtml(cleaned);
         setComments((cs) => cs.filter((c) => !sent.has(c.id)));
         setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
       } else {
         setHtml(newHtml);
+        setCommittedHtml(newHtml);
         setForm((f) => ({ ...f, notes: "" }));
       }
     },
@@ -163,7 +186,22 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       requestEdit.mutate({ html, comments: [], notes: form.notes ?? "" });
     }
   };
-  const [galleyTab, setGalleyTab] = useState<"edit" | "diff" | "audit" | "raw" | "payload">("edit");
+  const [galleyTab, setGalleyTab] = useState<
+    "edit" | "diff" | "tracked" | "audit" | "raw" | "payload"
+  >("edit");
+  // Pending human tracked changes (committed baseline vs working body).
+  const pendingChanges = useMemo(
+    () => computeTrackedChanges(committedHtml, html).hunks.length,
+    [committedHtml, html],
+  );
+  // Start a review thread from a tracked change (its text is the anchor).
+  const commentOnChange = (anchorText: string) => {
+    reviewThreads.beginThread(
+      `r-${Math.random().toString(36).slice(2, 10)}`,
+      anchorText,
+    );
+    setRightTab("review");
+  };
   const wpPayload = useWpPayloadPreview(runId, () => buildDryRequest(html, form));
 
   useEffect(() => {
@@ -173,6 +211,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       setOriginalHtml(render.data.html_body);
       if (hydratedFromSnapshotRef.current) return; // snapshot owns the editor body
       setHtml(render.data.html_body);
+      // No pending tracked changes on a fresh draft: baseline = working body.
+      setCommittedHtml(render.data.html_body);
       setForm((f) => ({
         ...f,
         edited_seo_title: render.data!.seo_title,
@@ -229,8 +269,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const snapshotIn = useMemo<Hitl2SnapshotIn>(
-    () => buildSnapshotIn(html, form, comments, "manual"),
-    [html, form, comments],
+    () => buildSnapshotIn(html, form, comments, "manual", committedHtml),
+    [html, form, comments, committedHtml],
   );
 
   // Baseline is derived from the same source data the prefill effects consume,
@@ -240,6 +280,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     return snapshotKey({
       trigger: "manual",
       html_body: render.data.html_body,
+      committed_html_body: render.data.html_body,
       seo_title: render.data.seo_title,
       meta_description: render.data.meta_description,
       notes: null,
@@ -258,6 +299,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
     setHtml(s.html_body);
+    // Restore the tracked-changes baseline; older snapshots without one have no
+    // pending changes (committed == body).
+    setCommittedHtml(s.committed_html_body ?? s.html_body);
     setComments(s.comments ?? []);
     setForm((f) => ({
       ...f,
@@ -401,6 +445,10 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
             <TabsList className="border-b border-rule">
               <TabsTrigger value="edit">Edit</TabsTrigger>
               <TabsTrigger value="diff">Diff vs render</TabsTrigger>
+              <TabsTrigger value="tracked">
+                Tracked changes
+                {pendingChanges > 0 && <span className="ml-1 text-accent">({pendingChanges})</span>}
+              </TabsTrigger>
               <TabsTrigger value="audit">Audit findings</TabsTrigger>
               <TabsTrigger value="raw">Raw HTML</TabsTrigger>
               <TabsTrigger value="payload">WP payload</TabsTrigger>
@@ -422,11 +470,24 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                   onChange={setHtml}
                   onAddComment={addComment}
                   onCommentClick={focusComment}
+                  onAddReviewNote={onAddReviewNote}
+                  onReviewClick={onReviewClick}
                 />
               )}
             </TabsContent>
             <TabsContent value="diff" className="pt-6">
               <HtmlDiffView original={originalHtml} updated={html} />
+            </TabsContent>
+            <TabsContent value="tracked" className="pt-6">
+              <TrackedChangesView
+                committed={committedHtml}
+                working={html}
+                onChange={({ committed, working }) => {
+                  setCommittedHtml(committed);
+                  setHtml(working);
+                }}
+                onComment={commentOnChange}
+              />
             </TabsContent>
             <TabsContent value="audit" className="pt-6">
               {audit.data && (
@@ -508,6 +569,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           onRequestEdit={requestAiEdit}
           requesting={requesting}
           requestEnabled={requestEnabled}
+          reviewPanel={<ReviewPanel rt={reviewThreads} />}
+          reviewCount={reviewThreads.threads.length}
         />
 
       <Hitl2VersionHistory
