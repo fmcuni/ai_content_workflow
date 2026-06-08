@@ -236,6 +236,40 @@ describe("renderHtml", () => {
     expect(out.htmlBody).toContain('<a href="https://example.com">Source</a>');
   });
 
+  it("carries through a Simplified FAQ heading instead of duplicating it", () => {
+    // Arrange — a zh-MY voice writes its own Simplified heading + Simplified
+    // sources section (emitted by resolve_citations).
+    const markup = [
+      "# 标题",
+      "%%meta desc=d%%",
+      "",
+      "正文。",
+      "",
+      "## 常见问题",
+      "%%acf_faq type=q%%",
+      "什么是 X？",
+      "%%acf_faq type=a%%",
+      "X 是一种东西。",
+      "%%end%%",
+      "",
+      "## 资讯来源",
+      "1. [Source](https://example.com)",
+    ].join("\n");
+
+    // Act
+    const out = renderHtml(markup);
+
+    // Assert — the model's Simplified heading is re-injected, not a hard-coded
+    // Traditional one (no duplicate), and sources render in Simplified.
+    expect(out.htmlBody).toContain("<h2>常见问题</h2>");
+    expect(out.htmlBody).not.toContain("常見問題");
+    expect(out.htmlBody).toContain("<h2>资讯来源</h2>");
+    expect(out.htmlBody).not.toContain("資訊來源");
+    const faqIdx = out.htmlBody.indexOf("editor__faq");
+    const sourcesIdx = out.htmlBody.indexOf("资讯来源");
+    expect(sourcesIdx).toBeGreaterThan(faqIdx);
+  });
+
   it("renders a markdown table (commonmark + table rule enabled)", () => {
     // Arrange
     const markup = ["# T", "%%meta desc=d%%", "", "| a | b |", "|---|---|", "| 1 | 2 |"].join(

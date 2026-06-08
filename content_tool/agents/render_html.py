@@ -33,6 +33,20 @@ _FAQ_BLOCK_RE = re.compile(
     r"%%acf_faq type=q%%[ \t]*\n(.*?)\n[ \t]*%%acf_faq type=a%%[ \t]*\n(.*?)\n[ \t]*%%end%%",
     re.DOTALL,
 )
+# The model writes its own FAQ heading on the line right before the first FAQ
+# shortcode; its wording follows the run's voice (e.g. Simplified 常见问题 for a
+# zh-MY voice). Capture it (group 1) so we re-inject the SAME heading rather than
+# a hard-coded Traditional 常見問題 — appending a constant on top of a surviving
+# Simplified heading is what produced the duplicate-heading bug. Falls back to
+# 常見問題 when no heading precedes the FAQ block.
+_FAQ_HEADING_RE = re.compile(
+    r"^##[ \t]+(.+?)[ \t]*\n(?=\s*%%acf_faq type=q%%)", re.MULTILINE
+)
+# Defensive: drop a stray FAQ heading (either script) that survives — e.g. if it
+# got separated from the block. Mirrors the old unconditional heading strip.
+_FAQ_HEADING_RESIDUE_RE = re.compile(
+    r"^##[ \t]*(?:常見問題|常见问题)[ \t]*\n", re.MULTILINE
+)
 # %%defterm name=<term>%%\n<description>\n%%end%%
 # `name` is a single token (no spaces / quotes) per the writer-prompt contract.
 # Newlines around the description are optional: writers sometimes inline the
@@ -123,16 +137,22 @@ def render_html(markdown: str) -> RenderResult:
     # Sanitization gate (run BEFORE we transform anything writer-controlled)
     _check_no_raw_html(rest)
 
-    # Extract FAQ items, then strip FAQ shortcodes from rest
+    # Extract FAQ items + the model's own FAQ heading (whatever script/wording
+    # the voice uses), then strip the shortcodes and the heading line.
     faq_items = [(q.strip(), a.strip()) for q, a in _FAQ_BLOCK_RE.findall(rest)]
+    faq_heading = "常見問題"
+    heading_match = _FAQ_HEADING_RE.search(rest)
+    if heading_match is not None:
+        faq_heading = heading_match.group(1).strip()
+        rest = rest[: heading_match.start()] + rest[heading_match.end() :]
     rest = _FAQ_BLOCK_RE.sub("", rest)
-    # Remove "## 常見問題" line if it's followed only by what was FAQ
-    rest = re.sub(r"##\s*常見問題\s*\n", "", rest)
+    rest = _FAQ_HEADING_RESIDUE_RE.sub("", rest)
 
-    # Split off the auto-generated "## 資訊來源" section so it can be re-ordered
-    # to appear AFTER the FAQ widget in the final HTML.
+    # Split off the auto-generated "## 資訊來源" section (either script — the
+    # heading follows the article's script; see resolve_citations) so it can be
+    # re-ordered to appear AFTER the FAQ widget in the final HTML.
     sources_md = ""
-    sources_split = re.search(r"\n##\s*資訊來源\s*\n", rest)
+    sources_split = re.search(r"\n##\s*(?:資訊來源|资讯来源)\s*\n", rest)
     if sources_split is not None:
         sources_md = rest[sources_split.start():].lstrip("\n")
         rest = rest[: sources_split.start()]
@@ -204,7 +224,7 @@ def render_html(markdown: str) -> RenderResult:
 
     final = body_html
     if faq_html:
-        final += "\n<h2>常見問題</h2>\n" + faq_html + "\n"
+        final += f"\n<h2>{faq_heading}</h2>\n" + faq_html + "\n"
     if sources_md:
         final += "\n" + md.render(sources_md)
 
