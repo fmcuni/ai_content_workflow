@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from content_tool.api.main import create_app
-from content_tool.db.models import Article, RefreshEvaluation, Run
+from content_tool.db.models import Article, RefreshEvaluation
 
 
 # ---------------------------------------------------------------------------

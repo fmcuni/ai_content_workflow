@@ -7,11 +7,12 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from content_tool.api.routes.runs import router
 from content_tool.api.wp_options_cache import TtlCache
 from content_tool.db.models import FetchedArticle, Run
-from content_tool.wordpress.client import WordPressError
+from content_tool.wordpress.client import FetchedPost, WordPressError
 
 
 def _make_app(session_factory, wp_client=None) -> FastAPI:
@@ -108,12 +109,6 @@ async def test_existing_post_category_id_null_when_no_categories(pg_session_fact
         r = await c.get(f"/runs/{run_id}/existing-post")
     assert r.status_code == 200
     assert r.json()["wp_category_id"] is None
-
-
-from unittest.mock import AsyncMock
-
-from content_tool.wordpress.client import FetchedPost, WordPressError
-from sqlalchemy import select
 
 
 @pytest.mark.asyncio
