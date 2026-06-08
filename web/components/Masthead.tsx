@@ -73,7 +73,7 @@ export function Masthead() {
   }
 
   return (
-    <header className="bg-paper/85 backdrop-blur-md sticky top-0 z-50">
+    <header className="bg-paper/85 backdrop-blur-md">
       <div className="mx-auto max-w-[1180px] px-5 md:px-10 pt-6 pb-3 flex items-center justify-between">
         <Link
           href="/"
