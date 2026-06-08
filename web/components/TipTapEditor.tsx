@@ -176,7 +176,7 @@ function TableMenu({ editor }: { editor: Editor }) {
 
 function Toolbar({ editor, onLinkClick }: { editor: Editor; onLinkClick: () => void }) {
   return (
-    <div className="sticky top-[6.25rem] z-20 flex flex-wrap items-center gap-0.5 rounded-t border border-b-0 border-rule bg-paper px-1.5 py-1">
+    <div className="sticky top-6 z-20 flex flex-wrap items-center gap-0.5 rounded-t border border-b-0 border-rule bg-paper px-1.5 py-1">
       <ToolbarButton label="Bold (⌘B)" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
         <BoldIcon className="h-4 w-4" />
       </ToolbarButton>
