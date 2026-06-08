@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { openExternal } from "@/lib/external-link";
 import { CommentAnchor } from "@/components/tiptap/CommentAnchor";
+import { FaqAccordion } from "@/components/tiptap/FaqAccordion";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -424,6 +425,9 @@ export function TipTapEditor({
       TableHeader,
       TableCell,
       CommentAnchor,
+      // Preserve the Bowtie FAQ accordion (div.editor__faq) — without this the
+      // editor flattens the widget to bare <p> tags and publishes it that way.
+      FaqAccordion,
     ],
     content: value,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
