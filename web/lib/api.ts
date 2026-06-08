@@ -18,20 +18,48 @@ import type {
   WpCategoryOption, WpUserOption,
 } from "./types";
 
+import { authClient } from "./auth-client";
+
 const BASE = "/api/runs";
 
-// The reverse proxy is the source of truth in production; in local dev we
-// pre-fill the header from this env so the API's _require_editor stamps the
-// version row with a real-looking identity instead of "dev@local".
+// Build-time fallback only (local dev). In production the signed-in editor's
+// better-auth session email is the primary source — see `resolveEditorEmail`.
 const PROMPT_EDITOR_EMAIL = process.env.NEXT_PUBLIC_PROMPT_EDITOR_EMAIL;
+
+// Cache the resolved editor email for the page session so we hit the session
+// endpoint at most once. `undefined` = not yet resolved, `null` = resolved to
+// "no session" (then the env fallback applies). A reload clears this.
+let cachedEditorEmail: string | null | undefined;
+
+/**
+ * Resolve the email to stamp prompt/source-policy edits with. Prefers the
+ * logged-in better-auth session (so the version row shows the real editor, not
+ * "dev@local"), falling back to the build-time env for local dev. The backend
+ * trusts this `X-Editor-Email` header; RBAC permission is enforced server-side
+ * independently of the stamped identity.
+ */
+async function resolveEditorEmail(): Promise<string | undefined> {
+  if (cachedEditorEmail === undefined) {
+    try {
+      const res = await authClient.getSession();
+      cachedEditorEmail = res.data?.user?.email ?? null;
+    } catch {
+      cachedEditorEmail = null;
+    }
+  }
+  return cachedEditorEmail ?? PROMPT_EDITOR_EMAIL;
+}
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const extra: Record<string, string> = {};
+  const method = (init?.method ?? "GET").toUpperCase();
+  const isWrite = method !== "GET" && method !== "HEAD";
   if (
-    PROMPT_EDITOR_EMAIL &&
+    isWrite &&
     (path.startsWith("/api/prompts/") || path.startsWith("/api/source-policy"))
   ) {
-    extra["X-Editor-Email"] = PROMPT_EDITOR_EMAIL;
+    const editorEmail = await resolveEditorEmail();
+    if (editorEmail) extra["X-Editor-Email"] = editorEmail;
   }
   const r = await fetch(path, {
     ...init,

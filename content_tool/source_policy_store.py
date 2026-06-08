@@ -78,7 +78,7 @@ def clean(raw: dict[str, Any]) -> dict[str, Any]:
     deny = _section(raw, "deny")
     prefer = _section(raw, "prefer")
     ce = _section(raw, "community_exception")
-    return {
+    cleaned: dict[str, Any] = {
         "deny": {
             "domains": _clean_list(deny, "domains", lower=True),
             "tlds": _clean_list(deny, "tlds", lower=True),
@@ -92,6 +92,17 @@ def clean(raw: dict[str, Any]) -> dict[str, Any]:
             "allowed_domains": _clean_list(ce, "allowed_domains", lower=True),
         },
     }
+    # Optional editable prompt-block template. Trimmed and emitted ONLY when
+    # non-empty, always as the LAST key, so policies without one round-trip to
+    # the exact same bytes (and sha) as before this field existed. NOT lowercased
+    # — it is 繁體中文 prose, unlike the domain/TLD lists. Mirrors the TS
+    # ``cleanPolicy``.
+    pb = raw.get("prompt_block")
+    if isinstance(pb, str):
+        pb = pb.strip()
+        if pb:
+            cleaned["prompt_block"] = pb
+    return cleaned
 
 
 def canonical_json(raw: dict[str, Any]) -> str:

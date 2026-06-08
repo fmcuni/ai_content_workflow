@@ -53,6 +53,10 @@ export interface CleanPolicy {
   deny: { domains: string[]; tlds: string[] };
   prefer: { tlds: string[]; domains: string[] };
   community_exception: { topic_categories: string[]; allowed_domains: string[] };
+  /** Optional editable prompt-block template. Present only when non-empty, always
+   * serialised LAST (after community_exception) so policies without one keep
+   * byte-identical canonical JSON. Mirrors the Python ``clean`` field. */
+  prompt_block?: string;
 }
 
 function asSection(raw: unknown, key: string): Record<string, unknown> | undefined {
@@ -88,7 +92,7 @@ export function cleanPolicy(raw: unknown): CleanPolicy {
   const deny = asSection(raw, "deny");
   const prefer = asSection(raw, "prefer");
   const ce = asSection(raw, "community_exception");
-  return {
+  const cleaned: CleanPolicy = {
     deny: { domains: cleanList(deny, "domains"), tlds: cleanList(deny, "tlds") },
     prefer: { tlds: cleanList(prefer, "tlds"), domains: cleanList(prefer, "domains") },
     community_exception: {
@@ -96,6 +100,17 @@ export function cleanPolicy(raw: unknown): CleanPolicy {
       allowed_domains: cleanList(ce, "allowed_domains"),
     },
   };
+  // Optional prompt-block template — trimmed, kept ONLY when non-empty, inserted
+  // LAST so the absent case serialises byte-for-byte like before this field
+  // existed. NOT lowercased (it is 繁體中文 prose). Mirrors Python ``clean``.
+  if (raw !== null && typeof raw === "object" && "prompt_block" in raw) {
+    const pb = (raw as Record<string, unknown>)["prompt_block"];
+    if (typeof pb === "string") {
+      const trimmed = pb.trim();
+      if (trimmed.length > 0) cleaned.prompt_block = trimmed;
+    }
+  }
+  return cleaned;
 }
 
 /**
@@ -187,6 +202,8 @@ export class SourcePolicy {
   readonly preferDomains: ReadonlySet<string>;
   readonly communityTopicCategories: ReadonlySet<string>;
   readonly communityAllowedDomains: ReadonlySet<string>;
+  /** Editor-supplied prompt-block template ("" ⇒ render the hard-coded default). */
+  readonly promptBlock: string;
 
   constructor(raw: unknown = SOURCE_POLICY_RAW) {
     const c = cleanPolicy(raw);
@@ -196,6 +213,7 @@ export class SourcePolicy {
     this.preferDomains = new Set(c.prefer.domains);
     this.communityTopicCategories = new Set(c.community_exception.topic_categories);
     this.communityAllowedDomains = new Set(c.community_exception.allowed_domains);
+    this.promptBlock = c.prompt_block ?? "";
   }
 
   /**
@@ -260,12 +278,22 @@ export class SourcePolicy {
       this.communityAllowedDomains.size > 0
         ? [...this.communityAllowedDomains].sort().join("、")
         : "（未設定）";
+    const deniedTlds = this.denyTlds.join(" / ");
+    const deniedTldLine =
+      this.denyTlds.length > 0
+        ? `- 額外硬性禁止：不可引用屬於以下頂級域名（TLD）的來源：${deniedTlds}。`
+        : "";
+
+    // Editor-supplied template wins: substitute the same token values the default
+    // block computes (prose stays coupled to the citation-gating lists). Token
+    // semantics + order MUST match the Python ``_render_template`` byte-for-byte.
+    if (this.promptBlock.length > 0) {
+      return this.renderTemplate(tlds, domains, cats, commDomains, deniedTlds, deniedTldLine);
+    }
+
     // Denied-TLD line is emitted only when configured, so the default rendered
     // block (and its prompt sha) is unchanged for empty policies.
-    const deniedTldLines =
-      this.denyTlds.length > 0
-        ? [`- 額外硬性禁止：不可引用屬於以下頂級域名（TLD）的來源：${this.denyTlds.join(" / ")}。`]
-        : [];
+    const deniedTldLines = this.denyTlds.length > 0 ? [deniedTldLine] : [];
 
     return [
       "引用與資料來源規則（由 source_policy 統一管理）：",
@@ -287,5 +315,34 @@ export class SourcePolicy {
       "- 不要在 markup 中手寫 `## 資訊來源` 區塊；該區塊由後處理流程根據 grounding " +
         "metadata 自動生成。",
     ].join("\n");
+  }
+
+  /**
+   * Substitute policy tokens into the editor-supplied template. Mirrors the
+   * Python ``SourcePolicy._render_template`` exactly (token order + the
+   * ``{denied_tlds_line}`` empty-case newline consumption) so the prompt sha
+   * stays in parity across backends. Uses ``replaceAll`` to match Python's
+   * replace-every-occurrence semantics.
+   */
+  private renderTemplate(
+    tlds: string,
+    domains: string,
+    cats: string,
+    commDomains: string,
+    deniedTlds: string,
+    deniedTldLine: string,
+  ): string {
+    let out = this.promptBlock;
+    if (deniedTldLine.length > 0) {
+      out = out.replaceAll("{denied_tlds_line}", deniedTldLine);
+    } else {
+      out = out.replaceAll("{denied_tlds_line}\n", "").replaceAll("{denied_tlds_line}", "");
+    }
+    return out
+      .replaceAll("{prefer_tlds}", tlds)
+      .replaceAll("{prefer_domains}", domains)
+      .replaceAll("{community_categories}", cats)
+      .replaceAll("{community_domains}", commDomains)
+      .replaceAll("{denied_tlds}", deniedTlds);
   }
 }

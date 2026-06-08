@@ -758,6 +758,10 @@ export interface SourcePolicyDoc {
   deny: { domains: string[]; tlds: string[] };
   prefer: { tlds: string[]; domains: string[] };
   community_exception: { topic_categories: string[]; allowed_domains: string[] };
+  /** Optional editable prompt-block template. When set, it overrides the
+   * default rendered block; tokens like {prefer_tlds} / {denied_tlds_line} are
+   * filled server-side from the lists above. Absent/empty ⇒ default block. */
+  prompt_block?: string;
 }
 
 // Per-voice as of the per-voice-prompt-library migration: `policy_id` is gone,

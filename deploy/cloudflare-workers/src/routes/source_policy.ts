@@ -88,6 +88,10 @@ function validatePolicy(policy: Record<string, unknown>): string | null {
       return `'${sectionKey}.${fieldKey}' must be an array of strings`;
     }
   }
+  const pb = policy["prompt_block"];
+  if (pb !== undefined && pb !== null && typeof pb !== "string") {
+    return "'prompt_block' must be a string";
+  }
   return null;
 }
 

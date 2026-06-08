@@ -77,6 +77,12 @@ def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
                     "message": f"'{section_key}.{field_key}' must be an array of strings",
                 },
             )
+    pb = policy.get("prompt_block")
+    if pb is not None and not isinstance(pb, str):
+        raise HTTPException(
+            400,
+            {"error": "invalid_policy", "message": "'prompt_block' must be a string"},
+        )
     return policy
 
 

@@ -26,6 +26,24 @@ def test_clean_canonical_includes_deny_tlds_in_fixed_order() -> None:
     )
 
 
+def test_clean_keeps_nonempty_prompt_block_as_last_key() -> None:
+    # The editable template is trimmed, kept only when non-empty, and serialised
+    # last so default rows stay byte-identical. Must match the TS cleanPolicy.
+    out = source_policy_store.clean({"prompt_block": "  只有這一行。  "})
+    assert out["prompt_block"] == "只有這一行。"
+    assert source_policy_store.canonical_json({"prompt_block": "只有這一行。"}) == (
+        '{"deny":{"domains":[],"tlds":[]},'
+        '"prefer":{"tlds":[],"domains":[]},'
+        '"community_exception":{"topic_categories":[],"allowed_domains":[]},'
+        '"prompt_block":"只有這一行。"}'
+    )
+
+
+def test_clean_drops_empty_prompt_block() -> None:
+    out = source_policy_store.clean({"prompt_block": "   "})
+    assert "prompt_block" not in out
+
+
 def test_fallback_snapshot_reads_yaml_and_carries_voice() -> None:
     snap = source_policy_store.fallback_snapshot("ghost-voice")
     assert snap.voice_slug == "ghost-voice"
