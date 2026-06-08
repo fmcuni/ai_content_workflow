@@ -43,11 +43,18 @@ describe("RunTaskDetails", () => {
     expect(screen.queryByText("Source URL")).not.toBeInTheDocument();
   });
 
-  it("renders 'none' for empty advertiser and widget ids", () => {
-    render(<RunTaskDetails run={makeRun({ acf_adv_id: null, acf_widget_id: null })} />);
+  it("renders 'none' for empty advertiser and widget ids (null or the 0 sentinel)", () => {
+    // 0 is the unset sentinel in this app — it must read as "none", not "0".
+    const { rerender } = render(
+      <RunTaskDetails run={makeRun({ acf_adv_id: 0, acf_widget_id: 0 })} />,
+    );
     expect(screen.getByText("Adv ID")).toBeInTheDocument();
     expect(screen.getByText("Widget ID")).toBeInTheDocument();
+    expect(screen.queryByText("Adv ID")?.parentElement?.textContent).not.toContain("0");
     // Voice + keywords are populated, so the only "none" values are the two ids.
+    expect(screen.getAllByText("none")).toHaveLength(2);
+
+    rerender(<RunTaskDetails run={makeRun({ acf_adv_id: null, acf_widget_id: null })} />);
     expect(screen.getAllByText("none")).toHaveLength(2);
   });
 

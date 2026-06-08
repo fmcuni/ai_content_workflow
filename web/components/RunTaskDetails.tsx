@@ -84,8 +84,9 @@ export function RunTaskDetails({ run }: { run: RunSummary }) {
         </div>
         <Field label="Voice" value={run.persona ?? "none"} />
         {!isCreate && <Field label="Mode" value={run.mode} />}
-        <Field label="Adv ID" value={run.acf_adv_id ?? "none"} />
-        <Field label="Widget ID" value={run.acf_widget_id ?? "none"} />
+        {/* 0 is the unset sentinel for these ACF ids, so show it as "none" too. */}
+        <Field label="Adv ID" value={run.acf_adv_id || "none"} />
+        <Field label="Widget ID" value={run.acf_widget_id || "none"} />
 
         {/* Operator's note that seeded / steers this run. */}
         {run.edit_note && (

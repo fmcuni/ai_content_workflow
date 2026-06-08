@@ -145,8 +145,10 @@ export function runToItem(r: RunSummary): DeskItem {
   const meta: string[] = [];
   if (r.persona) meta.push(`Voice · ${r.persona}`);
   if (category === "rewrite") meta.push(`Mode · ${r.mode}`);
-  if (r.acf_adv_id != null) meta.push(`Adv ${r.acf_adv_id}`);
-  if (r.acf_widget_id != null) meta.push(`Widget ${r.acf_widget_id}`);
+  // 0 is the "unset" sentinel for these ACF ids (ids start at 1), so treat it
+  // as empty and omit the chip entirely — only show a real, assigned id.
+  if (r.acf_adv_id) meta.push(`Adv ${r.acf_adv_id}`);
+  if (r.acf_widget_id) meta.push(`Widget ${r.acf_widget_id}`);
   return {
     key: `run:${r.run_id}`,
     id: r.run_id,

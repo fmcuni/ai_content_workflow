@@ -83,7 +83,7 @@ function cellContent(run: RunSummary, col: RunColumn, view: RowView): ReactNode 
       return view.canEdit ? (
         <NumberCell value={run.acf_adv_id} pending={pending} onCommit={(n) => patch({ acf_adv_id: n })} />
       ) : (
-        run.acf_adv_id ?? "none"
+        run.acf_adv_id || "none"
       );
     case "widget":
       return view.canEdit ? (
@@ -93,7 +93,7 @@ function cellContent(run: RunSummary, col: RunColumn, view: RowView): ReactNode 
           onCommit={(n) => patch({ acf_widget_id: n })}
         />
       ) : (
-        run.acf_widget_id ?? "none"
+        run.acf_widget_id || "none"
       );
 
     case "author":
