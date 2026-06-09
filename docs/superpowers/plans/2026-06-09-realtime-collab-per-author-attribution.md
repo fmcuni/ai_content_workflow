@@ -117,14 +117,46 @@ byte-identical until the flag flips.
   flatten-source vs the Phase-2 skip. web vitest **369/51 green**, tsc + eslint
   clean. Backend untouched → workers suites unaffected (8 pool + 434 node).
 
-## Phase 4 — Per-author attribution in Review panel
+## Phase 4 — Per-author attribution in Review panel — ✅ DONE 2026-06-09 (frontend-only, flag OFF)
 
-- Wire `Y.PermanentUserData` into the doc (register the awareness user).
-- Extend `Hunk` (`web/lib/tracked-changes.ts`) with optional `author`; map a
-  working-doc position range → user via `PermanentUserData`.
-- `InlineTrackedChanges.tsx` popover renders "Added/Removed by {name}".
-- **Tests:** `tracked-changes.test.ts` blame-mapping cases; component test for the
-  popover author line.
+De-risk spike first (real SSOT schema, two authors exchanging Yjs updates) proved:
+insertion blame is char-precise via `getUserByClientId`; deletion blame works via
+`getUserByDeletedId` **iff the doc is `gc:false`** (tombstone content must survive)
+and the `setTimeout(0)` ds-recording has flushed (eventually-consistent in prod);
+the ydoc char-walk aligns byte-for-byte with the flattened text EXCEPT at FAQ atoms
+(text is attribute-stored, re-emitted by `renderHTML`); and HTML-string-diff hunk
+boundaries are NOT authorship boundaries (a clean Yjs delete+insert fragments into
+author-mixed hunks). USER chose **full insert+delete char-precise + node-level FAQ**.
+
+- **Blame core** `web/lib/run-editor/collab-blame.ts` — `buildBlameResolver(ydoc,
+  awareness?)` (null when no doc). Walks the shared doc into live/tombstone char
+  sequences + FAQ-atom elements, then **drives attribution off the diff `parts`**
+  (the design the spike validated — no committed-side reconstruction): `added`
+  text → next live chars → `getUserByClientId`; `removed` → next deleted chars →
+  `getUserByDeletedId`; `unchanged` advances the live cursor only. Atom text is
+  detected via the `editor__faq` wrapper, skipped from the char cursors (so prose
+  AFTER a widget stays aligned) and attributed at the NODE level. A hunk gets its
+  **dominant** author (plurality); colour from awareness (else neutral). Reads Yjs
+  internals defensively — a scan error degrades to unattributed hunks.
+- **Registration** `useCollabDoc.ts` — doc is now `new Y.Doc({ gc: false })` and
+  `createInstances` registers `Y.PermanentUserData.setUserMapping(doc, clientID,
+  name)` (held on `CollabInstances`). Disabled path never calls it → side-effect
+  free. Existing 8 tests stay green (yjs records deletions only for `local`
+  transactions, so no spurious users-map writes on remote updates).
+- **Type** `tracked-changes.ts` — additive optional `author?: HunkAuthor {name,
+  color}` on `Hunk`; `computeTrackedChanges` stays authorship-agnostic / byte
+  identical.
+- **Popover** `InlineTrackedChanges.tsx` — optional `resolver` prop; annotate the
+  pure diff in a separate step; render "Added/Removed by {name}" coloured via
+  `safeCollabColor`. No resolver → `author===undefined` → popover/diff
+  byte-identical to non-collab. Wired from `ArticleEditor` (resolver built from the
+  `collab` prop, memoized; null collab → null resolver).
+- **Tests:** collab-blame 7 (insertion/deletion blame, offset past a FAQ atom,
+  dominant author, colour, null no-op); InlineTrackedChanges +3 (Added-by,
+  Removed-by, no-resolver no attribution). web vitest **379/52 green**, tsc +
+  eslint clean. Backend untouched → workers suites unaffected (8 + 434).
+  typescript-reviewer pass applied (item-start delete id, null-child walk guard,
+  scan try/catch, clarified tag handling, stored PUD).
 
 ## Phase 5 — Roll across all run-editor surfaces
 
