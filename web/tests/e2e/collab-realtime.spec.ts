@@ -48,8 +48,6 @@ const PASSWORD = process.env.E2E_PASSWORD;
 const EMAIL_2 = process.env.E2E_EMAIL_2 || EMAIL;
 const PASSWORD_2 = process.env.E2E_PASSWORD_2 || PASSWORD;
 
-const RUN_ID_RE = /\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
-
 /** ProseMirror editable surface inside the visual editor. */
 const EDITOR = ".editorial-prose";
 
@@ -61,19 +59,16 @@ async function login(page: Page, email: string, password: string): Promise<void>
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 25_000 });
 }
 
-/** Pick the first run id off the /runs board. */
+/** Resolve a run id via the authenticated runs API.
+ *  Robust against board UI: the Ledger board collapses runs into groups and
+ *  exposes no top-level per-run link to scrape, and discovery must happen on a
+ *  logged-in page (page.request shares the context's session cookie). */
 async function firstRunId(page: Page): Promise<string> {
-  await page.goto(`${BASE}/runs`);
-  await page.waitForLoadState("networkidle");
-  const href = await page
-    .locator("a[href*='/runs/']")
-    .evaluateAll((els) =>
-      els.map((e) => e.getAttribute("href") ?? "").find((h) => RUN_ID_RE.test(h)),
-    );
-  expect(href, "no run links found on /runs").toBeTruthy();
-  const m = href!.match(RUN_ID_RE);
-  expect(m, "could not parse a run id").toBeTruthy();
-  return m![1];
+  const res = await page.request.get(`${BASE}/api/runs`);
+  expect(res.ok(), `GET /api/runs failed: ${res.status()}`).toBeTruthy();
+  const runs = (await res.json()) as Array<{ run_id: string }>;
+  expect(runs.length, "no runs returned by /api/runs").toBeGreaterThan(0);
+  return runs[0].run_id;
 }
 
 /** Open a run's /edit surface in a fresh authenticated context and wait for the
@@ -113,9 +108,13 @@ test.describe("realtime collab — two editors on one run", () => {
     const ctxB = await browser.newContext();
 
     try {
-      const runId = await firstRunId(await ctxA.newPage());
+      // Log in A first; run discovery uses the authenticated /api/runs.
+      const pageA = await ctxA.newPage();
+      await login(pageA, EMAIL!, PASSWORD!);
+      const runId = await firstRunId(pageA);
+      await pageA.goto(`${BASE}/runs/${runId}/edit`);
+      await expect(pageA.locator(EDITOR)).toBeVisible({ timeout: 30_000 });
 
-      const pageA = await openEditor(ctxA, EMAIL!, PASSWORD!, runId);
       const pageB = await openEditor(ctxB, EMAIL_2!, PASSWORD_2!, runId);
 
       // Unique markers so we can assert convergence both ways without depending
