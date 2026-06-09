@@ -250,7 +250,11 @@ export class RunDoc extends DurableObject<RunDocEnv> {
     try {
       return Y.encodeStateAsUpdate(this.doc).byteLength <= 2;
     } catch {
-      return false;
+      // On the (very unlikely) encode failure, bias toward "empty" so a seeder
+      // is still granted rather than the run being permanently unseeded: an
+      // erroneously-granted primary that turns out to face content simply
+      // no-ops in seedCollabDocIfEmpty (editor.isEmpty === false) after sync.
+      return true;
     }
   }
 
