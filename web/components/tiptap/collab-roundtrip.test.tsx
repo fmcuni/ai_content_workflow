@@ -1,17 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { Editor, type Extensions } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import LinkExtension from "@tiptap/extension-link";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
-import Collaboration from "@tiptap/extension-collaboration";
+import { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 
-import { CommentAnchor } from "./CommentAnchor";
-import { ReviewAnchor } from "./ReviewAnchor";
-import { FaqAccordion } from "./FaqAccordion";
+import { buildEditorExtensions } from "./editor-extensions";
 
 /**
  * Phase 0b spike — prove the article body survives the collaboration round-trip:
@@ -19,46 +10,22 @@ import { FaqAccordion } from "./FaqAccordion";
  * `FaqAccordion` node, tables, links, review anchors, and CJK all intact. This
  * is the biggest fidelity risk of moving the body onto Yjs (same class as the
  * 2026-06-09 FAQ-widget flattening regression).
+ *
+ * Both helpers build their schema through the SSOT `buildEditorExtensions`, so
+ * the round-trip is proven against the exact schema the live editor uses.
  */
-
-// The real editor schema (mirrors TipTapEditor.tsx). `undoRedo` is dropped only
-// for the collaborative editors, where Yjs supplies history instead.
-function baseExtensions(): Extensions {
-  return [
-    StarterKit.configure({ link: false }),
-    LinkExtension.configure({ openOnClick: false, autolink: true }),
-    Table.configure({ resizable: false }),
-    TableRow,
-    TableHeader,
-    TableCell,
-    CommentAnchor,
-    ReviewAnchor,
-    FaqAccordion,
-  ];
-}
 
 function makeEditor(ydoc: Y.Doc): Editor {
   return new Editor({
     element: document.createElement("div"),
-    extensions: [
-      StarterKit.configure({ link: false, undoRedo: false }),
-      LinkExtension.configure({ openOnClick: false, autolink: true }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      CommentAnchor,
-      ReviewAnchor,
-      FaqAccordion,
-      Collaboration.configure({ document: ydoc }),
-    ],
+    extensions: buildEditorExtensions({ collabDoc: ydoc }),
   });
 }
 
 /** What today's non-collaborative editor produces from the same HTML — the
  * fidelity baseline. The collab round-trip must add NO loss beyond this. */
 function baselineHtml(html: string): string {
-  const editor = new Editor({ element: document.createElement("div"), extensions: baseExtensions() });
+  const editor = new Editor({ element: document.createElement("div"), extensions: buildEditorExtensions() });
   try {
     editor.commands.setContent(html);
     return editor.getHTML();

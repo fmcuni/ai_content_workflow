@@ -1,15 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import LinkExtension from "@tiptap/extension-link";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
-import Collaboration from "@tiptap/extension-collaboration";
-import { CollaborationCaret } from "@tiptap/extension-collaboration-caret";
-import type { Extensions } from "@tiptap/core";
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -36,9 +27,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { openExternal } from "@/lib/external-link";
-import { CommentAnchor } from "@/components/tiptap/CommentAnchor";
-import { ReviewAnchor } from "@/components/tiptap/ReviewAnchor";
-import { FaqAccordion } from "@/components/tiptap/FaqAccordion";
+import { buildEditorExtensions } from "@/components/tiptap/editor-extensions";
 import type { CollabProvider } from "@/lib/run-editor/useCollabDoc";
 import { safeCollabColor } from "@/lib/run-editor/collab-color";
 import {
@@ -431,7 +420,7 @@ function LinkPanel({ state, onSave, onStartEdit, onRemove, onClose }: LinkPanelP
 
 /** Live-collaboration binding: a shared Yjs doc + the provider's awareness +
  *  this session's display identity. Present only when realtime collab is on. */
-interface TipTapCollab {
+export interface TipTapCollab {
   ydoc: import("yjs").Doc;
   provider: CollabProvider; // has `.awareness` for CollaborationCaret
   user: { name: string; color: string };
@@ -473,47 +462,17 @@ export function TipTapEditor({
   }, [linkPanel]);
 
   const editor = useEditor({
-    extensions: [
-      // StarterKit v3 bundles its own Link extension; disable it so our
-      // explicitly-configured LinkExtension below is the sole registration.
-      // (Two registrations triggered TipTap's "Duplicate extension names:
-      // ['link']" console warning.) In collab mode also disable StarterKit's
-      // history — Yjs (Collaboration) supplies undo/redo, and a second history
-      // plugin fights the CRDT (mirrors collab-roundtrip.test.tsx).
-      StarterKit.configure(collab ? { link: false, undoRedo: false } : { link: false }),
-      LinkExtension.configure({
-        openOnClick: false,
-        autolink: true,
-        HTMLAttributes: { class: "text-accent underline underline-offset-2" },
-      }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      CommentAnchor,
-      // Human review-thread highlight (separate from the AI CommentAnchor).
-      ReviewAnchor,
-      // Preserve the Bowtie FAQ accordion (div.editor__faq) — without this the
-      // editor flattens the widget to bare <p> tags and publishes it that way.
-      FaqAccordion,
-      // Realtime collaboration: bind the body to the shared Yjs doc and render
-      // remote carets from the provider's awareness. Appended only when a
-      // `collab` binding is supplied — otherwise the array is byte-identical to
-      // the standalone editor above.
-      ...(collab
-        ? ([
-            Collaboration.configure({ document: collab.ydoc }),
-            CollaborationCaret.configure({
-              // The caret extension types `provider` as `any`; our binding is
-              // typed via CollabProvider so this single localized cast is the
-              // only `any` at the boundary.
-              provider: collab.provider as unknown,
-              user: collab.user,
-              render: renderCollabCaret,
-            }),
-          ] as Extensions)
-        : []),
-    ],
+    // SSOT: the schema is single-sourced via buildEditorExtensions so the live
+    // editor can never drift from the headless flatten/seed primitives (the
+    // drift that flattened the FAQ widget on 2026-06-09). The collab editor
+    // passes both the shared doc and the caret binding; non-collab passes
+    // neither, leaving the array byte-identical to the standalone editor.
+    extensions: buildEditorExtensions({
+      collabDoc: collab?.ydoc ?? null,
+      caret: collab
+        ? { provider: collab.provider, user: collab.user, render: renderCollabCaret }
+        : null,
+    }),
     // Yjs is the source of truth in collab mode; passing `content` alongside
     // Collaboration would duplicate the doc, so seed nothing here.
     content: collab ? undefined : value,
