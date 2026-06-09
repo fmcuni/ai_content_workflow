@@ -1,5 +1,7 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 
+import { ensureLoggedIn } from "./support/login";
+
 /**
  * Phase 5 — realtime-collab two-context e2e.
  *
@@ -56,12 +58,12 @@ const EXPECTED_AUTHOR = process.env.E2E_AUTHOR_NAME || "Collab E2E";
 /** ProseMirror editable surface inside the visual editor. */
 const EDITOR = ".editorial-prose";
 
+// Provider-aware login. Under better-auth this drives the form with the given
+// per-author credentials (collab uses two distinct authors). Under
+// E2E_AUTH_PROVIDER=supabase it injects the single configured test session
+// (multi-author collab is exercised on the better-auth path). See support/login.ts.
 async function login(page: Page, email: string, password: string): Promise<void> {
-  await page.goto(`${BASE}/login`);
-  await page.locator("#email").fill(email);
-  await page.locator("#password").fill(password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 25_000 });
+  await ensureLoggedIn(page, { baseUrl: BASE, email, password });
 }
 
 /** Resolve a run id via the authenticated runs API.

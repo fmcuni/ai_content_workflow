@@ -1,5 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
+import { ensureLoggedIn } from "./support/login";
+
 /**
  * Authenticated smoke for the Per-Voice Prompt Library against the deployed prod
  * frontend (via playwright.prod.pvpl.config.ts).
@@ -27,12 +29,10 @@ const MUTATE = process.env.PVPL_SMOKE_MUTATE === "1";
 const SMOKE_SLUG = "zzz-smoke-pvpl";
 const SMOKE_NAME = "ZZZ Smoke (per-voice)";
 
+// Provider-aware login (better-auth form, or Supabase session inject under
+// E2E_AUTH_PROVIDER=supabase). See support/login.ts.
 async function login(page: Page): Promise<void> {
-  await page.goto(`${BASE}/login`);
-  await page.locator("#email").fill(EMAIL!);
-  await page.locator("#password").fill(PASSWORD!);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 25_000 });
+  await ensureLoggedIn(page, { baseUrl: BASE, email: EMAIL, password: PASSWORD });
 }
 
 test.describe("per-voice prompt library (prod smoke)", () => {

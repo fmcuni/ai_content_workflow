@@ -50,3 +50,5 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /playwright/.cache/
+# auth harness storageState (holds a live session token)
+/tests/e2e/.auth/
