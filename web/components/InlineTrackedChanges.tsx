@@ -10,7 +10,10 @@ import {
   dismissAll,
   dismissHunk,
   type CommitResult,
+  type HunkAuthor,
 } from "@/lib/tracked-changes";
+import type { BlameResolver } from "@/lib/run-editor/collab-blame";
+import { safeCollabColor } from "@/lib/run-editor/collab-color";
 
 interface Props {
   /** The committed baseline (last accepted body). */
@@ -21,6 +24,10 @@ interface Props {
   onChange: (next: CommitResult) => void;
   /** Start a review thread from a tracked change (its text becomes the anchor). */
   onComment: (anchorText: string) => void;
+  /** Realtime-collab blame resolver. When present, the popover shows who wrote /
+   *  removed each change; when absent (flag off / non-collab) the diff and popover
+   *  render exactly as before — no attribution. */
+  resolver?: BlameResolver | null;
 }
 
 interface ActiveChange {
@@ -51,8 +58,15 @@ const EDGE_MARGIN = 8;
  * surface and any other view stay byte-for-byte consistent. AI edits never
  * appear here — they advance the baseline directly.
  */
-export function InlineTrackedChanges({ committed, working, onChange, onComment }: Props) {
-  const { parts, hunks } = computeTrackedChanges(committed, working);
+export function InlineTrackedChanges({ committed, working, onChange, onComment, resolver }: Props) {
+  const tracked = computeTrackedChanges(committed, working);
+  const { parts } = tracked;
+  // Annotation is a SEPARATE step over the pure diff — the engine never knows
+  // about authors. Without a resolver the hunks are byte-identical to before.
+  const hunks = resolver ? resolver.annotate(tracked) : tracked.hunks;
+  const authorByIndex = new Map<number, HunkAuthor>(
+    hunks.flatMap((h) => (h.author ? [[h.index, h.author] as const] : [])),
+  );
   const [active, setActive] = useState<ActiveChange | null>(null);
   const diffRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -216,6 +230,24 @@ export function InlineTrackedChanges({ committed, working, onChange, onComment }
           onMouseLeave={() => setActive(null)}
           className="flex items-center gap-0.5 rounded border border-ink bg-paper px-1 py-1 shadow-md"
         >
+          {(() => {
+            const author = authorByIndex.get(active.index);
+            if (!author) return null;
+            return (
+              <>
+                <span className="inline-flex items-center gap-1 pl-1 pr-0.5 font-mono text-[11px] text-ink-soft">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: safeCollabColor(author.color) }}
+                  />
+                  {active.type === "add" ? "Added" : "Removed"} by{" "}
+                  <span className="text-ink">{author.name}</span>
+                </span>
+                <span aria-hidden className="mx-0.5 h-4 w-px bg-rule" />
+              </>
+            );
+          })()}
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
