@@ -29,6 +29,12 @@ import {
 } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
+import { useCollabDoc } from "@/lib/run-editor/useCollabDoc";
+import { useSeedCollabDoc } from "@/lib/run-editor/useSeedCollabDoc";
+import { isCollabEnabled } from "@/lib/run-editor/collab-flag";
+import { NEUTRAL_COLLAB_COLOR } from "@/lib/run-editor/collab-color";
+import { flattenCollabDoc } from "@/lib/run-editor/collab-html";
+import { type TipTapCollab } from "@/components/TipTapEditor";
 import { RunEditorHeaderActions } from "@/components/run-editor/RunEditorHeaderActions";
 import { useRole } from "@/lib/use-role";
 import { useSession } from "@/lib/auth-client";
@@ -87,6 +93,40 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   useEffect(() => {
     editorEmailRef.current = editorEmail;
   }, [editorEmail]);
+
+  // Realtime collaboration — flag-gated OFF by default (Phase 5 flips it). With
+  // the flag off, useCollabDoc returns a frozen disabled handle (no socket, ydoc
+  // null, status "disabled") → collabActive false → collab null → every path
+  // below is byte-identical to the string-snapshot editor.
+  const collabEnabled = isCollabEnabled();
+  const collabUser = useMemo(
+    () => ({ name: editorName || editorEmail || "Editor", email: editorEmail }),
+    [editorName, editorEmail],
+  );
+  const { ydoc, provider, status: collabStatus, color: collabColor } = useCollabDoc(runId, {
+    enabled: collabEnabled,
+    user: collabUser,
+  });
+  const collabActive = collabEnabled && ydoc !== null && provider !== null;
+  const collab: TipTapCollab | null =
+    collabActive && ydoc && provider
+      ? { ydoc, provider, user: { name: collabUser.name, color: collabColor ?? NEUTRAL_COLLAB_COLOR } }
+      : null;
+
+  useSeedCollabDoc({
+    ydoc,
+    status: collabStatus,
+    draftHtml: render.data?.html_body ?? "",
+    enabled: collabActive && render.data !== undefined,
+  });
+
+  // Stable flatten callback (keyed on the live doc) so the autosave hook's
+  // interval/beacon effects don't reset every render once collab is on. Undefined
+  // when collab is off → the autosave keeps its byte-identical string path.
+  const flattenBody = useMemo(
+    () => (collabActive && ydoc ? () => flattenCollabDoc(ydoc) : undefined),
+    [collabActive, ydoc],
+  );
 
   const {
     comments,
@@ -250,11 +290,13 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       hydrateEnabled: true,
       hydratedFromSnapshotRef,
       onHydrate: applySnapshot,
+      collabActive,
+      flattenBody,
     });
 
   async function persist() {
     if (outline && outlineDirty) await api.saveOutline(runId, outline);
-    await api.saveArticle(runId, buildArticlePayload(html, form));
+    await api.saveArticle(runId, buildArticlePayload(collab ? flattenCollabDoc(collab.ydoc) : html, form));
     // Capture a version-history snapshot so each save is recoverable, mirroring
     // the HITL_2 gate's autosave history. Routed through the autosave hook so the
     // header's dirty indicator clears; the hook swallows snapshot failures so they
@@ -272,14 +314,16 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
 
   // WP payload preview for the "WP payload" tab — reflects the current unsaved
   // edits (does not persist). Mirrors the HITL_2 dry-publish preview.
-  const wpPayload = useWpPayloadPreview(runId, () => buildDryRequest(html, form));
+  const wpPayload = useWpPayloadPreview(runId, () =>
+    buildDryRequest(collab ? flattenCollabDoc(collab.ydoc) : html, form),
+  );
 
   // Save → build the dry-publish preview → open the confirm dialog so the
   // operator verifies target_label before any write to WordPress.
   const prepublish = useMutation({
     mutationFn: async () => {
       await persist();
-      return api.dryPublish(runId, buildDryRequest(html, form));
+      return api.dryPublish(runId, buildDryRequest(collab ? flattenCollabDoc(collab.ydoc) : html, form));
     },
     // Feed the shared preview state so the WP-payload tab and this dialog read
     // the same payload (single source of truth, as the pre-refactor page did).
@@ -401,6 +445,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                   onCommentClick={focusComment}
                   onAddReviewNote={onAddReviewNote}
                   onReviewClick={onReviewClick}
+                  collab={collab}
                 />
               )}
             </TabsContent>

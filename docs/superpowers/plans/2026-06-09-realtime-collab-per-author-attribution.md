@@ -78,17 +78,44 @@ Phase 0 de-risk complete — clear to proceed to Phase 1 (production wiring).
   source); snapshots become flatten-on-event (Phase 3).
 - **Tests:** Vitest/RTL for `useCollabDoc` + presence render.
 
-## Phase 3 — HTML derivation + snapshot / publish integration
+## Phase 3 — HTML derivation + snapshot / publish integration — ✅ DONE 2026-06-09 (frontend-only, flag OFF)
 
-- `web/lib/run-editor/flattenCollabDoc.ts`: Yjs/ProseMirror doc → HTML using the
-  identical schema (FAQ/table/link safe).
-- Seed-once on HITL_2 entry: if the run's Yjs doc is empty, initialise from the
-  generated draft HTML (idempotent, server-side in the DO or first-client).
-- Flatten on snapshot/manual-save/HITL_2-approve → feed existing snapshot +
-  version-history + publish pipeline unchanged (`runs.ts` snapshot routes,
-  `publish.py` / Workers publish).
-- **Tests:** round-trip fixtures (FAQ accordion, tables, links, CJK); publish
-  HTML byte-equivalence; version-history snapshot shape unchanged.
+Confirmed FRONTEND-ONLY: flatten/seed need a DOM (a headless TipTap `Editor`),
+which workerd lacks → they run client-side and the backend publish/snapshot
+routes are byte-for-byte unchanged. The feature flag was NOT flipped (Phase 5);
+collab is mounted **disabled** on the pages so the whole path is inert and
+byte-identical until the flag flips.
+
+- **Schema SSOT** `web/components/tiptap/editor-extensions.ts` —
+  `buildEditorExtensions({ collabDoc?, caret? })` is the ONE source for the live
+  editor, flatten, seed, AND the round-trip test (kills the FAQ-flatten drift
+  class). `TipTapEditor` refactored to consume it (non-collab path byte-identical;
+  `TipTapCollab` now exported).
+- **Flatten/seed** `web/lib/run-editor/collab-html.ts` — `flattenCollabDoc(ydoc)`
+  (byte-identical to the non-collab editor for the FAQ/table/link/anchor/CJK
+  fixtures) + `seedCollabDocIfEmpty(ydoc, draftHtml)` (idempotent; no-op on a
+  non-empty doc).
+- **Seed flow** `web/lib/run-editor/useSeedCollabDoc.ts` — seeds the shared doc
+  once from the generated draft, but ONLY after `status === "connected"` (post DO
+  sync) so a returning run's persisted doc is never re-seeded; per-`ydoc` guard.
+  **Seed-race decision:** client-only emptiness guard (the recommended default).
+  Safe for the single-opener case and any returning run; the ONLY residual is two
+  brand-new first-joiners within the sync round-trip. A fully race-free fix needs
+  a backend "you-are-the-seeder" signal from the RunDoc DO — deferred to Phase 5
+  hardening (it would re-touch the committed Phase 1 DO + its 8 pool tests).
+- **Snapshot/publish wiring** — `useSnapshotAutosave` gained an optional
+  `flattenBody?: () => string`; when collab is active it sources the persisted
+  body from the flattened live doc (replacing the Phase 2 "skip"); when absent it
+  keeps the skip. `/hitl2` + `/edit` mount `useCollabDoc({ enabled:
+  isCollabEnabled() })` (disabled handle when the flag is off), forward `collab`
+  through `ArticleEditor → TipTapEditor`, mount `useSeedCollabDoc`, and source the
+  HITL_2-approve / save / re-push / WP-preview body from `flattenCollabDoc` when
+  collab is active (else the unchanged `html` string). `/regenerate` deferred to
+  Phase 5.
+- **Tests:** collab-html byte-equivalence + seed round-trip/no-op; useSeedCollabDoc
+  seed-once / not-connected / disabled / non-empty / two-first-joiners; autosave
+  flatten-source vs the Phase-2 skip. web vitest **369/51 green**, tsc + eslint
+  clean. Backend untouched → workers suites unaffected (8 pool + 434 node).
 
 ## Phase 4 — Per-author attribution in Review panel
 

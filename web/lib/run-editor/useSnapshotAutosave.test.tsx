@@ -52,11 +52,12 @@ function makeSnapshotIn(html: string): Hitl2SnapshotIn {
 
 interface RenderArgs {
   collabActive?: boolean;
+  flattenBody?: () => string;
   snapshotIn: Hitl2SnapshotIn;
   baselineKey: string | null;
 }
 
-function renderAutosave({ collabActive, snapshotIn, baselineKey }: RenderArgs) {
+function renderAutosave({ collabActive, flattenBody, snapshotIn, baselineKey }: RenderArgs) {
   const editorEmailRef = { current: "editor@bowtie.com.hk" };
   const submittedRef = { current: false };
   const hydratedFromSnapshotRef = { current: false };
@@ -73,6 +74,7 @@ function renderAutosave({ collabActive, snapshotIn, baselineKey }: RenderArgs) {
         hydratedFromSnapshotRef,
         onHydrate: () => {},
         collabActive,
+        flattenBody,
       }),
     { wrapper: wrapper(makeClient()) },
   );
@@ -100,6 +102,31 @@ describe("useSnapshotAutosave — collab gating", () => {
 
     expect(outcome).toBe("unchanged");
     expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it("persists the FLATTENED body when collabActive and flattenBody is provided", async () => {
+    // The live React `snapshotIn` is stale; the flatten source is the truth.
+    const baseline = makeSnapshotIn("<p>seed</p>");
+    const stale = makeSnapshotIn("<p>stale react state</p>");
+    const { result } = renderAutosave({
+      collabActive: true,
+      flattenBody: () => "<p>flattened from doc</p>",
+      snapshotIn: stale,
+      baselineKey: snapshotKey(baseline),
+    });
+
+    // The baseline-init effect must run so `lastSavedKey` is set (non-null).
+    await waitFor(() => expect(result.current.isDirty).toBe(true));
+    const outcome = await result.current.saveSnapshot("manual");
+
+    expect(outcome).toBe("saved");
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    const [, body] = mockSave.mock.calls[0]!;
+    expect(body).toMatchObject({
+      html_body: "<p>flattened from doc</p>",
+      committed_html_body: "<p>flattened from doc</p>",
+      trigger: "manual",
+    });
   });
 
   it("persists a dirty body write when collab is off (existing behaviour preserved)", async () => {

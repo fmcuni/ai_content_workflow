@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Pencil, GitCompareArrows } from "lucide-react";
 
-import { TipTapEditor } from "@/components/TipTapEditor";
+import { TipTapEditor, type TipTapCollab } from "@/components/TipTapEditor";
 import { InlineTrackedChanges } from "@/components/InlineTrackedChanges";
 import { cn } from "@/lib/utils";
 import type { CommitResult } from "@/lib/tracked-changes";
@@ -28,6 +28,8 @@ interface ArticleEditorProps {
   /** Human review-thread anchor (passed through to the visual editor). */
   onAddReviewNote: (id: string, anchorText: string) => void;
   onReviewClick: (id: string) => void;
+  /** Live Yjs binding forwarded to the visual editor; null = standalone string editor. */
+  collab?: TipTapCollab | null;
 }
 
 /**
@@ -49,6 +51,7 @@ export function ArticleEditor({
   onCommentClick,
   onAddReviewNote,
   onReviewClick,
+  collab,
 }: ArticleEditorProps) {
   const [mode, setMode] = useState<ArticleMode>("edit");
 
@@ -76,6 +79,7 @@ export function ArticleEditor({
           onCommentClick={onCommentClick}
           onAddReviewNote={onAddReviewNote}
           onReviewClick={onReviewClick}
+          collab={collab}
         />
       ) : (
         <InlineTrackedChanges
