@@ -1,4 +1,5 @@
 import type { Env } from "../index";
+import { stripAnchorSpans } from "../util/strip_anchors";
 import type {
   FetchedPost,
   PublishPayload,
@@ -139,7 +140,10 @@ function toReadbackData(post: ReadbackPost): Record<string, unknown> {
 function buildPublishBody(p: PublishPayload): Readonly<Record<string, unknown>> {
   const base: Record<string, unknown> = {
     title: p.title,
-    content: p.content,
+    // Strip editor annotation anchors (comment/review spans) — they are
+    // in-document markers, never article content. This is the authoritative
+    // chokepoint: every real publish (HITL_2 + republish) funnels through here.
+    content: stripAnchorSpans(p.content),
     status: p.status,
     categories: p.categories,
     tags: p.tags,

@@ -56,6 +56,7 @@ from content_tool.wordpress.client import (
 )
 from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
 from content_tool.wordpress.slug import canonicalize_slug
+from content_tool.wordpress.strip_anchors import strip_anchor_spans
 
 logger = logging.getLogger(__name__)
 
@@ -1552,7 +1553,11 @@ async def dry_publish(
     ov = overrides or DryPublishRequest()
 
     title = ov.edited_seo_title if ov.edited_seo_title is not None else render.seo_title
-    content = ov.edited_html_body if ov.edited_html_body is not None else render.html_body
+    # Strip annotation anchors so the dry-publish preview matches exactly what
+    # the WP client will ship (it strips them too at publish time).
+    content = strip_anchor_spans(
+        ov.edited_html_body if ov.edited_html_body is not None else render.html_body
+    )
     meta_desc = (
         ov.edited_meta_description
         if ov.edited_meta_description is not None

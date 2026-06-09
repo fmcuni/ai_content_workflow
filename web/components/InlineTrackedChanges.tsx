@@ -206,7 +206,7 @@ export function InlineTrackedChanges({ committed, working, onChange, onComment, 
         onFocus={onFocus}
         dangerouslySetInnerHTML={{ __html: buildInlineDiffHtml(parts) }}
         className={[
-          "editorial-prose max-w-none min-h-[480px] rounded border border-rule bg-paper px-6 py-5 focus:outline-none",
+          "editorial-prose tracked-diff max-w-none min-h-[480px] rounded border border-rule bg-paper px-6 py-5 focus:outline-none",
           "[&_ins[data-tc]]:bg-emerald-100 [&_ins[data-tc]]:text-emerald-900 [&_ins[data-tc]]:no-underline [&_ins[data-tc]]:rounded-sm [&_ins[data-tc]]:px-0.5 [&_ins[data-tc]]:cursor-pointer",
           "[&_ins[data-tc]:hover]:ring-1 [&_ins[data-tc]:hover]:ring-emerald-400 [&_ins[data-tc]:focus-visible]:outline-none [&_ins[data-tc]:focus-visible]:ring-2 [&_ins[data-tc]:focus-visible]:ring-emerald-500",
           "[&_del[data-tc]]:bg-rose-100 [&_del[data-tc]]:text-rose-900 [&_del[data-tc]]:line-through [&_del[data-tc]]:rounded-sm [&_del[data-tc]]:px-0.5 [&_del[data-tc]]:cursor-pointer",

@@ -255,3 +255,41 @@ describe("insignificant formatting whitespace is not a phantom change", () => {
     expect(hunks.some((h) => h.type === "remove" && h.value.includes("old"))).toBe(true);
   });
 });
+
+describe("computeTrackedChanges — annotation anchors are not changes", () => {
+  const COMMENT = '<p>hello <span class="comment-anchor" data-comment-id="c1">world</span></p>';
+  const REVIEW = '<p>hello <span class="review-anchor" data-review-id="r1">world</span></p>';
+  const PLAIN = "<p>hello world</p>";
+
+  it("highlighting text for AI edit adds no pending hunk", () => {
+    expect(computeTrackedChanges(PLAIN, COMMENT).hunks).toEqual([]);
+  });
+
+  it("highlighting text for a review note adds no pending hunk", () => {
+    expect(computeTrackedChanges(PLAIN, REVIEW).hunks).toEqual([]);
+  });
+
+  it("a real edit still counts when an anchor is also present", () => {
+    const working =
+      '<p>hello <span class="comment-anchor" data-comment-id="c1">world</span> again</p>';
+    const { hunks } = computeTrackedChanges(PLAIN, working);
+    expect(hunks.some((h) => h.type === "add" && h.value.includes("again"))).toBe(true);
+  });
+
+  it("accept/reject preserve the anchor span in the working body", () => {
+    // Real edit (add 'again') alongside a comment anchor; accepting the edit
+    // must not strip the anchor markup from the working body.
+    const working =
+      '<p>hello <span class="comment-anchor" data-comment-id="c1">world</span> again</p>';
+    const { parts, hunks } = computeTrackedChanges(PLAIN, working);
+    const addIdx = hunks.find((h) => h.type === "add")!.index;
+    expect(commitHunk(parts, addIdx).working).toContain('data-comment-id="c1"');
+    expect(dismissHunk(parts, addIdx).working).toContain('data-comment-id="c1"');
+  });
+
+  it("newly-inserted anchored text is a real change (not noise)", () => {
+    const working = '<p>hello<span class="review-anchor" data-review-id="r1">fresh</span></p>';
+    const { hunks } = computeTrackedChanges("<p>hello</p>", working);
+    expect(hunks.some((h) => h.type === "add" && h.value.includes("fresh"))).toBe(true);
+  });
+});

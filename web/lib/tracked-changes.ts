@@ -75,6 +75,26 @@ const isTag = (token: string): boolean => TAG_RE.test(token);
 const isWhitespace = (token: string): boolean => /^\s+$/.test(token);
 
 /**
+ * A token that is an editor annotation-anchor tag: an opening comment/review
+ * anchor span (`<span … data-comment-id|data-review-id …>`) or its `</span>`
+ * close. These wrap a selection so the editor can attach a thread; they are NOT
+ * article content. The baseline never carries them, so they only ever surface
+ * as ADDED tokens in the diff. */
+const ANCHOR_OPEN_RE = /^<span\b[^>]*\bdata-(?:comment|review)-id=/;
+const isAnchorTag = (token: string): boolean =>
+  ANCHOR_OPEN_RE.test(token) || token === "</span>";
+
+/**
+ * An ADDED diff part that carries no real content — only annotation-anchor tags
+ * and whitespace. Adding a highlight injects exactly such a part, and it must
+ * NOT count as a pending tracked change. A part that also contains inserted
+ * TEXT (newly-written anchored text) is a real change and is excluded here. */
+const isAnchorNoise = (p: DiffPart): boolean =>
+  !!p.added &&
+  p.value.some(isAnchorTag) &&
+  p.value.every((t) => isAnchorTag(t) || isWhitespace(t));
+
+/**
  * Split a text run into diff tokens: each CJK / Kana / Hangul codepoint is its
  * own token (character-level granularity for scriptio-continua languages), Latin
  * runs stay whole words, whitespace runs stay whole, and every other codepoint is
@@ -124,8 +144,14 @@ export function computeTrackedChanges(committed: string, working: string): Track
   }) as DiffPart[];
   const hunks: Hunk[] = [];
   parts.forEach((p, index) => {
-    if (p.added) hunks.push({ index, type: "add", value: p.value.join("") });
-    else if (p.removed) hunks.push({ index, type: "remove", value: p.value.join("") });
+    // Annotation-anchor-only additions (highlighting text for AI edit / Review)
+    // are not content changes — keep them in `parts` (so accept/reject and the
+    // working body preserve the anchors) but never count them as a pending hunk.
+    if (p.added && !isAnchorNoise(p)) {
+      hunks.push({ index, type: "add", value: p.value.join("") });
+    } else if (p.removed) {
+      hunks.push({ index, type: "remove", value: p.value.join("") });
+    }
   });
   return { parts, hunks };
 }

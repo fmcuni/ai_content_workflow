@@ -232,6 +232,17 @@
     border-bottom: 1px dashed color-mix(in srgb, var(--color-ink) 30%, transparent);
     opacity: 0.6;
   }
+
+  /* "Review changes" diff view: annotation anchors ride through the working
+     structure but are NOT edits, so render them flat — no highlight, no
+     underline. Higher specificity (.editorial-prose.tracked-diff …) overrides
+     the editor anchor styling above regardless of layer order. */
+  .editorial-prose.tracked-diff .comment-anchor,
+  .editorial-prose.tracked-diff .review-anchor {
+    background: transparent;
+    border-bottom: 0;
+    cursor: inherit;
+  }
 }
 
 /* Realtime-collaboration peer carets (@tiptap/extension-collaboration-caret).

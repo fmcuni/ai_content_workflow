@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from content_tool.wordpress.strip_anchors import strip_anchor_spans
+
 # WordPress represents "use the theme's default page template" as the empty
 # string in the REST API `template` field. Sending this on every upsert forces
 # both the create and refresh/update pipelines onto the default template,
@@ -176,7 +178,10 @@ class WordPressClient:
     def _build_body(self, p: PublishPayload) -> dict[str, object]:
         body: dict[str, object] = {
             "title": p.title,
-            "content": p.content,
+            # Strip editor annotation anchors (comment/review spans) — they are
+            # in-document markers, never article content. Authoritative
+            # chokepoint: every real publish funnels through here.
+            "content": strip_anchor_spans(p.content),
             "status": p.status,
             "categories": p.categories,
             "tags": p.tags,

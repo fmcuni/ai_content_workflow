@@ -14,6 +14,7 @@ import {
 } from "../wordpress/client";
 import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
+import { stripAnchorSpans } from "../util/strip_anchors";
 import { canonicalizeSlug } from "../wordpress/slug";
 import { resolvePublishTarget, buildTargetEnv } from "../publishers/wp_factory";
 import { restartGuard } from "./run_guards";
@@ -933,7 +934,9 @@ runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
 
   // Merge optional reviewer edits over the persisted render + run WP options.
   const title = ov.edited_seo_title ?? render.seo_title;
-  const content = ov.edited_html_body ?? render.html_body;
+  // Strip annotation anchors so the dry-publish preview matches exactly what
+  // the WP client will ship (it strips them too at publish time).
+  const content = stripAnchorSpans(ov.edited_html_body ?? render.html_body);
   const metaDesc = ov.edited_meta_description ?? render.meta_description;
   const status = resolvePublishStatus(ov.wp_publish_status ?? run.wp_publish_status);
   const categories = ov.wp_category_ids ?? pgJson<number[] | null>(run.wp_category_ids) ?? [];
