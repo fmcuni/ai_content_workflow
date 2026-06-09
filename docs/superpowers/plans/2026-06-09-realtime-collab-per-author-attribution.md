@@ -217,12 +217,49 @@ Verification: web vitest **388/53** (+9), tsc + eslint clean; workers **11 pool*
 (+3) + **434 node**, `typecheck` + `typecheck:workers` clean. typescript-reviewer
 pass: no CRITICAL/HIGH; one MEDIUM hardening applied (`docIsEmpty` error bias).
 
-## Phase 6 — Parity, deploy, cleanup
+## Phase 6 — Parity, deploy, cleanup — ✅ DONE 2026-06-09 (backend live; web shipped collab-DARK)
 
-- `node deploy/cloudflare-workers/parity/check-parity.mjs` (read-only routes
-  unaffected; confirm no regression).
-- Deploy backend Worker (DO migration) **before** web Worker.
-- `graphify update .`; update `CLAUDE.md` architecture section (RunDoc DO).
+Go-live decision (operator): **option (a)** — deploy backend + DO + migration to
+prod, ship the web Worker with `NEXT_PUBLIC_COLLAB_ENABLED` **unset (collab dark)**.
+Collab stays inert in prod until a follow-up web deploy flips the build-time flag.
+Branch merge to `main` was **NOT** authorized this session — branch left unmerged.
+
+What shipped:
+- **Migration:** `supabase db push` applied `20260612000000_run_collab_state.sql`
+  to the linked prod project (dry-run confirmed it was the sole pending migration;
+  remote history now records it). Additive — new table + RLS + `content_tool_app`
+  grant.
+- **Backend Worker** (`bowtie-content-tool-poc`): `npx wrangler deploy` → version
+  `e4162e9d-2894-4a63-815a-516856863316`. Bindings confirm `RUN_DOC (RunDoc)` DO +
+  `HYPERDRIVE` (so the Postgres cold-store persists in prod). Smoke: `/health` 200;
+  `/runs/<id>/doc` WS upgrade without a ticket → **401** (auth-gated, expected).
+  Rollback handle (prior version): `b7292180-e1f8-42ca-b9c8-addff6f79fcc`.
+- **Web Worker** (`bowtie-content-tool-web`): `NEXT_PUBLIC_API_BASE=<prod backend>
+  npm run cf:deploy` (collab flag omitted → dark) → version
+  `66a65f74-dcc9-451b-b74b-d6fbe7f8fbfb`. Smoke: `/` 307→/login, `/login` 200,
+  `/api/auth/get-session` 200 (apibase footgun avoided). Non-collab web diffs
+  (`InlineTrackedChanges`/`tracked-changes`/`globals.css`) verified inert with the
+  flag off ("byte-identical to before" without a blame resolver). Rollback handle
+  (prior version): `bcfd3e18-7469-420a-90df-7fb60275538c`.
+
+Parity: `check-parity.mjs` could not run a **live** diff headlessly (it discovers
+routes by querying the Python reference at `localhost:8000`, which was not running).
+Static analysis confirmed the new WS `/runs/:id/doc` route is **outside** the gate's
+22 read-only-JSON-route scope, and the `runs.ts` diff is purely additive — no
+read-only-route regression. A conclusive live PASS needs the Python backend up.
+
+Docs: `CLAUDE.md` Architecture section gained a `RunDoc` Durable Object subsection.
+
+### Still owed (pre web-ON flip gate)
+- **Live two-context e2e** (`web/tests/e2e/collab-realtime.spec.ts`): NOT run this
+  session. It needs a local `wrangler dev` backend + DB-backed run data; the only
+  isolated local DB is Supabase-local, which needs Docker (was DOWN). Running it
+  against the prod DB would write test snapshots into a real run, so it was
+  **deferred**. Run it on an isolated/local DB (Docker up) as the gate **before**
+  flipping `NEXT_PUBLIC_COLLAB_ENABLED=true` in a web deploy.
+- **Authenticated UI eyeball** of prod (login behind the `@bowtie.com.hk` better-auth
+  + WAF gate) — could not be done headlessly. Manual check owed.
+- **Merge to `main`** (bridges fmcuni + bowtie-ins) — operator to run when ready.
 
 ## Optional follow-on (not v1)
 
