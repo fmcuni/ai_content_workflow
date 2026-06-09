@@ -88,3 +88,6 @@ skills-lock.json
 # (e.g. settings-page-<hash>.js). The web frontend lives under web/, so the
 # repo root never holds source JS — safe to ignore wholesale.
 /*.js
+
+# graphify knowledge-graph output (generated locally, rebuilt on demand)
+graphify-out/
