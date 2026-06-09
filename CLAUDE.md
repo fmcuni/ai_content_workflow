@@ -104,6 +104,30 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
   promotions use `start_mode="refresh"` with the candidate's `existing_url` and run
   the full refresh path (fetch + gap analysis).
 
+### Realtime collab (`RunDoc` Durable Object)
+
+- Per-run collab document hub as a Cloudflare Durable Object `RunDoc`
+  (`deploy/cloudflare-workers/src/run-doc.ts`, bound `RUN_DOC`; wrangler migration
+  tag `v5`, `new_sqlite_classes: ["RunDoc"]`).
+- Relays **Yjs CRDT sync + awareness** (presence/cursor) over a WebSocket at
+  `/runs/:id/doc`. Cursor colours are **server-issued** by the DO, not the client.
+- Per-author attribution ("blame") via `Y.PermanentUserData` — surfaced in live
+  cursors and the Review popover.
+- **Seeder grant:** the DO designates exactly one client as seeder
+  ("you-are-seeder" signal) to close the seed race. Caveat: it currently grants
+  `primary` regardless of role, so a future read-only observer could consume the
+  seeder slot (latent — no observer surface exists yet).
+- **Persistence:** DO storage + best-effort Postgres cold-store table
+  `run_collab_state` (migration `supabase/migrations/20260612000000_run_collab_state.sql`).
+  The Postgres cold-store is a **no-op when `HYPERDRIVE` is unbound** (e.g. local);
+  prod has Hyperdrive so it persists/cold-loads.
+- **Gate:** collab is behind the **build-time** Next public env var
+  `NEXT_PUBLIC_COLLAB_ENABLED` (`web/lib/run-editor/collab-flag.ts`) — NOT a runtime
+  toggle; default **OFF**.
+- Collab surfaces (presence avatar stack) are wired into the run-editor shell on the
+  `/hitl2` and `/edit` pages. Observer read-only infra exists but no observer surface
+  is wired yet.
+
 ## Conventions
 
 - **Async everywhere** — DB, HTTP, Gemini. `asyncio_mode = "auto"` in pytest.

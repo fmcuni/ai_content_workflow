@@ -1,11 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pencil, GitCompareArrows } from "lucide-react";
 
-import { TipTapEditor } from "@/components/TipTapEditor";
+import { TipTapEditor, type TipTapCollab } from "@/components/TipTapEditor";
 import { InlineTrackedChanges } from "@/components/InlineTrackedChanges";
 import { cn } from "@/lib/utils";
 import type { CommitResult } from "@/lib/tracked-changes";
+import { buildBlameResolver } from "@/lib/run-editor/collab-blame";
 
 type ArticleMode = "edit" | "review";
 
@@ -28,6 +29,8 @@ interface ArticleEditorProps {
   /** Human review-thread anchor (passed through to the visual editor). */
   onAddReviewNote: (id: string, anchorText: string) => void;
   onReviewClick: (id: string) => void;
+  /** Live Yjs binding forwarded to the visual editor; null = standalone string editor. */
+  collab?: TipTapCollab | null;
 }
 
 /**
@@ -49,8 +52,17 @@ export function ArticleEditor({
   onCommentClick,
   onAddReviewNote,
   onReviewClick,
+  collab,
 }: ArticleEditorProps) {
   const [mode, setMode] = useState<ArticleMode>("edit");
+
+  // Per-author blame for Review mode — only when collab is live. null collab →
+  // null resolver → the inline diff/popover render with no attribution (today's
+  // behaviour). Rebuilt when the shared doc instance changes.
+  const blameResolver = useMemo(
+    () => (collab ? buildBlameResolver(collab.ydoc, collab.provider.awareness) : null),
+    [collab],
+  );
 
   return (
     <div>
@@ -76,6 +88,7 @@ export function ArticleEditor({
           onCommentClick={onCommentClick}
           onAddReviewNote={onAddReviewNote}
           onReviewClick={onReviewClick}
+          collab={collab}
         />
       ) : (
         <InlineTrackedChanges
@@ -83,6 +96,7 @@ export function ArticleEditor({
           working={html}
           onChange={onTrackedChange}
           onComment={onComment}
+          resolver={blameResolver}
         />
       )}
     </div>

@@ -4,8 +4,19 @@ import userEvent from "@testing-library/user-event";
 
 import { InlineTrackedChanges } from "@/components/InlineTrackedChanges";
 import { computeTrackedChanges } from "@/lib/tracked-changes";
+import type { BlameResolver } from "@/lib/run-editor/collab-blame";
 
 const noop = () => {};
+
+/** Fake resolver: tags every add hunk to Bob, every remove to Carol. The real
+ *  Yjs-backed resolver is covered in lib/run-editor/collab-blame.test.ts. */
+const fakeResolver: BlameResolver = {
+  annotate: (tracked) =>
+    tracked.hunks.map((h) => ({
+      ...h,
+      author: { name: h.type === "add" ? "Bob" : "Carol", color: "#3b82f6" },
+    })),
+};
 
 describe("InlineTrackedChanges", () => {
   it("shows the empty state when committed === working", () => {
@@ -100,5 +111,52 @@ describe("InlineTrackedChanges", () => {
     await userEvent.click(await screen.findByRole("button", { name: /comment on change/i }));
     expect(onComment).toHaveBeenCalledTimes(1);
     expect(onComment.mock.calls[0]![0]).toContain("world");
+  });
+
+  it("with a resolver, the popover shows 'Added by {name}' on an insertion", async () => {
+    const { container } = render(
+      <InlineTrackedChanges
+        committed="<p>hello</p>"
+        working="<p>hello world</p>"
+        onChange={noop}
+        onComment={noop}
+        resolver={fakeResolver}
+      />,
+    );
+    const ins = container.querySelector('ins[data-tc="add"]') as HTMLElement;
+    await userEvent.click(ins);
+    const popover = await screen.findByRole("group", { name: /tracked change actions/i });
+    expect(popover.textContent).toMatch(/Added by\s*Bob/);
+  });
+
+  it("with a resolver, the popover shows 'Removed by {name}' on a deletion", async () => {
+    const { container } = render(
+      <InlineTrackedChanges
+        committed="<p>hello world</p>"
+        working="<p>hello</p>"
+        onChange={noop}
+        onComment={noop}
+        resolver={fakeResolver}
+      />,
+    );
+    const del = container.querySelector('del[data-tc="del"]') as HTMLElement;
+    await userEvent.click(del);
+    const popover = await screen.findByRole("group", { name: /tracked change actions/i });
+    expect(popover.textContent).toMatch(/Removed by\s*Carol/);
+  });
+
+  it("without a resolver, the popover renders NO attribution line (byte-identical)", async () => {
+    const { container } = render(
+      <InlineTrackedChanges
+        committed="<p>hello</p>"
+        working="<p>hello world</p>"
+        onChange={noop}
+        onComment={noop}
+      />,
+    );
+    const ins = container.querySelector('ins[data-tc="add"]') as HTMLElement;
+    await userEvent.click(ins);
+    const popover = await screen.findByRole("group", { name: /tracked change actions/i });
+    expect(popover.textContent).not.toMatch(/by/i);
   });
 });

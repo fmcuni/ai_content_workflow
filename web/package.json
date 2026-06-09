@@ -18,6 +18,8 @@
     "@base-ui/react": "^1.5.0",
     "@microsoft/fetch-event-source": "^2.0.1",
     "@tanstack/react-query": "^5.100.11",
+    "@tiptap/extension-collaboration": "^3.23.5",
+    "@tiptap/extension-collaboration-caret": "3.23.5",
     "@tiptap/extension-link": "^3.23.5",
     "@tiptap/extension-table": "^3.23.5",
     "@tiptap/extension-table-cell": "^3.23.5",
@@ -38,7 +40,10 @@
     "react-dom": "19.2.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0",
+    "y-prosemirror": "^1.3.7",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.31"
   },
   "overrides": {
     "postcss": "^8.5.10"

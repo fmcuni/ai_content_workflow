@@ -25,6 +25,7 @@ export { RefreshScanWorkflow } from "./workflows/refresh_scan";
 export { RunStream } from "./run-stream";
 // US-pinned Gemini proxy DO — bypasses the Asia/HK geo-block on Google AI Studio.
 export { GeminiProxy } from "./gemini/proxy_do";
+export { RunDoc } from "./run-doc";
 
 export interface Env {
   // Hyperdrive binding — pools/proxies the Supabase connection so the Worker
@@ -47,6 +48,8 @@ export interface Env {
   // US-pinned Gemini proxy DO — DoGeminiClient forwards generate() here so the
   // call egresses from a US region (Google AI Studio geo-blocks the Asia/HK colo).
   GEMINI_PROXY: DurableObjectNamespace<import("./gemini/proxy_do").GeminiProxy>;
+  // Per-run collaborative-editing DO — Yjs CRDT sync for the run editor.
+  RUN_DOC: DurableObjectNamespace<import("./run-doc").RunDoc>;
   // Comma-separated allowlist of frontend origins permitted to open the SSE
   // streams cross-origin (the OpenNext frontend Worker). Unset → reflect the
   // request Origin (local dev). See src/http/cors.ts.

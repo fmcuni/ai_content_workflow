@@ -15,6 +15,7 @@ import { computeTrackedChanges } from "@/lib/tracked-changes";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 import { ArticleEditor } from "@/components/run-editor/ArticleEditor";
 import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
+import { CollabPresence } from "@/components/run-editor/CollabPresence";
 import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RawHtmlView } from "@/components/RawHtmlView";
@@ -26,6 +27,12 @@ import { stripCommentSpan } from "@/lib/comment-anchor";
 import { buildDryRequest, buildSnapshotIn, snapshotKey } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
+import { useCollabDoc } from "@/lib/run-editor/useCollabDoc";
+import { useSeedCollabDoc } from "@/lib/run-editor/useSeedCollabDoc";
+import { isCollabEnabled } from "@/lib/run-editor/collab-flag";
+import { NEUTRAL_COLLAB_COLOR } from "@/lib/run-editor/collab-color";
+import { flattenCollabDoc } from "@/lib/run-editor/collab-html";
+import { type TipTapCollab } from "@/components/TipTapEditor";
 import { RunEditorHeaderActions } from "@/components/run-editor/RunEditorHeaderActions";
 import { useRole } from "@/lib/use-role";
 import { useSession } from "@/lib/auth-client";
@@ -67,6 +74,48 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   useEffect(() => {
     editorEmailRef.current = editorEmail;
   }, [editorEmail]);
+
+  // Realtime collaboration — flag-gated OFF by default (Phase 5 flips it). With
+  // the flag off, useCollabDoc returns a frozen disabled handle (no socket, ydoc
+  // null, status "disabled") → collabActive false → collab null → every path
+  // below is byte-identical to the string-snapshot editor.
+  const collabEnabled = isCollabEnabled();
+  const collabUser = useMemo(
+    () => ({ name: editorName || editorEmail || "Editor", email: editorEmail }),
+    [editorName, editorEmail],
+  );
+  const {
+    ydoc,
+    awareness,
+    provider,
+    status: collabStatus,
+    color: collabColor,
+    isSeedAuthority,
+  } = useCollabDoc(runId, {
+    enabled: collabEnabled,
+    user: collabUser,
+  });
+  const collabActive = collabEnabled && ydoc !== null && provider !== null;
+  const collab: TipTapCollab | null =
+    collabActive && ydoc && provider
+      ? { ydoc, provider, user: { name: collabUser.name, color: collabColor ?? NEUTRAL_COLLAB_COLOR } }
+      : null;
+
+  useSeedCollabDoc({
+    ydoc,
+    status: collabStatus,
+    draftHtml: render.data?.html_body ?? "",
+    enabled: collabActive && render.data !== undefined,
+    isSeedAuthority,
+  });
+
+  // Stable flatten callback (keyed on the live doc) so the autosave hook's
+  // interval/beacon effects don't reset every render once collab is on. Undefined
+  // when collab is off → the autosave keeps its byte-identical string path.
+  const flattenBody = useMemo(
+    () => (collabActive && ydoc ? () => flattenCollabDoc(ydoc) : undefined),
+    [collabActive, ydoc],
+  );
 
   const existingPost = useQuery({
     queryKey: ["existing-post", runId],
@@ -253,7 +302,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       api.resumeHitl2(runId, {
         ...form,
         decision,
-        edited_html_body: html,
+        edited_html_body: collab ? flattenCollabDoc(collab.ydoc) : html,
         comments: [],
         editor_email: editorEmail,
       }),
@@ -332,6 +381,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       hydrateEnabled: true,
       hydratedFromSnapshotRef,
       onHydrate: applySnapshot,
+      collabActive,
+      flattenBody,
     });
 
   // Restoring first preserves current work, then loads the chosen version.
@@ -390,6 +441,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           onOpenHistory={() => setHistoryOpen(true)}
         />
       }
+      presence={<CollabPresence awareness={awareness} />}
       actionBar={
         gateResolved ? (
           <>
@@ -474,6 +526,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                   onCommentClick={focusComment}
                   onAddReviewNote={onAddReviewNote}
                   onReviewClick={onReviewClick}
+                  collab={collab}
                 />
               )}
             </TabsContent>
