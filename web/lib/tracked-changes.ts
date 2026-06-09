@@ -38,6 +38,20 @@ export interface DiffPart {
   removed?: boolean;
 }
 
+/**
+ * Per-author attribution for a hunk (realtime collab only). Populated by the
+ * separate, OPTIONAL blame step in `lib/run-editor/collab-blame.ts` — never by
+ * `computeTrackedChanges`, which stays authorship-agnostic. `undefined` whenever
+ * collab is off or the author can't be resolved, so the non-collab diff is
+ * byte-identical.
+ */
+export interface HunkAuthor {
+  /** Display name of the hunk's dominant author (inserter for `add`, deleter for `remove`). */
+  name: string;
+  /** That author's server-issued cursor colour (hex) or the neutral fallback. */
+  color: string;
+}
+
 export interface Hunk {
   /** Index of this part within the diff `parts` array. */
   index: number;
@@ -45,6 +59,8 @@ export interface Hunk {
   type: "add" | "remove";
   /** The hunk's text (tokens joined) — used as a comment anchor. */
   value: string;
+  /** Who wrote/removed this text — set only by the collab blame step (optional). */
+  author?: HunkAuthor;
 }
 
 export interface TrackedChanges {

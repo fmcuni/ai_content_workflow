@@ -118,12 +118,25 @@ interface CollabInstances {
   awareness: Awareness;
   provider: CollabProvider;
   socket: SocketHolder;
+  /** Owns this session's blame mapping. Held so it isn't GC'd while the doc lives;
+   *  its observers are torn down with the doc on cleanup. */
+  permanentUserData: Y.PermanentUserData;
 }
 
 /** Construct a fresh doc/awareness/provider triple, seeded with the operator's
- * identity (colour filled in once the server's INIT frame arrives). */
+ * identity (colour filled in once the server's INIT frame arrives).
+ *
+ * `gc: false` keeps deleted content as tombstones (not garbage-collected) so the
+ * Review panel's per-author blame can attribute a DELETED run to its deleter via
+ * `PermanentUserData.getUserByDeletedId` (see lib/run-editor/collab-blame.ts).
+ * `PermanentUserData.setUserMapping` records THIS session's clientID → display
+ * name in the shared doc's `users` map (which rides the DO sync to every peer),
+ * and — for LOCAL transactions only (yjs gates this) — appends this user's
+ * deletions to their delete-set. That is the write side of blame; the resolver
+ * reads it back read-only. Insert authorship comes from the clientID mapping;
+ * delete authorship from the per-user delete-set. */
 function createInstances(runId: string, user: { name: string; email: string }): CollabInstances {
-  const doc = new Y.Doc();
+  const doc = new Y.Doc({ gc: false });
   const awareness = new Awareness(doc);
   const socket = new SocketHolder();
   const provider: CollabProvider = {
@@ -131,8 +144,13 @@ function createInstances(runId: string, user: { name: string; email: string }): 
     doc,
     destroy: () => socket.close(),
   };
+  // Register the blame mapping under the display name (used directly as the
+  // "Added/Removed by {name}" label). A returning run already carries prior
+  // authors in the synced `users` map; adding this client's id is idempotent.
+  const permanentUserData = new Y.PermanentUserData(doc);
+  permanentUserData.setUserMapping(doc, doc.clientID, user.name);
   awareness.setLocalStateField("user", { name: user.name, email: user.email, color: null });
-  return { runId, doc, awareness, provider, socket };
+  return { runId, doc, awareness, provider, socket, permanentUserData };
 }
 
 export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): CollabDocHandle {
