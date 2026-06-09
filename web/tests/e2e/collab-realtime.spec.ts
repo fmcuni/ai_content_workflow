@@ -136,8 +136,11 @@ test.describe("realtime collab — two editors on one run", () => {
       await expect(pageB.locator(EDITOR)).toContainText(tokenA, { timeout: 15_000 });
       await expect(pageB.locator(EDITOR)).toContainText(tokenB, { timeout: 15_000 });
 
-      // 3) Remote caret + name label: A renders a collaboration caret for B.
-      await expect(pageA.locator(".collaboration-carets__caret").first()).toBeVisible({
+      // 3) Remote caret + name label: A renders a collaboration caret widget for
+      //    B. The caret bar itself is a ~0-width marker (Playwright reports it
+      //    "hidden"); the visible, meaningful part is the peer's name-label flag,
+      //    which is a child of the caret span — asserting it covers both.
+      await expect(pageA.locator(".collaboration-carets__label").first()).toBeVisible({
         timeout: 15_000,
       });
 
