@@ -32,7 +32,7 @@ import { useSeedCollabDoc } from "@/lib/run-editor/useSeedCollabDoc";
 import { useWorkingBody } from "@/lib/run-editor/useWorkingBody";
 import { isCollabEnabled } from "@/lib/run-editor/collab-flag";
 import { NEUTRAL_COLLAB_COLOR } from "@/lib/run-editor/collab-color";
-import { flattenCollabDoc } from "@/lib/run-editor/collab-html";
+import { flattenCollabDoc, normalizeEditorHtml } from "@/lib/run-editor/collab-html";
 import { type TipTapCollab } from "@/components/TipTapEditor";
 import { RunEditorHeaderActions } from "@/components/run-editor/RunEditorHeaderActions";
 import { useRole } from "@/lib/use-role";
@@ -183,6 +183,13 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // away from this show as pending tracked changes. Defaults to the render so a
   // freshly-loaded draft has zero pending; AI edits advance it (no false hunks).
   const [committedHtml, setCommittedHtml] = useState("");
+  // The render body in the editor's OWN serialization space. The working body is
+  // always TipTap-serialized (in collab it is seeded THROUGH the editor), so the
+  // tracked-changes baseline must be normalized to match or serialization-only
+  // differences (`<b>`→`<strong>`, attribute order, entity/`<br>` encoding) read
+  // as phantom "Review changes". Computed in an effect because normalizeEditorHtml
+  // needs a DOM (browser only) — calling it in a render-time memo crashes SSR.
+  const [normalizedRenderBody, setNormalizedRenderBody] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<EditorRailTab>("wp");
   // Collab-aware working-body writer: when collab is on, external writes also
   // push into the shared Yjs doc (the live editor ignores its value prop then).
@@ -215,7 +222,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     onApplied: (newHtml, ctx) => {
       if (ctx.commentIds.length > 0) {
         // Strip the addressed comments' anchor spans and drop them from the list.
-        const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
+        // Normalize into the editor's serialization space so the advanced baseline
+        // matches the (TipTap-serialized) working body — no phantom human changes.
+        const cleaned = normalizeEditorHtml(ctx.commentIds.reduce(stripCommentSpan, newHtml));
         const sent = new Set(ctx.commentIds);
         applyWorking(() => cleaned);
         // AI edits advance the tracked-changes baseline so they never surface as
@@ -224,8 +233,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         setComments((cs) => cs.filter((c) => !sent.has(c.id)));
         setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
       } else {
-        applyWorking(() => newHtml);
-        setCommittedHtml(newHtml);
+        const normalized = normalizeEditorHtml(newHtml);
+        applyWorking(() => normalized);
+        setCommittedHtml(normalized);
         setForm((f) => ({ ...f, notes: "" }));
       }
     },
@@ -262,13 +272,19 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   useEffect(() => {
     if (render.data) {
-      // Diff baseline is always the pristine render, even when restoring a snapshot.
+      // Normalize the raw render into the editor's serialization space so the
+      // tracked-changes baseline matches the (always-TipTap-serialized) working
+      // body. Client-only (needs a DOM); the effect never runs during SSR.
+      const normalized = normalizeEditorHtml(render.data.html_body);
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNormalizedRenderBody(normalized);
+      // The "raw" diff tab (HtmlDiffView) keeps the pristine, un-normalized render.
       setOriginalHtml(render.data.html_body);
       if (hydratedFromSnapshotRef.current) return; // snapshot owns the editor body
-      setHtml(render.data.html_body);
-      // No pending tracked changes on a fresh draft: baseline = working body.
-      setCommittedHtml(render.data.html_body);
+      setHtml(normalized);
+      // No pending tracked changes on a fresh draft: baseline = working body,
+      // both in the editor's serialization space.
+      setCommittedHtml(normalized);
       setForm((f) => ({
         ...f,
         edited_seo_title: render.data!.seo_title,
@@ -332,11 +348,13 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // Baseline is derived from the same source data the prefill effects consume,
   // so a freshly-loaded page never reads as dirty before any real edit.
   const baselineKey = useMemo(() => {
-    if (!render.data || !existingPost.isFetched) return null;
+    if (!render.data || !existingPost.isFetched || normalizedRenderBody == null) return null;
     return snapshotKey({
       trigger: "manual",
-      html_body: render.data.html_body,
-      committed_html_body: render.data.html_body,
+      // Match the hydrated working/committed body (editor serialization space),
+      // else a freshly-loaded page reads as dirty before any real edit.
+      html_body: normalizedRenderBody,
+      committed_html_body: normalizedRenderBody,
       seo_title: render.data.seo_title,
       meta_description: render.data.meta_description,
       notes: null,
@@ -351,15 +369,19 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       wp_excerpt: render.data.excerpt_suggestion ?? null,
       wp_publish_at: null,
     });
-  }, [render.data, existingPost.data, existingPost.isFetched]);
+  }, [render.data, existingPost.data, existingPost.isFetched, normalizedRenderBody]);
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
+    // Normalize both sides into the editor's serialization space (idempotent for
+    // snapshots already saved from the editor; fixes legacy raw bodies). Keeps the
+    // diff baseline apples-to-apples with the working body, so a restore reads clean.
+    const body = normalizeEditorHtml(s.html_body);
     // force: a restore/hydrate must replace the CRDT even if the resolved body
     // equals the (effect-synced, possibly stale) React `html` ref.
-    applyWorking(() => s.html_body, { force: true });
+    applyWorking(() => body, { force: true });
     // Restore the tracked-changes baseline; older snapshots without one have no
     // pending changes (committed == body).
-    setCommittedHtml(s.committed_html_body ?? s.html_body);
+    setCommittedHtml(normalizeEditorHtml(s.committed_html_body ?? s.html_body));
     setComments(s.comments ?? []);
     setForm((f) => ({
       ...f,

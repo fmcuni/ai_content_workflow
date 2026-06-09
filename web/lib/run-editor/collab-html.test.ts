@@ -3,7 +3,12 @@ import { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 
 import { buildEditorExtensions } from "@/components/tiptap/editor-extensions";
-import { flattenCollabDoc, seedCollabDocIfEmpty } from "@/lib/run-editor/collab-html";
+import {
+  flattenCollabDoc,
+  normalizeEditorHtml,
+  seedCollabDocIfEmpty,
+} from "@/lib/run-editor/collab-html";
+import { computeTrackedChanges } from "@/lib/tracked-changes";
 
 /**
  * Flatten/seed fidelity — the headless collab primitives MUST stay byte-identical
@@ -123,5 +128,66 @@ describe("seedCollabDocIfEmpty", () => {
   it("no-ops on empty/whitespace draftHtml (returns false)", () => {
     expect(seedCollabDocIfEmpty(new Y.Doc(), "")).toBe(false);
     expect(seedCollabDocIfEmpty(new Y.Doc(), "   \n  ")).toBe(false);
+  });
+});
+
+/**
+ * normalizeEditorHtml — the phantom-"Review changes" fix. The tracked-changes
+ * baseline (committedHtml) is the raw server render, but the working body is
+ * always TipTap-serialized (in collab it is seeded THROUGH the editor). The two
+ * serializations differ MECHANICALLY (TipTap canonicalizes `<b>`→`<strong>`,
+ * `<i>`→`<em>`, injects the link class, collapses formatting whitespace), and
+ * `computeTrackedChanges` compares tags as atomic tokens, so those serialization
+ * differences surface as phantom hunks. Normalizing the baseline into the
+ * editor's own serialization space puts both sides apples-to-apples.
+ */
+describe("normalizeEditorHtml", () => {
+  // A representative server render: <b>/<i> (TipTap emits <strong>/<em>), a link
+  // WITHOUT the editor's class (TipTap injects it), and formatting whitespace +
+  // newlines between blocks — all mechanical, no content difference.
+  const SERVER_RENDER = `<h2>產品比較</h2>
+<p>This is <b>bold</b> and <i>italic</i> — see
+  <a href="https://gobowtie.com/my/vhis">官方頁面</a>.</p>`;
+
+  it("re-serializes raw server-render HTML into the editor's own (DIFFERENT) string", () => {
+    const normalized = normalizeEditorHtml(SERVER_RENDER);
+    // The mechanism exists: the normalized form is not the raw input.
+    expect(normalized).not.toBe(SERVER_RENDER);
+    // Concretely: TipTap canonicalizes the inline marks the server emitted raw.
+    expect(SERVER_RENDER).toContain("<b>bold</b>");
+    expect(normalized).toContain("<strong>bold</strong>");
+    expect(normalized).toContain("<em>italic</em>");
+    // Content is preserved (CJK + link target intact).
+    expect(normalized).toContain("產品比較");
+    expect(normalized).toContain('href="https://gobowtie.com/my/vhis"');
+  });
+
+  it("is idempotent — normalizing an already-normalized string is a no-op", () => {
+    const once = normalizeEditorHtml(SERVER_RENDER);
+    expect(normalizeEditorHtml(once)).toBe(once);
+  });
+
+  it("returns empty/falsy input unchanged", () => {
+    expect(normalizeEditorHtml("")).toBe("");
+  });
+
+  it("kills phantom hunks for a no-edit case but still reports a real text edit", () => {
+    // The working body in collab is seeded THROUGH the editor → TipTap output.
+    const working = normalizeEditorHtml(SERVER_RENDER);
+
+    // THE BUG: raw baseline vs TipTap working diffs on serialization ALONE.
+    const phantom = computeTrackedChanges(SERVER_RENDER, working);
+    expect(phantom.hunks.length).toBeGreaterThan(0);
+
+    // THE FIX: normalize the baseline into the same serialization space → clean.
+    const normalizedBaseline = normalizeEditorHtml(SERVER_RENDER);
+    const clean = computeTrackedChanges(normalizedBaseline, working);
+    expect(clean.hunks.length).toBe(0);
+
+    // A genuine text edit still surfaces against the normalized baseline.
+    const edited = working.replace("bold", "BOLD");
+    expect(edited).not.toBe(working);
+    const realEdit = computeTrackedChanges(normalizedBaseline, edited);
+    expect(realEdit.hunks.length).toBeGreaterThan(0);
   });
 });

@@ -28,6 +28,29 @@ export function flattenCollabDoc(ydoc: YDoc): string {
   }
 }
 
+/**
+ * Normalize an HTML string into the editor's OWN serialization by round-tripping
+ * it through a headless (non-collab) editor built from the SSOT schema. The
+ * tracked-changes baseline (`committedHtml`) is the raw server render, but the
+ * working body is always TipTap-serialized (in collab it is seeded THROUGH the
+ * editor). Comparing raw render vs TipTap output surfaces serialization-only
+ * differences (attribute order, entity encoding, self-closing tags) as phantom
+ * tracked changes. Normalizing the baseline with this puts both sides in the
+ * same serialization space so only real edits diff. CLIENT-SIDE ONLY. */
+export function normalizeEditorHtml(html: string): string {
+  if (!html) return html;
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: buildEditorExtensions(),
+  });
+  try {
+    editor.commands.setContent(html, { emitUpdate: false });
+    return editor.getHTML();
+  } finally {
+    editor.destroy();
+  }
+}
+
 /** Seed an EMPTY shared doc from draft HTML, once. Returns true if it seeded,
  *  false if the doc already had content (idempotent no-op). Binding a headless
  *  editor to the shared doc and calling setContent writes through y-prosemirror

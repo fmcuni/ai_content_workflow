@@ -35,7 +35,7 @@ import { useSeedCollabDoc } from "@/lib/run-editor/useSeedCollabDoc";
 import { useWorkingBody } from "@/lib/run-editor/useWorkingBody";
 import { isCollabEnabled } from "@/lib/run-editor/collab-flag";
 import { NEUTRAL_COLLAB_COLOR } from "@/lib/run-editor/collab-color";
-import { flattenCollabDoc } from "@/lib/run-editor/collab-html";
+import { flattenCollabDoc, normalizeEditorHtml } from "@/lib/run-editor/collab-html";
 import { type TipTapCollab } from "@/components/TipTapEditor";
 import { RunEditorHeaderActions } from "@/components/run-editor/RunEditorHeaderActions";
 import { useRole } from "@/lib/use-role";
@@ -75,6 +75,11 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   // Tracked-changes baseline (last committed body); defaults to the render so a
   // fresh editor has zero pending. AI edits advance it.
   const [committedHtml, setCommittedHtml] = useState("");
+  // Render body in the editor's OWN serialization space — the tracked-changes
+  // baseline must match the (always-TipTap-serialized) working body or
+  // serialization-only differences read as phantom "Review changes". Computed in
+  // an effect (normalizeEditorHtml needs a DOM → browser only, never SSR).
+  const [normalizedRenderBody, setNormalizedRenderBody] = useState<string | null>(null);
   const [form, setForm] = useState<Hitl2Request>({ decision: "approve", wp_publish_status: "draft" });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -173,15 +178,18 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     onApplied: (newHtml, ctx) => {
       if (ctx.commentIds.length > 0) {
         // Strip the addressed comments' anchor spans and drop them from the list.
-        const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
+        // Normalize into the editor's serialization space so the advanced baseline
+        // matches the (TipTap-serialized) working body — no phantom human changes.
+        const cleaned = normalizeEditorHtml(ctx.commentIds.reduce(stripCommentSpan, newHtml));
         const sent = new Set(ctx.commentIds);
         applyWorking(() => cleaned);
         setCommittedHtml(cleaned); // AI edits advance the baseline (human-only tracking)
         setComments((cs) => cs.filter((c) => !sent.has(c.id)));
         setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
       } else {
-        applyWorking(() => newHtml);
-        setCommittedHtml(newHtml);
+        const normalized = normalizeEditorHtml(newHtml);
+        applyWorking(() => normalized);
+        setCommittedHtml(normalized);
         setForm((f) => ({ ...f, notes: "" }));
       }
     },
@@ -212,11 +220,19 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   // later refetch (e.g. after Save invalidates the query) can't re-clobber the
   // operator's in-progress edits or race the WP-metadata prefill below.
   useEffect(() => {
-    if (!render.data || renderSeededRef.current) return;
+    if (!render.data) return;
+    // Normalize the raw render into the editor's serialization space so the
+    // tracked-changes baseline matches the (always-TipTap-serialized) working
+    // body. Set unconditionally (even when a snapshot owns the body) so
+    // baselineKey has it; client-only (the effect never runs during SSR).
+    const normalized = normalizeEditorHtml(render.data.html_body);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNormalizedRenderBody(normalized);
+    if (renderSeededRef.current) return;
     if (hydratedFromSnapshotRef.current) return; // a saved snapshot owns the body
     renderSeededRef.current = true;
-    setHtml(render.data.html_body);
-    setCommittedHtml(render.data.html_body); // no pending tracked changes on load
+    setHtml(normalized);
+    setCommittedHtml(normalized); // no pending tracked changes on load
     setForm((f) => ({
       ...f,
       edited_seo_title: render.data!.seo_title,
@@ -267,13 +283,15 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   // prefill (run row first, existing post as fallback), so a freshly-loaded
   // editor never reads as dirty before a real edit.
   const baselineKey = useMemo(() => {
-    if (!render.data || !existingPostSettled) return null;
+    if (!render.data || !existingPostSettled || normalizedRenderBody == null) return null;
     const r = run.data;
     const ep = existingPost.data;
     return snapshotKey({
       trigger: "manual",
-      html_body: render.data.html_body,
-      committed_html_body: render.data.html_body,
+      // Match the hydrated working/committed body (editor serialization space),
+      // else a freshly-loaded page reads as dirty before any real edit.
+      html_body: normalizedRenderBody,
+      committed_html_body: normalizedRenderBody,
       seo_title: render.data.seo_title,
       meta_description: render.data.meta_description,
       notes: null,
@@ -288,13 +306,17 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       wp_excerpt: r?.wp_excerpt ?? render.data.excerpt_suggestion ?? null,
       wp_publish_at: null,
     });
-  }, [render.data, run.data, existingPost.data, existingPostSettled]);
+  }, [render.data, run.data, existingPost.data, existingPostSettled, normalizedRenderBody]);
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
+    // Normalize both sides into the editor's serialization space (idempotent for
+    // snapshots already saved from the editor; fixes legacy raw bodies) so the
+    // diff baseline stays apples-to-apples with the working body on restore.
+    const body = normalizeEditorHtml(s.html_body);
     // force: a restore/hydrate must replace the CRDT even if the resolved body
     // equals the (effect-synced, possibly stale) React `html` ref.
-    applyWorking(() => s.html_body, { force: true });
-    setCommittedHtml(s.committed_html_body ?? s.html_body);
+    applyWorking(() => body, { force: true });
+    setCommittedHtml(normalizeEditorHtml(s.committed_html_body ?? s.html_body));
     setComments(s.comments ?? []);
     setForm((f) => applySnapshotToForm(f, s));
   }, [setComments, applyWorking]);
