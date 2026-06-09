@@ -110,6 +110,14 @@ test.describe("realtime collab — two editors on one run", () => {
     try {
       // Log in A first; run discovery uses the authenticated /api/runs.
       const pageA = await ctxA.newPage();
+      // TEMP diagnostic: surface pageA browser warnings/errors into CI stdout to
+      // pinpoint why Review-mode blame attribution does not render.
+      pageA.on("console", (m) => {
+        if (m.type() === "warning" || m.type() === "error") {
+          // eslint-disable-next-line no-console
+          console.log(`[pageA:${m.type()}] ${m.text()}`);
+        }
+      });
       await login(pageA, EMAIL!, PASSWORD!);
       const runId = await firstRunId(pageA);
       await pageA.goto(`${BASE}/runs/${runId}/edit`);
