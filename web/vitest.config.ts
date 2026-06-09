@@ -21,6 +21,9 @@ export default defineConfig({
       "lib/**/*.test.ts",
       "lib/**/*.test.tsx",
       "components/**/*.test.tsx",
+      // WS3 admin user-management page lives under app/admin/users; its RTL
+      // test sits beside it. Still excludes the Playwright specs (tests/e2e/**).
+      "app/**/*.test.tsx",
     ],
   },
 });
