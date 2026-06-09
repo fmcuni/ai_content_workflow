@@ -21,9 +21,15 @@ export function ReviewPanel({ rt }: Props) {
         <PendingComposer
           anchorText={rt.pending.anchorText}
           busy={rt.create.isPending}
+          error={rt.create.isError}
           onSubmit={rt.submitPending}
           onCancel={rt.cancelPending}
         />
+      )}
+      {(rt.reply.isError || rt.resolve.isError || rt.remove.isError) && (
+        <p role="alert" className="mb-3 font-mono text-[11px] text-accent-deep">
+          Something went wrong — please try again.
+        </p>
       )}
       <ReviewThreadList
         threads={rt.threads}
@@ -41,11 +47,13 @@ export function ReviewPanel({ rt }: Props) {
 interface PendingComposerProps {
   anchorText: string;
   busy: boolean;
+  /** The create POST failed — keep the composer and prompt a retry. */
+  error?: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
 }
 
-function PendingComposer({ anchorText, busy, onSubmit, onCancel }: PendingComposerProps) {
+function PendingComposer({ anchorText, busy, error, onSubmit, onCancel }: PendingComposerProps) {
   const [body, setBody] = useState("");
   const submit = () => {
     const trimmed = body.trim();
@@ -84,6 +92,11 @@ function PendingComposer({ anchorText, busy, onSubmit, onCancel }: PendingCompos
         placeholder="Start a review note for the team… (⌘↵ to post)"
         className="w-full resize-y border-b border-rule bg-transparent pb-1 text-[13px] text-ink focus:border-accent focus:outline-none"
       />
+      {error && (
+        <p role="alert" className="mt-1 font-mono text-[11px] text-accent-deep">
+          Couldn’t post the note — please try again.
+        </p>
+      )}
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
           type="button"

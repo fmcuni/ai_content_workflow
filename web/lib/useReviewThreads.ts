@@ -49,7 +49,13 @@ export function useReviewThreads(
   const create = useMutation({
     mutationFn: (v: { anchor_id: string; anchor_text: string; body: string }) =>
       api.createReviewThread(runId, { ...v, ...author }),
+    // Clear the pending composer ONLY once the thread is persisted. Clearing it
+    // eagerly in `submitPending` discarded the typed note the moment the request
+    // started, so a failed create left the rail empty with no error and no way to
+    // retry — the "posted a note, nothing updated" report. On failure the composer
+    // stays mounted (body preserved) and surfaces `create.error` for a retry.
     onSuccess: (thread) => {
+      setPending(null);
       invalidate();
       setFocusedThreadId(thread.thread_id);
     },
@@ -101,8 +107,9 @@ export function useReviewThreads(
   const submitPending = useCallback(
     (body: string) => {
       if (!pending) return;
+      // `pending` is cleared in `create.onSuccess` (not here) so a failed POST
+      // keeps the composer + typed note for retry instead of silently dropping it.
       create.mutate({ anchor_id: pending.anchorId, anchor_text: pending.anchorText, body });
-      setPending(null);
     },
     [pending, create],
   );
