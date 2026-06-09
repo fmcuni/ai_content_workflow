@@ -20,6 +20,7 @@ class TestClient {
   readonly doc = new Y.Doc();
   readonly awareness = new awarenessProtocol.Awareness(this.doc);
   assignedColour: string | null = null;
+  assignedPrimary: boolean | null = null;
 
   constructor(private readonly ws: WebSocket) {
     ws.addEventListener("message", (e) => this.onMessage(e.data));
@@ -55,6 +56,10 @@ class TestClient {
     this.ws.send(bytes);
   }
 
+  close(): void {
+    this.ws.close();
+  }
+
   private onMessage(data: unknown): void {
     const bytes = new Uint8Array(data as ArrayBuffer);
     const decoder = decoding.createDecoder(bytes);
@@ -67,8 +72,12 @@ class TestClient {
     } else if (type === MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), "remote");
     } else if (type === MESSAGE_INIT) {
-      const init = JSON.parse(decoding.readVarString(decoder)) as { color?: string };
+      const init = JSON.parse(decoding.readVarString(decoder)) as {
+        color?: string;
+        primary?: boolean;
+      };
       this.assignedColour = init.color ?? null;
+      this.assignedPrimary = init.primary ?? null;
     }
   }
 }
@@ -173,5 +182,47 @@ describe("RunDoc collab sync", () => {
     expect(a.assignedColour).toMatch(/^#[0-9a-f]{6}$/);
     expect(b.assignedColour).toMatch(/^#[0-9a-f]{6}$/);
     expect(a.assignedColour).not.toBe(b.assignedColour);
+  });
+});
+
+describe("RunDoc seeder designation", () => {
+  it("designates the first joiner to an empty run as the seeder (primary=true) and a second joiner as not (primary=false)", async () => {
+    const runId = freshRun();
+    const a = await connect(runId);
+    const b = await connect(runId);
+
+    await waitFor(() => a.assignedPrimary !== null && b.assignedPrimary !== null);
+    expect(a.assignedPrimary).toBe(true);
+    expect(b.assignedPrimary).toBe(false);
+  });
+
+  it("tells the first joiner of an already-seeded run it is NOT the seeder", async () => {
+    const runId = freshRun();
+    const a = await connect(runId);
+    await waitFor(() => a.assignedPrimary !== null);
+    expect(a.assignedPrimary).toBe(true);
+
+    // Seed content so the DO's doc is no longer empty, then let the update land.
+    a.doc.getText("body").insert(0, "seeded");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const c = await connect(runId);
+    await waitFor(() => c.assignedPrimary !== null);
+    expect(c.assignedPrimary).toBe(false);
+  });
+
+  it("re-grants the seeder role to the next joiner if the designated seeder disconnects before seeding", async () => {
+    const runId = freshRun();
+    const a = await connect(runId);
+    await waitFor(() => a.assignedPrimary !== null);
+    expect(a.assignedPrimary).toBe(true);
+
+    // Close without inserting any content → onClose releases the seeder grant.
+    a.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const b = await connect(runId);
+    await waitFor(() => b.assignedPrimary !== null);
+    expect(b.assignedPrimary).toBe(true);
   });
 });

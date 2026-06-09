@@ -65,6 +65,14 @@ export class RunDoc extends DurableObject<RunDocEnv> {
   private readonly controlledIds = new Map<WebSocket, Set<number>>();
   /** Server-issued cursor colour per connection. */
   private readonly colours = new Map<WebSocket, string>();
+  /**
+   * The one connection designated as the seed authority for an empty doc.
+   * The DO is the single source of truth for first-write, so exactly one
+   * joiner is told `primary: true` and seeds the initial content; everyone
+   * else is told `primary: false` and must not seed (closes the
+   * two-first-joiners duplicate-seed race the client guard alone can't).
+   */
+  private seederWs: WebSocket | null = null;
   private loaded = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   /**
@@ -140,12 +148,22 @@ export class RunDoc extends DurableObject<RunDocEnv> {
     const colour = this.assignColour();
     this.colours.set(server, colour);
 
+    // Grant the seeder role to the FIRST connection that reaches an empty doc
+    // while no seeder is assigned yet (sticky). A returning run is non-empty
+    // after ensureLoaded() → primary=false for everyone (no seed needed); a
+    // second concurrent joiner sees seederWs !== null → primary=false.
+    let primary = false;
+    if (this.seederWs === null && this.docIsEmpty()) {
+      this.seederWs = server;
+      primary = true;
+    }
+
     server.addEventListener("message", (event) => this.onMessage(server, event.data));
     server.addEventListener("close", () => this.onClose(server));
     server.addEventListener("error", () => this.onClose(server));
 
-    // 1. Server-issued cursor colour for this session.
-    this.trySend(server, this.initFrame(colour));
+    // 1. Server-issued cursor colour + seeder grant for this session.
+    this.trySend(server, this.initFrame(colour, primary));
     // 2. Sync step 1 — ask the client to reconcile against our state vector.
     const syncEncoder = encoding.createEncoder();
     encoding.writeVarUint(syncEncoder, MESSAGE_SYNC);
@@ -202,6 +220,13 @@ export class RunDoc extends DurableObject<RunDocEnv> {
     if (!this.conns.has(ws)) return;
     this.conns.delete(ws);
     this.colours.delete(ws);
+    // Release the seeder grant if the designated seeder leaves. Sticky-then-
+    // released: while the doc is still empty the next joiner can claim it; once
+    // the doc has content docIsEmpty() is false so no new primary is granted
+    // anyway. Narrow residual: a client already told primary=false will not be
+    // re-granted on a later seeder departure — acceptable, and far better than
+    // duplicate seeding.
+    if (ws === this.seederWs) this.seederWs = null;
     const ids = this.controlledIds.get(ws);
     this.controlledIds.delete(ws);
     if (ids && ids.size > 0) {
@@ -209,11 +234,24 @@ export class RunDoc extends DurableObject<RunDocEnv> {
     }
   }
 
-  private initFrame(colour: string): Uint8Array {
+  private initFrame(colour: string, primary: boolean): Uint8Array {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MESSAGE_INIT);
-    encoding.writeVarString(encoder, JSON.stringify({ color: colour }));
+    encoding.writeVarString(encoder, JSON.stringify({ color: colour, primary }));
     return encoding.toUint8Array(encoder);
+  }
+
+  /**
+   * Schema-agnostic emptiness check: an empty Y.Doc encodes its full state as
+   * the 2-byte update `[0,0]`; any content makes it longer. Avoids reaching
+   * into `this.doc.store` internals.
+   */
+  private docIsEmpty(): boolean {
+    try {
+      return Y.encodeStateAsUpdate(this.doc).byteLength <= 2;
+    } catch {
+      return false;
+    }
   }
 
   /** Least-used colour from the palette, so small groups get distinct cursors. */
