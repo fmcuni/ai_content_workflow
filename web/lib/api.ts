@@ -317,22 +317,11 @@ export const meApi = {
   get: () => http<MeResponse>("/api/me"),
 };
 
-// Admin user-management. Admin-gated server-side (403 for non-admins); the UI
-// also hides/blocks these for non-admins as defense in depth.
+// Admin user-management (Supabase Auth provider). Admin-gated server-side (403
+// for non-admins); the UI also hides/blocks these for non-admins as defense in
+// depth. Reuses the shared http() helper.
 const ADMIN_USERS_BASE = "/api/admin/users";
 
-export const adminApi = {
-  listUsers: () => http<AdminUser[]>(ADMIN_USERS_BASE),
-  setUserRole: (id: string, role: UserRole) =>
-    http<AdminUser>(`${ADMIN_USERS_BASE}/${id}/role`, {
-      method: "PUT",
-      body: JSON.stringify({ role }),
-    }),
-};
-
-// --- WS3 admin user-management (Supabase Auth provider) -------------------
-// Appended object so the diff stays additive (Agent B owns the http()/header
-// change in this file). Reuses the same ADMIN_USERS_BASE + http() helper.
 //
 // Backend enriches list rows with GoTrue facets (status / last_sign_in /
 // confirmed) on the supabase provider; AdminUserDetail is the superset the UI

@@ -36,6 +36,13 @@ function makeFakeSql(): unknown {
 
     // --- Supabase provider: content_tool.app_user ---
     if (text.includes("app_user")) {
+      // loadRole (provider-aware, supabase path) reads the ACTING user's role via
+      // a bare `SELECT role FROM content_tool.app_user WHERE id/email = ...`. The
+      // admin routes always project multiple columns, so a role-only projection
+      // is unambiguously the auth gate — return the ACTOR's role, not the target.
+      if (text.startsWith("select role from")) {
+        return [{ role: state.actorRole }];
+      }
       if (text.startsWith("insert")) {
         // POST /users create — bound order: id, email, role.
         const strs = _values.filter((v) => typeof v === "string") as string[];
