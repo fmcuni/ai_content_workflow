@@ -87,4 +87,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NEXT_PUBLIC_API_BASE: https://bowtie-content-tool-poc.fmc.workers.dev
+          # Realtime collab is a BUILD-TIME flag. Set here so every prod deploy
+          # keeps collab ON durably — a one-off manual cf:deploy would be reverted
+          # to dark by the next main push. To roll collab back: flip to "false"
+          # (or remove) and redeploy, or `wrangler rollback <prior dark version>`.
+          NEXT_PUBLIC_COLLAB_ENABLED: "true"
         run: npm run cf:deploy
