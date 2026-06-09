@@ -162,8 +162,11 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 
 ## Supabase
 
-**Managed Postgres only** — no PostgREST, no Supabase Auth, no `supabase-js`.
-SQLAlchemy/asyncpg owns all data access for the Python backend.
+**Managed Postgres + (optionally) Supabase Auth** — no PostgREST, no Data API.
+SQLAlchemy/asyncpg owns all data access for the Python backend. Supabase Auth
+(GoTrue) is an **optional, flagged** auth provider for the Workers backend + web
+(see **Auth** below); the Python backend keeps better-auth. `supabase-js` is used
+**only** in the browser for the GoTrue session — never for data access.
 
 **Workers-native backend** (`deploy/cloudflare-workers/`) uses `postgres.js` through
 Cloudflare Hyperdrive (`{ max: 5, fetch_types: false }`) instead of SQLAlchemy/asyncpg —
@@ -186,6 +189,42 @@ RLS is enabled on all tables as defense in depth; app connects via the dedicated
 - `supabase migration new <name>` — scaffold a new migration
 - `supabase db reset` — wipe + re-apply all migrations locally
 - `supabase db push` — apply pending migrations to the linked prod project
+
+### Auth (GoTrue) — behind `AUTH_PROVIDER`
+
+Authentication can run on **either** better-auth (default, legacy) **or Supabase
+Auth (GoTrue)**, selected by a flag so cutover is reversible:
+
+- **Flag:** `AUTH_PROVIDER` (Workers `Env`, default `better-auth`) and
+  `NEXT_PUBLIC_AUTH_PROVIDER` (web build env, default `better-auth`). Set both to
+  `supabase` to use GoTrue. Flip back to roll back.
+- **Magic-link only, invite-only.** Self-signup + email confirmations are OFF;
+  accounts are admin-created (Users & Roles → invite). `/signup` redirects.
+- **Token model:** the browser holds a Supabase session in a single cookie
+  (`bowtie-sb-auth`, PKCE, cookie storage) and sends `Authorization: Bearer
+  <access_token>`. The Workers backend verifies it in `src/auth/jwt.ts` via the
+  project **JWKS** (asymmetric RS256/ES256, cached). **Once `SUPABASE_URL` is set,
+  JWKS is authoritative and there is NO HS256 fallback** — so **prod MUST enable
+  asymmetric ("Signing keys") JWTs in the Supabase dashboard**, or every request
+  401s. HS256 (`SUPABASE_JWT_SECRET`) is only honored when no `SUPABASE_URL` is set.
+- **User table:** `content_tool.app_user` (id ↔ GoTrue user id, lower(email)
+  unique, `role` + `status`, RLS on, `content_tool_app` grants). `loadRole` reads
+  it on the supabase branch. Migration `20260613000000_app_user.sql` **must be
+  applied before** any code that reads the table (deploy-ordering invariant).
+- **Roles (4-role cumulative):** `viewer < author < reviewer < admin`. The
+  capability maps in `deploy/cloudflare-workers/src/auth/authz.ts` (`ROLES`/
+  `ROLE_RANK`) and `web/lib/roles.ts` **must stay byte-in-sync**. `coerceRole`
+  aliases the legacy stored `editor` → `reviewer`; `isRole` is strict 4-role.
+- **Admin user-mgmt** calls GoTrue admin REST with the `service_role` key from
+  `src/auth/gotrue-admin.ts` (fail-closed; **never log the key**).
+- **Env/secrets:** Workers — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+  `SUPABASE_JWT_SECRET` (via `wrangler secret put`); web build —
+  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+- **E2E:** `web/playwright.supabase.config.ts` mints a session via the Supabase
+  password grant from the gitignored root `.env.test.local` (needs
+  `E2E_AUTH_PROVIDER=supabase`, `E2E_EMAIL`/`E2E_PASSWORD`, `E2E_SUPABASE_URL`/
+  `E2E_SUPABASE_ANON_KEY`).
+- **Spec/plan:** `docs/superpowers/{specs,plans}/2026-06-10-supabase-auth-migration.md`.
 
 **Prod cutover runbook (E1–E9):** see [Supabase Cutover Runbook (E1–E9)](https://www.notion.so/36fef2b9861481d39723d884070e30fa) in Notion.
 
