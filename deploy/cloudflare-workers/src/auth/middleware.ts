@@ -28,8 +28,9 @@ function isPublicPath(path: string): boolean {
  * workers.dev URL, so it enforces sessions independently of the frontend.
  *
  * - REST: validates the same-origin session cookie (the Next proxy forwards it).
- * - SSE (paths ending in "/events"): opened cross-origin without the cookie, so
- *   it is authenticated by the short-lived `?ticket=` HMAC instead.
+ * - SSE (paths ending in "/events") and the collab WebSocket (paths ending in
+ *   "/doc"): opened cross-origin without the cookie, so they are authenticated
+ *   by the short-lived `?ticket=` HMAC instead.
  * - `AUTH_DISABLED=true` bypasses the gate for local dev against the Python
  *   backend (which has no auth routes).
  */
@@ -40,7 +41,12 @@ export async function requireAuth(c: AuthContext, next: Next): Promise<Response 
   const path = new URL(c.req.url).pathname;
   if (isPublicPath(path)) return next();
 
-  if (path.endsWith("/events")) {
+  // `/runs/:id/doc` is the collab WebSocket: opened cross-origin and cookie-less
+  // (the browser cannot attach the better-auth session cookie to a WS upgrade),
+  // so it is ticket-authed exactly like the SSE `/events` stream. Scope the `/doc`
+  // match to `/runs/` so a future route ending in `/doc` can't accidentally
+  // inherit ticket auth.
+  if (path.endsWith("/events") || (path.startsWith("/runs/") && path.endsWith("/doc"))) {
     const ticket = c.req.query("ticket") ?? "";
     const userId = ticket ? await verifyTicket(c.env, ticket) : null;
     if (!userId) return c.json({ error: "unauthorized" }, 401);

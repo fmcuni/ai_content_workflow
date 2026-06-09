@@ -801,6 +801,45 @@ runsRouter.options("/:id/events", (c) =>
 );
 
 // ---------------------------------------------------------------------------
+// GET /:id/doc — WebSocket-upgrade proxy to the per-run RUN_DOC Durable Object
+// (the realtime-collab document sync). The browser opens this WS DIRECTLY
+// against this Worker cross-origin (same as /events), so it cannot send the
+// session cookie — requireAuth admits it via the short-lived `?ticket=` HMAC.
+//
+// Any authenticated session (viewer+) may join and write the collaborative
+// body: in this codebase `viewer` is the content-editor floor, so the auth gate
+// here is simply "authenticated session" (no requireRole — that would lock
+// viewers out, contradicting the established RBAC).
+//
+// WebSocket upgrades are NOT subject to CORS preflight, so the Origin is
+// validated server-side here. The 101 handshake response is returned untouched
+// (no withCors): CORS headers don't belong on a WS handshake, and re-wrapping
+// the response would drop its `webSocket`.
+// ---------------------------------------------------------------------------
+runsRouter.get("/:id/doc", (c) => {
+  const runId = c.req.param("id");
+
+  // Origin check — when FRONTEND_ORIGIN is set (production), reject any browser
+  // Origin that is not in the allowlist. Unset (local dev) reflects/skips, per
+  // resolveCorsOrigin. Reuse the allowlist parsing: the resolved origin equals
+  // the request Origin only when it is allowed.
+  const origin = c.req.header("origin") ?? null;
+  if (c.env.FRONTEND_ORIGIN && origin) {
+    const allowed = resolveCorsOrigin(origin, c.env.FRONTEND_ORIGIN);
+    if (origin !== allowed) return c.json({ error: "forbidden" }, 403);
+  }
+
+  // Require the upgrade header. The DO would also return 426, but guard here to
+  // avoid a needless DO hop.
+  if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
+    return new Response("expected websocket", { status: 426 });
+  }
+
+  const stub = c.env.RUN_DOC.get(c.env.RUN_DOC.idFromName(runId));
+  return stub.fetch(c.req.raw);
+});
+
+// ---------------------------------------------------------------------------
 // GET /:id/logs — verbose persisted per-step event log for this run.
 // Ordered by seq ASC. Query params: since_seq (seq>since_seq), limit (default
 // 2000, cap 10000), level (equality). CORS-pinned like /events so the debug
