@@ -15,6 +15,15 @@ on:
   workflow_dispatch:
   push:
     branches: [feat/realtime-collab-per-author]
+  # Gate PRs into main that touch the collab editor surface (the working-body →
+  # Yjs sync path the spec covers). Still SKIP-gated on E2E_COLLAB_BASE_URL, set
+  # only inside this job, so nothing runs against prod.
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "deploy/cloudflare-workers/**"
+      - ".github/workflows/collab-e2e.yml"
 
 concurrency:
   group: collab-e2e-${{ github.ref }}

@@ -127,6 +127,12 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 - Collab surfaces (presence avatar stack) are wired into the run-editor shell on the
   `/hitl2` and `/edit` pages. Observer read-only infra exists but no observer surface
   is wired yet.
+- External working-body writes (tracked-change reject, AI apply-edits result,
+  comment/review-span edits, snapshot restore) are pushed into the Yjs doc via a
+  **whole-document replace** (`replaceCollabDoc` + the `useWorkingBody` hook) so they
+  reflect in the Edit panel under collab. CAVEAT: a whole-doc replace can merge
+  unexpectedly against a concurrent peer's in-flight edit (rare at the HITL_2 review
+  gate, accepted for now).
 
 ## Conventions
 

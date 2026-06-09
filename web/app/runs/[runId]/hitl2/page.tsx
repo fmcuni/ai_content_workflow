@@ -29,6 +29,7 @@ import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
 import { useCollabDoc } from "@/lib/run-editor/useCollabDoc";
 import { useSeedCollabDoc } from "@/lib/run-editor/useSeedCollabDoc";
+import { useWorkingBody } from "@/lib/run-editor/useWorkingBody";
 import { isCollabEnabled } from "@/lib/run-editor/collab-flag";
 import { NEUTRAL_COLLAB_COLOR } from "@/lib/run-editor/collab-color";
 import { flattenCollabDoc } from "@/lib/run-editor/collab-html";
@@ -180,6 +181,10 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // freshly-loaded draft has zero pending; AI edits advance it (no false hunks).
   const [committedHtml, setCommittedHtml] = useState("");
   const [rightTab, setRightTab] = useState<EditorRailTab>("wp");
+  // Collab-aware working-body writer: when collab is on, external writes also
+  // push into the shared Yjs doc (the live editor ignores its value prop then).
+  // When collab is off this is byte-identical to calling setHtml.
+  const applyWorking = useWorkingBody({ collabActive, ydoc, html, setHtml });
   const {
     comments,
     setComments,
@@ -189,12 +194,12 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     updateComment,
     deleteComment,
     focusComment,
-  } = useArticleComments(setHtml, {
+  } = useArticleComments(applyWorking, {
     onAddComment: () => setRightTab("comments"),
     onFocusComment: () => setRightTab("comments"),
   });
   // Human review threads — SEPARATE pipeline from the AI "comments" above.
-  const reviewThreads = useReviewThreads(runId, { email: editorEmail, name: editorName }, setHtml);
+  const reviewThreads = useReviewThreads(runId, { email: editorEmail, name: editorName }, applyWorking);
   const onAddReviewNote = (id: string, anchorText: string) => {
     reviewThreads.beginThread(id, anchorText);
     setRightTab("review");
@@ -209,14 +214,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         // Strip the addressed comments' anchor spans and drop them from the list.
         const cleaned = ctx.commentIds.reduce(stripCommentSpan, newHtml);
         const sent = new Set(ctx.commentIds);
-        setHtml(cleaned);
+        applyWorking(() => cleaned);
         // AI edits advance the tracked-changes baseline so they never surface as
         // pending HUMAN changes (tracked changes are human-only).
         setCommittedHtml(cleaned);
         setComments((cs) => cs.filter((c) => !sent.has(c.id)));
         setFocusedCommentId((f) => (f && sent.has(f) ? null : f));
       } else {
-        setHtml(newHtml);
+        applyWorking(() => newHtml);
         setCommittedHtml(newHtml);
         setForm((f) => ({ ...f, notes: "" }));
       }
@@ -346,7 +351,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   }, [render.data, existingPost.data, existingPost.isFetched]);
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
-    setHtml(s.html_body);
+    applyWorking(() => s.html_body);
     // Restore the tracked-changes baseline; older snapshots without one have no
     // pending changes (committed == body).
     setCommittedHtml(s.committed_html_body ?? s.html_body);
@@ -368,7 +373,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       wp_excerpt: s.wp_excerpt ?? null,
       wp_publish_at: s.wp_publish_at ?? null,
     }));
-  }, [setComments]);
+  }, [setComments, applyWorking]);
 
   const { saveState, isDirty, saveStatusLabel, saveSnapshot, handleManualSave } =
     useSnapshotAutosave({
@@ -518,8 +523,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                   pendingCount={pendingChanges}
                   onHtmlChange={setHtml}
                   onTrackedChange={({ committed, working }) => {
+                    // committed is a React-only tracked-changes baseline — never
+                    // written to Yjs. working is the new body → route through the
+                    // collab-aware writer so the CRDT gets it too.
                     setCommittedHtml(committed);
-                    setHtml(working);
+                    applyWorking(() => working);
                   }}
                   onComment={commentOnChange}
                   onAddComment={addComment}

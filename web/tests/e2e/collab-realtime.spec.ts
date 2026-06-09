@@ -182,4 +182,47 @@ test.describe("realtime collab — two editors on one run", () => {
       await ctxB.close();
     }
   });
+
+  test("rejecting a tracked change reflects back in the Edit panel under collab", async ({
+    browser,
+  }) => {
+    // Regression for fix/collab-working-body-yjs-sync: with collab ON, an external
+    // working-body write (the tracked-change Reject) used to update React state
+    // only and never the Yjs CRDT — so the rejection vanished when you switched
+    // back to Edit (the collab editor hydrates from the Yjs doc, the source of
+    // truth in collab mode). The fix pushes such writes into Yjs via a whole-doc
+    // replace, so Reject must now be visible in the Edit panel.
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await login(page, EMAIL!, PASSWORD!);
+      const runId = await firstRunId(page);
+      await page.goto(`${BASE}/runs/${runId}/edit`);
+      await expect(page.locator(EDITOR)).toBeVisible({ timeout: 30_000 });
+
+      // 1) Create a CLEAN pending insertion hunk: type a unique contiguous token
+      //    at the document start. Committed baseline vs working body now differ,
+      //    so Review mode renders this token as a single-author <ins> hunk.
+      const rejectToken = `ZZREJ-${runId.slice(0, 4)}`;
+      await typeAtEdge(page, "Home", rejectToken);
+      await expect(page.locator(EDITOR)).toContainText(rejectToken, { timeout: 15_000 });
+
+      // 2) Switch to Review changes and reject that hunk.
+      await page.getByRole("button", { name: /Review changes/i }).click();
+      const insertion = page.locator(`ins:has-text("${rejectToken}")`).first();
+      await expect(insertion).toBeVisible({ timeout: 15_000 });
+      await insertion.click();
+      const popover = page.getByRole("group", { name: /Tracked change actions/i });
+      await expect(popover).toBeVisible({ timeout: 15_000 });
+      await popover.getByRole("button", { name: /Reject change/i }).click();
+
+      // 3) Switch back to Edit. The collab editor re-hydrates from the Yjs doc;
+      //    the rejected text must be GONE there (the bug left it present).
+      await page.getByRole("button", { name: /^Edit$/ }).click();
+      await expect(page.locator(EDITOR)).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator(EDITOR)).not.toContainText(rejectToken, { timeout: 15_000 });
+    } finally {
+      await context.close();
+    }
+  });
 });

@@ -47,3 +47,23 @@ export function seedCollabDocIfEmpty(ydoc: YDoc, draftHtml: string): boolean {
     editor.destroy();
   }
 }
+
+/** Replace the ENTIRE shared doc fragment with `html`. Used for external
+ *  working-body writes (reject tracked change, AI apply-edits, comment/review
+ *  strip, snapshot restore) that must propagate into the CRDT when collab is on
+ *  — without it the live editor (bound to Yjs, ignoring its `value` prop) shows
+ *  stale content and the next keystroke re-propagates the old body, losing the
+ *  change. Binds a headless editor to the shared doc through the SSOT schema and
+ *  setContent's the whole document (whole-fragment replace is intentional).
+ *  CLIENT-SIDE ONLY (needs a DOM). */
+export function replaceCollabDoc(ydoc: YDoc, html: string): void {
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: buildEditorExtensions({ collabDoc: ydoc }),
+  });
+  try {
+    editor.commands.setContent(html, { emitUpdate: true });
+  } finally {
+    editor.destroy();
+  }
+}

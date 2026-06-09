@@ -3,6 +3,7 @@ import { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 
 import { buildEditorExtensions } from "./editor-extensions";
+import { replaceCollabDoc } from "@/lib/run-editor/collab-html";
 
 /**
  * Phase 0b spike — prove the article body survives the collaboration round-trip:
@@ -121,6 +122,30 @@ describe("collab round-trip fidelity", () => {
     } finally {
       a.destroy();
       b.destroy();
+    }
+  });
+
+  it("replaceCollabDoc on a shared doc is reflected in a live editor bound to that doc", () => {
+    const ydoc = new Y.Doc();
+    // A live editor bound to the shared doc (stands in for the on-screen editor).
+    const live = makeEditor(ydoc);
+    try {
+      live.commands.setContent(RICH_HTML);
+      expectAllFeaturesPreserved(live.getHTML());
+
+      // External working-body write (e.g. reject a tracked change) replaces the
+      // whole shared fragment with new content — the live editor must reflect it.
+      const replacement = "<h2>新標題</h2><p>替換後的內容。</p>";
+      replaceCollabDoc(ydoc, replacement);
+
+      const liveHtml = live.getHTML();
+      expect(liveHtml).toContain("新標題");
+      expect(liveHtml).toContain("替換後的內容。");
+      // Old content is gone — this was a whole-fragment replace, not a merge.
+      expect(liveHtml).not.toContain("產品比較");
+      expect(liveHtml).not.toContain("editor__faq");
+    } finally {
+      live.destroy();
     }
   });
 });
