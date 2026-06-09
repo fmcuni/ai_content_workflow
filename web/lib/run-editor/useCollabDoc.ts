@@ -32,11 +32,28 @@ export interface CollabDocHandle {
   status: CollabStatus;
   /** Server-issued cursor colour for THIS session (null until the INIT frame). */
   color: string | null;
+  /**
+   * True only when the RunDoc DO designated THIS session as the authoritative
+   * first-writer (the INIT frame's `primary` flag). Drives the seed flow so two
+   * brand-new first-joiners can't both seed and duplicate content
+   * (lib/run-editor/useSeedCollabDoc.ts). Always false until the INIT frame,
+   * false when collab is disabled, and forced false in observer mode (a
+   * read-only viewer must never seed).
+   */
+  isSeedAuthority: boolean;
 }
 
 export interface UseCollabDocOptions {
   enabled: boolean;
   user: { name: string; email: string };
+  /**
+   * Observer / read-only mode. When true the session still opens the socket,
+   * receives remote edits, and publishes its awareness (so editors see the
+   * viewer present) — but relays NO local document updates and never seeds. The
+   * caller is responsible for mounting the editor non-editable. Default false
+   * (full read-write editor). See the seeder-grant caveat in the effect.
+   */
+  readOnly?: boolean;
 }
 
 const DISABLED_HANDLE: CollabDocHandle = {
@@ -45,6 +62,7 @@ const DISABLED_HANDLE: CollabDocHandle = {
   provider: null,
   status: "disabled",
   color: null,
+  isSeedAuthority: false,
 };
 
 /** Coerce an inbound WebSocket frame (ArrayBuffer / view) to Uint8Array; mirrors
@@ -154,11 +172,12 @@ function createInstances(runId: string, user: { name: string; email: string }): 
 }
 
 export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): CollabDocHandle {
-  const { enabled, user } = opts;
+  const { enabled, user, readOnly = false } = opts;
   const active = enabled && runId !== null;
 
   const [status, setStatus] = useState<CollabStatus>(active ? "connecting" : "disabled");
   const [color, setColor] = useState<string | null>(null);
+  const [isSeedAuthority, setIsSeedAuthority] = useState<boolean>(false);
 
   // Create the doc/awareness/provider triple at first render (lazy initializer)
   // so consumers see it immediately — no setState-in-effect to publish it. The
@@ -177,6 +196,7 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
     setInstances(active && runId !== null ? createInstances(runId, user) : null);
     setStatus(active ? "connecting" : "disabled");
     setColor(null);
+    setIsSeedAuthority(false);
   }
 
   // Keep the latest identity available to the effect's async callbacks without
@@ -185,6 +205,13 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  // Observer flag read via ref so toggling it never tears the socket down (it is
+  // surface-stable in practice). Gates the outbound doc-update relay + seeding.
+  const readOnlyRef = useRef(readOnly);
+  useEffect(() => {
+    readOnlyRef.current = readOnly;
+  }, [readOnly]);
 
   useEffect(() => {
     if (!active || !instances) return;
@@ -206,8 +233,12 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
 
     // Outbound: local doc updates → MESSAGE_SYNC update frame. Skip updates that
     // came FROM the server (origin === provider) to avoid echoing them back.
+    // Observer mode relays NO local edits at all — the editor is mounted
+    // non-editable, but guard here too so any programmatic local mutation stays
+    // local (sync REPLIES in onMessage still flow, so the observer keeps
+    // receiving remote state).
     const onDocUpdate = (update: Uint8Array, origin: unknown): void => {
-      if (origin === provider) return;
+      if (origin === provider || readOnlyRef.current) return;
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, MESSAGE_SYNC);
       syncProtocol.writeUpdate(encoder, update);
@@ -274,6 +305,22 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
                 color: issued,
               });
             }
+            // `primary` (DO seeder grant) gates the seed flow. Defensive: a frame
+            // without a boolean `primary` (older server) reads as false. An
+            // observer must NEVER seed, so force false in read-only mode.
+            // CAVEAT: the DO grants `primary` to the first connection on an empty
+            // doc regardless of role; if a read-only observer ever opens an empty
+            // run before any editor, it would consume the seeder slot server-side
+            // (and then decline to seed here). That is harmless today (no
+            // observer surface is wired), but when one is added the DO grant must
+            // learn to skip observers (e.g. an `?observe=1` upgrade query).
+            const primary =
+              typeof raw === "object" &&
+              raw !== null &&
+              typeof (raw as { primary?: unknown }).primary === "boolean"
+                ? (raw as { primary: boolean }).primary
+                : false;
+            setIsSeedAuthority(readOnlyRef.current ? false : primary);
           } catch (err: unknown) {
             console.warn("useCollabDoc: malformed INIT frame", err);
           }
@@ -379,5 +426,6 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
     provider: instances?.provider ?? null,
     status,
     color,
+    isSeedAuthority,
   };
 }

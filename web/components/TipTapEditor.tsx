@@ -440,6 +440,11 @@ interface TipTapEditorProps {
    *  editor is the standalone string-backed editor (default; byte-identical to
    *  before). */
   collab?: TipTapCollab | null;
+  /** Observer / read-only mode. When false the editor is non-editable (no
+   *  toolbar, no selection actions, no link-panel mutations) but — in collab
+   *  mode — still renders live remote edits + carets via the bound Yjs doc.
+   *  Default true (full editor; byte-identical to before). */
+  editable?: boolean;
 }
 
 export function TipTapEditor({
@@ -450,8 +455,15 @@ export function TipTapEditor({
   onAddReviewNote,
   onReviewClick,
   collab,
+  editable = true,
 }: TipTapEditorProps) {
   const collabActive = !!collab;
+  // Read by the editor's selection/click callbacks (registered once) so they see
+  // the current editability without re-creating the editor.
+  const editableRef = useRef(editable);
+  useEffect(() => {
+    editableRef.current = editable;
+  }, [editable]);
   const [selectionPill, setSelectionPill] = useState<{ x: number; y: number } | null>(null);
   const [linkPanel, setLinkPanel] = useState<LinkPanelState | null>(null);
   // Read by the editor's selection/click callbacks (registered once) so they see
@@ -476,8 +488,17 @@ export function TipTapEditor({
     // Yjs is the source of truth in collab mode; passing `content` alongside
     // Collaboration would duplicate the doc, so seed nothing here.
     content: collab ? undefined : value,
+    // Observer mode: non-editable. Collaboration still applies remote updates
+    // (the doc is the SoT), so an observer sees live edits + carets without a
+    // local caret of their own.
+    editable,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     onSelectionUpdate: ({ editor }) => {
+      // No selection-driven UI for a read-only observer.
+      if (!editableRef.current) {
+        setSelectionPill(null);
+        return;
+      }
       // Dismiss the link panel once the cursor leaves the link — unless we're
       // mid-edit in the panel's input (which blurs the editor selection).
       // setState(null) is a no-op re-render when already null (React bails).
@@ -503,6 +524,8 @@ export function TipTapEditor({
         autocapitalize: "off",
       },
       handleClickOn: (_view, _pos, _node, _nodePos, event) => {
+        // A read-only observer gets no link panel / comment / review interactions.
+        if (!editableRef.current) return false;
         const target = event.target as HTMLElement;
         // A link click opens the URL panel (full URL + copy/open/edit/remove)
         // instead of navigating — openOnClick is disabled on the extension.
@@ -547,6 +570,13 @@ export function TipTapEditor({
     if (editor.getHTML() === value) return;
     editor.commands.setContent(value, { emitUpdate: false });
   }, [editor, value, collabActive]);
+
+  // Keep editability in sync if the `editable` prop flips after creation (the
+  // editor is only recreated on `collabActive`, not on `editable`).
+  useEffect(() => {
+    if (!editor) return;
+    if (editor.isEditable !== editable) editor.setEditable(editable);
+  }, [editor, editable]);
 
   const addComment = useCallback(() => {
     if (!editor || !onAddComment) return;
@@ -615,9 +645,11 @@ export function TipTapEditor({
 
   return (
     <div className="relative">
-      <Toolbar editor={editor} onLinkClick={openLinkPanel} />
+      {/* Observer (read-only) mode hides the editing toolbar; the bound Yjs doc
+          still streams live remote edits + carets into EditorContent. */}
+      {editable && <Toolbar editor={editor} onLinkClick={openLinkPanel} />}
       <EditorContent editor={editor} />
-      {linkPanel && (
+      {editable && linkPanel && (
         <LinkPanel
           state={linkPanel}
           onSave={saveLink}

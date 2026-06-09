@@ -91,6 +91,22 @@ function buildInitFrame(color: string): Uint8Array {
   return encoding.toUint8Array(encoder);
 }
 
+/** INIT frame carrying the DO's seeder grant (`primary`). */
+function buildInitFrameWithPrimary(color: string, primary: boolean): Uint8Array {
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, MESSAGE_INIT);
+  encoding.writeVarString(encoder, JSON.stringify({ color, primary }));
+  return encoding.toUint8Array(encoder);
+}
+
+/** Insert a paragraph into the doc's body fragment (a local content edit). */
+function insertLocalEdit(ydoc: Y.Doc): void {
+  const frag = ydoc.getXmlFragment("default");
+  const el = new Y.XmlElement("paragraph");
+  el.insert(0, [new Y.XmlText("hi")]);
+  frag.insert(0, [el]);
+}
+
 /** A second simulated client's awareness, encoded as a MESSAGE_AWARENESS frame. */
 function buildAwarenessFrame(): { frame: Uint8Array; clientId: number } {
   const otherDoc = new Y.Doc();
@@ -248,6 +264,86 @@ describe("useCollabDoc — connection", () => {
     // The doc applied the update (origin === provider) so onDocUpdate skipped
     // the echo — no SYNC update frame was sent in response.
     expect(ws.sent.length).toBe(sentBefore);
+  });
+});
+
+describe("useCollabDoc — seed authority", () => {
+  it("INIT with primary=true marks the session as the seed authority", async () => {
+    const { result } = renderHook(() => useCollabDoc("run-1", { enabled: true, user: identity }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ws = FakeWebSocket.instances[0]!;
+    act(() => ws.fireOpen());
+
+    expect(result.current.isSeedAuthority).toBe(false); // not until INIT
+    act(() => ws.fireServerMessage(buildInitFrameWithPrimary("#ef4444", true)));
+
+    await waitFor(() => expect(result.current.isSeedAuthority).toBe(true));
+  });
+
+  it("INIT without a primary flag leaves isSeedAuthority false (back-compat)", async () => {
+    const { result } = renderHook(() => useCollabDoc("run-1", { enabled: true, user: identity }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ws = FakeWebSocket.instances[0]!;
+    act(() => ws.fireOpen());
+
+    act(() => ws.fireServerMessage(buildInitFrame("#ef4444")));
+
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(result.current.isSeedAuthority).toBe(false);
+  });
+});
+
+describe("useCollabDoc — observer (read-only)", () => {
+  it("relays NO local doc edit to the server in observer mode", async () => {
+    const { result } = renderHook(() =>
+      useCollabDoc("run-1", { enabled: true, user: identity, readOnly: true }),
+    );
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ws = FakeWebSocket.instances[0]!;
+    act(() => ws.fireOpen());
+
+    const sentBefore = ws.sent.length;
+    act(() => insertLocalEdit(result.current.ydoc!));
+
+    // The outbound relay is suppressed for an observer — no frame was sent.
+    expect(ws.sent.length).toBe(sentBefore);
+  });
+
+  it("never becomes the seed authority even when the server grants primary=true", async () => {
+    const { result } = renderHook(() =>
+      useCollabDoc("run-1", { enabled: true, user: identity, readOnly: true }),
+    );
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ws = FakeWebSocket.instances[0]!;
+    act(() => ws.fireOpen());
+
+    act(() => ws.fireServerMessage(buildInitFrameWithPrimary("#ef4444", true)));
+
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(result.current.isSeedAuthority).toBe(false);
+  });
+
+  it("still receives + applies a remote edit in observer mode", async () => {
+    const { result } = renderHook(() =>
+      useCollabDoc("run-1", { enabled: true, user: identity, readOnly: true }),
+    );
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ws = FakeWebSocket.instances[0]!;
+    act(() => ws.fireOpen());
+
+    // Server pushes a doc that has content.
+    const serverDoc = new Y.Doc();
+    serverDoc.getXmlFragment("default").insert(0, [new Y.XmlText("from server")]);
+    const update = Y.encodeStateAsUpdate(serverDoc);
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, MESSAGE_SYNC);
+    syncProtocol.writeUpdate(encoder, update);
+    const frame = encoding.toUint8Array(encoder);
+
+    act(() => ws.fireServerMessage(frame));
+
+    // The observer applied the remote update locally (read path intact).
+    expect(result.current.ydoc!.getXmlFragment("default").length).toBeGreaterThan(0);
   });
 });
 

@@ -15,15 +15,16 @@ import type { CollabStatus } from "@/lib/run-editor/useCollabDoc";
  * (the emptiness check in `seedCollabDocIfEmpty` then sees real content). A
  * per-`ydoc` guard ensures we attempt the seed at most once per doc instance.
  *
- * RACE BOUNDARY (read before extending this):
- * The emptiness guard is client-side. It is fully safe for the common
+ * RACE BOUNDARY (closed in Phase 5):
+ * The emptiness guard is client-side and is fully safe for the common
  * single-opener case AND for any returning run (a persisted doc is non-empty →
- * no re-seed). The ONLY residual race is two BRAND-NEW first-joiners opening the
- * same empty run within the sync round-trip: both could observe an empty doc and
- * seed, duplicating content on merge. A fully race-free fix would require a
- * backend "you-are-the-seeder" signal from the RunDoc DO; that is deferred
- * because it would touch the committed Phase 1 Durable Object. This hook does
- * not attempt to close that window.
+ * no re-seed). The previously-documented residual — two BRAND-NEW first-joiners
+ * opening the same empty run within the sync round-trip, both observing an empty
+ * doc and seeding (duplicating content on merge) — is now closed by the RunDoc
+ * DO's authoritative "you-are-the-seeder" grant: the DO designates exactly ONE
+ * connection as primary, surfaced as `isSeedAuthority` on the useCollabDoc
+ * handle. Seeding requires BOTH that grant AND the local emptiness check, so a
+ * non-authoritative joiner never seeds even if it momentarily sees an empty doc.
  */
 
 export interface UseSeedCollabDocArgs {
@@ -35,6 +36,9 @@ export interface UseSeedCollabDocArgs {
   draftHtml: string;
   /** Master gate — collab active AND the draft is ready. Seeding never runs when false. */
   enabled: boolean;
+  /** The DO-issued seeder grant from useCollabDoc. Only the authoritative
+   *  first-writer seeds — closes the two-first-joiners race. */
+  isSeedAuthority: boolean;
 }
 
 export interface SeedCollabDocResult {
@@ -43,7 +47,7 @@ export interface SeedCollabDocResult {
 }
 
 export function useSeedCollabDoc(args: UseSeedCollabDocArgs): SeedCollabDocResult {
-  const { ydoc, status, draftHtml, enabled } = args;
+  const { ydoc, status, draftHtml, enabled, isSeedAuthority } = args;
 
   const [seeded, setSeeded] = useState<boolean>(false);
 
@@ -65,7 +69,11 @@ export function useSeedCollabDoc(args: UseSeedCollabDocArgs): SeedCollabDocResul
 
     if (attemptedRef.current) return;
     const canSeed =
-      enabled && ydoc !== null && status === "connected" && draftHtml.trim() !== "";
+      enabled &&
+      isSeedAuthority &&
+      ydoc !== null &&
+      status === "connected" &&
+      draftHtml.trim() !== "";
     if (!canSeed) return;
 
     attemptedRef.current = true;
@@ -82,7 +90,7 @@ export function useSeedCollabDoc(args: UseSeedCollabDocArgs): SeedCollabDocResul
     // must publish its outcome to consumers (mirrors useCollabDoc's status pattern).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSeeded(didSeed);
-  }, [enabled, ydoc, status, draftHtml]);
+  }, [enabled, isSeedAuthority, ydoc, status, draftHtml]);
 
   return { seeded };
 }

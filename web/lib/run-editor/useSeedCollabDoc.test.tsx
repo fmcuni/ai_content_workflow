@@ -27,6 +27,7 @@ function args(overrides: Partial<UseSeedCollabDocArgs>): UseSeedCollabDocArgs {
     status: "connected" satisfies CollabStatus,
     draftHtml: DRAFT_HTML,
     enabled: true,
+    isSeedAuthority: true,
     ...overrides,
   };
 }
@@ -92,26 +93,37 @@ describe("useSeedCollabDoc", () => {
     expect(html).not.toContain("new");
   });
 
-  it("two simulated first-joiners on the SAME shared doc do not duplicate content", async () => {
-    // Models the RunDoc DO relaying ONE logical doc to two clients, with updates
-    // applied synchronously in-test (the seed of joiner A is visible to B before
-    // B's effect reads emptiness). True zero-propagation simultaneity — both
-    // clients observing an empty doc within the sync round-trip — is the
-    // documented residual race and is out of scope for this test.
+  it("does NOT seed when not the seed authority, even if connected + empty", async () => {
+    const ydoc = new Y.Doc();
+    const { result } = renderHook(() =>
+      useSeedCollabDoc(args({ ydoc, isSeedAuthority: false })),
+    );
+
+    // Let any effect run, then assert the non-authority never seeded.
+    await waitFor(() => expect(result.current.seeded).toBe(false));
+    expect(flattenCollabDoc(ydoc)).not.toContain(DRAFT_BODY);
+  });
+
+  it("two first-joiners on the SAME shared doc: only the seed authority seeds (no duplication)", async () => {
+    // The RunDoc DO designates exactly one connection as the seed authority
+    // (isSeedAuthority=true); the other is told false. Even racing on one shared
+    // doc, only the authority writes, so content is never duplicated.
     const sharedDoc = new Y.Doc();
 
-    const a = renderHook(() => useSeedCollabDoc(args({ ydoc: sharedDoc })));
-    const b = renderHook(() => useSeedCollabDoc(args({ ydoc: sharedDoc })));
+    const authority = renderHook(() =>
+      useSeedCollabDoc(args({ ydoc: sharedDoc, isSeedAuthority: true })),
+    );
+    const follower = renderHook(() =>
+      useSeedCollabDoc(args({ ydoc: sharedDoc, isSeedAuthority: false })),
+    );
 
-    await waitFor(() => {
-      expect(a.result.current.seeded || b.result.current.seeded).toBe(true);
-    });
+    await waitFor(() => expect(authority.result.current.seeded).toBe(true));
 
     const html = flattenCollabDoc(sharedDoc);
     expect(html).toContain(DRAFT_BODY);
-    // Exactly one copy — the first hook seeded, the second observed non-empty.
+    // Exactly one copy, written by the authority only.
     expect(countOccurrences(html, DRAFT_BODY)).toBe(1);
-    // Exactly one of the two reports having seeded.
-    expect([a.result.current.seeded, b.result.current.seeded].filter(Boolean)).toHaveLength(1);
+    expect(authority.result.current.seeded).toBe(true);
+    expect(follower.result.current.seeded).toBe(false);
   });
 });
