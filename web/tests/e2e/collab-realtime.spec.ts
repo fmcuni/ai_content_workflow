@@ -8,12 +8,9 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
  *   1. concurrent typing from both editors CONVERGES (CRDT merge, no lost text);
  *   2. each editor sees the OTHER's remote caret + name label;
  *   3. the connected-editors presence avatar stack shows BOTH;
- *   4. the Review-changes surface opens a hunk's actions popover (accept/reject).
- *
- * NOTE: per-author blame attribution ("…by {name}") is covered by the
- * collab-blame unit tests but is NOT asserted here — it does not surface in this
- * live two-context path (popover shows accept/reject, no author line). Tracked as
- * a follow-up; do not claim live blame works off this e2e.
+ *   4. the Review-changes surface opens a hunk's actions popover (accept/reject)
+ *      AND shows per-author blame attribution ("Added by {name}") for a clean
+ *      single-author insertion hunk.
  *
  * ── HOW TO RUN (LOCAL STACK ONLY — never prod) ───────────────────────────────
  * Collab is flag-gated OFF in production, and this test TYPES into the article
@@ -52,6 +49,9 @@ const PASSWORD = process.env.E2E_PASSWORD;
 // Optional second distinct author; falls back to the first account.
 const EMAIL_2 = process.env.E2E_EMAIL_2 || EMAIL;
 const PASSWORD_2 = process.env.E2E_PASSWORD_2 || PASSWORD;
+// Expected blame author name = session.user.name || email || "Editor". CI signs
+// up "Collab E2E"; override for local runs whose account carries another name.
+const EXPECTED_AUTHOR = process.env.E2E_AUTHOR_NAME || "Collab E2E";
 
 /** ProseMirror editable surface inside the visual editor. */
 const EDITOR = ".editorial-prose";
@@ -157,20 +157,26 @@ test.describe("realtime collab — two editors on one run", () => {
         expect(count).toBeGreaterThanOrEqual(2);
       }).toPass({ timeout: 15_000 });
 
-      // 5) Review surface: switch A to Review mode, open a hunk's actions popover.
-      //    NOTE: per-author blame attribution ("Added by {name}") is intentionally
-      //    NOT asserted here. The blame resolver is covered by collab-blame.test.ts
-      //    in isolation, but it does NOT surface an author in this live two-context
-      //    path — the popover opens with Accept/Reject but no attribution line.
-      //    That gap is a tracked follow-up (see project_realtime_collab_per_author
-      //    memory + the plan doc); this e2e gates the user-visible review flow.
+      // 5) Review surface: switch A to Review mode, open a hunk's actions popover,
+      //    and assert per-author blame attribution surfaces. tokenA was typed
+      //    contiguously by A at the document start, so the first <ins> is a CLEAN
+      //    single-author insertion hunk; A is the live local session, so its own
+      //    edit resolves via awareness (keyed by the live clientID — robust to the
+      //    name-keyed users-map clientID strand fixed in collab-blame.ts).
       await pageA.getByRole("button", { name: /Review changes/i }).click();
-      const insertion = pageA.locator("ins").first();
+      // The clean tokenA insertion (A's own, at the start of the doc).
+      const insertion = pageA.locator(`ins:has-text("${tokenA}")`).first();
       await expect(insertion).toBeVisible({ timeout: 15_000 });
       await insertion.click();
       const popover = pageA.getByRole("group", { name: /Tracked change actions/i });
       await expect(popover).toBeVisible({ timeout: 15_000 });
       await expect(popover.getByRole("button", { name: /Accept change/i })).toBeVisible();
+      // Attribution line: "Added by {name}". Both contexts authenticate as the
+      // same CI account (display name "Collab E2E"), so A's own insertion is
+      // attributed to that name. Scoped to the popover group to avoid matching
+      // the article body or presence stack.
+      await expect(popover).toContainText(/Added by/i, { timeout: 15_000 });
+      await expect(popover.getByText(EXPECTED_AUTHOR, { exact: false })).toBeVisible();
     } finally {
       await ctxA.close();
       await ctxB.close();

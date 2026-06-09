@@ -163,6 +163,53 @@ describe("buildBlameResolver", () => {
     b.destroy();
   });
 
+  it("attributes the live editor's OWN insertion via awareness after syncing in a same-name prior session (regression: users-map clientID strand)", () => {
+    // Reproduces the live bug: a prior session (DO storage) seeded the doc under
+    // display name "Franco"; a NEW session for the SAME name creates a fresh
+    // doc + clientID, calls setUserMapping, then syncs the stored state in. The
+    // name-keyed `users` Y.Map collides on "Franco" and the sync resolves it to a
+    // single winner, non-deterministically stranding one clientID. Awareness
+    // (keyed by the live clientID) must still attribute the editor's own edit.
+    const docPrior = new Y.Doc({ gc: false });
+    const pudPrior = new Y.PermanentUserData(docPrior);
+    pudPrior.setUserMapping(docPrior, docPrior.clientID, "Franco");
+    const seeder = makeEditor(docPrior);
+    seeder.commands.setContent("<p>Seeded committed body</p>");
+    const committed = flatten(docPrior);
+    seeder.destroy();
+    const stored = Y.encodeStateAsUpdate(docPrior);
+
+    const doc = new Y.Doc({ gc: false });
+    const pud = new Y.PermanentUserData(doc);
+    pud.setUserMapping(doc, doc.clientID, "Franco"); // same display name
+    Y.applyUpdate(doc, stored); // syncStep2 — collides on the "Franco" key
+
+    const live = makeEditor(doc);
+    live.commands.insertContentAt(live.state.doc.content.size - 1, " typed by me");
+    const working = flatten(doc);
+
+    // Live awareness for THIS session (clientID === doc.clientID).
+    const awareness = new Awareness(doc);
+    awareness.setLocalStateField("user", {
+      name: "Franco",
+      email: "franco@bowtie.com.hk",
+      color: "#3b82f6",
+    });
+
+    const hunks = buildBlameResolver(doc, awareness)!.annotate(
+      computeTrackedChanges(committed, working),
+    );
+    const adds = hunks.filter((h) => h.type === "add");
+    expect(adds.length).toBeGreaterThan(0);
+    // The own edit attributes to Franco (and carries the server colour) even
+    // though the users-map race may have stranded this session's clientID.
+    for (const h of adds) {
+      expect(h.author?.name).toBe("Franco");
+      expect(h.author?.color).toBe("#3b82f6");
+    }
+    live.destroy();
+  });
+
   it("returns the hunks unchanged when there are none (no work, no mutation)", () => {
     const { docA } = seedByAlice("<p>Same body</p>");
     const same = flatten(docA);

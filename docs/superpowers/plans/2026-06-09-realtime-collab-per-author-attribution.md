@@ -298,12 +298,27 @@ string-snapshot editor. The `run_collab_state` table and `RunDoc` DO are additiv
   (the caret bar is a ~0-width marker Playwright calls "hidden").
 - **CI gate GREEN** (run 27198968283) for: convergence/no-loss, remote caret +
   name label, presence stack (≥2 sessions), and the Review actions popover.
-- **Blame attribution DESCOPED from the e2e** → **follow-up**: in the live
-  two-context path the Review popover opens (accept/reject) but renders **no**
-  `Added by {name}` line — author resolves null for every hunk; `scanDoc` does not
-  throw. `collab-blame.test.ts` passes in isolation, so the resolver logic is
-  sound; the gap is the live wire/seed path. Needs runtime Yjs-doc inspection on a
-  non-OOM machine.
+- **Blame attribution follow-up — ✅ ROOT-CAUSED + FIXED 2026-06-09** (branch
+  `fix/collab-live-blame-attribution`, CI collab-e2e GREEN run 27202729529; awaiting
+  merge). The live Review popover rendered **no** `Added by {name}` line — author
+  null for every hunk, `scanDoc` silent. Root cause found by reading branch-only
+  `window.__collabBlame` diagnostics out of the CI logs (non-OOM, no prod writes):
+  `walk()` detected Yjs content via `content.constructor.name === "ContentString"/
+  "ContentType"`, but the **production Turbopack build MINIFIES yjs's internal
+  Content\* class names** (diag showed share types `gE`/`gH`), so the comparisons
+  matched nothing → `scanDoc` collected zero chars (`liveCharCount:0`) without
+  throwing → every hunk lost its author. Unit tests run unminified, so they passed
+  and masked it. **Fix:** duck-type on content shape — `ContentString` is the only
+  content with a string `.str`, `ContentType` the only one with a nested `.type`
+  (minifier-safe). Plus complementary hardening: `nameByClientId` resolves
+  clientID→name from **awareness first** (keyed by the live `doc.clientID`), PUD
+  fallback for disconnected authors — robust to the name-keyed `users` Y.Map
+  collision that strands a same-name session's clientID on sync. Re-instated the
+  real `Added by {name}` e2e assertion (clean tokenA insertion hunk, scoped to the
+  popover). web vitest 389/389 (+1 regression), tsc/eslint clean. Deletion blame
+  stays best-effort (separate delete-set path, not asserted). **CI flake noted:**
+  `next build` intermittently fails fetching `next/font/google` (noto_sans/serif_tc)
+  — transient CDN error, re-run.
 - **Rolled out:** merged branch → `main` (`db18992`), then flipped collab **ON**
   durably by setting `NEXT_PUBLIC_COLLAB_ENABLED=true` in the **web deploy step of
   `deploy-workers.yml`** (`3c21ff1`) — a one-off manual `cf:deploy` would be

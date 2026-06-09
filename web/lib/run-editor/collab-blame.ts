@@ -86,9 +86,16 @@ function walk(type: unknown, scan: DocScan): void {
   let item: any = (type as { _start?: unknown })._start ?? null;
   while (item) {
     const content = item.content;
-    const cname: string = content?.constructor?.name ?? "";
-    if (cname === "ContentString") {
-      const str: string = content.str ?? "";
+    // DUCK-TYPE on content shape, NOT `content.constructor.name`: yjs's internal
+    // Content* classes are renamed by the production minifier (Turbopack), so a
+    // `=== "ContentString"` name check silently matches NOTHING in prod — the doc
+    // scans clean and every hunk loses its author. `ContentString` is the only
+    // content carrying a string `.str`; `ContentType` is the only one carrying a
+    // nested `.type` (an AbstractType). ContentFormat/Embed/Deleted carry neither,
+    // so they fall through and contribute no character (as before).
+    const str: unknown = content?.str;
+    const childType: unknown = content?.type;
+    if (typeof str === "string") {
       if (item.deleted) {
         // Every char in this item was deleted by one transaction, so they share
         // the item's id; the delete-set is range-based, so the item-start id
@@ -98,7 +105,7 @@ function walk(type: unknown, scan: DocScan): void {
       } else {
         for (let j = 0; j < str.length; j++) scan.liveChars.push({ client: item.id.client });
       }
-    } else if (cname === "ContentType") {
+    } else if (childType && typeof childType === "object") {
       const child = content.type;
       if (!child) {
         item = item.right; // partially-synced nested type — skip, never throw
@@ -166,6 +173,28 @@ function buildColourMap(awareness: Awareness | null | undefined): Map<string, st
   return map;
 }
 
+/** Build a clientID → display-name map from the current peers' awareness.
+ *
+ *  This is the AUTHORITATIVE source for currently-connected editors: awareness is
+ *  keyed by the live `doc.clientID` — the exact id every inserted char carries —
+ *  and always reflects the session's current name. The `users` Y.Map that
+ *  `PermanentUserData` reads is keyed by DISPLAY NAME, so two sessions of the same
+ *  person (e.g. the same operator re-opening a persisted run) collide on one key;
+ *  syncing the stored doc in then resolves that `Y.Map` key conflict to a single
+ *  winner, stranding the loser's clientID — non-deterministically the current
+ *  session's OR a prior one's, depending on which random clientID sorts higher.
+ *  Awareness sidesteps that entirely. PermanentUserData stays the fallback for
+ *  authors who have since disconnected (no awareness entry). */
+function buildAwarenessNameMap(awareness: Awareness | null | undefined): Map<number, string> {
+  const map = new Map<number, string>();
+  if (!awareness) return map;
+  awareness.getStates().forEach((state, clientId) => {
+    const user = (state as { user?: { name?: unknown } })?.user;
+    if (user && typeof user.name === "string") map.set(clientId, user.name);
+  });
+  return map;
+}
+
 /** A read-only attribution view over a live shared doc. `annotate` returns the
  *  tracked-changes hunks with `author` filled in where it can be resolved. */
 export interface BlameResolver {
@@ -201,6 +230,9 @@ export function buildBlameResolver(
       }
       const colours = buildColourMap(awareness);
       const colourOf = (name: string): string => colours.get(name) ?? NEUTRAL_COLLAB_COLOR;
+      // clientID → name from live awareness; authoritative over the name-keyed
+      // `users` map for connected editors (see buildAwarenessNameMap).
+      const awarenessNames = buildAwarenessNameMap(awareness);
 
       let liveCursor = 0;
       let delCursor = 0;
@@ -227,6 +259,10 @@ export function buildBlameResolver(
 
       // getUserByClientId is typed `any`; coerce to a clean string | null.
       const nameByClientId = (client: number): string | null => {
+        // Awareness (keyed by the live clientID) is authoritative for connected
+        // editors; PermanentUserData is the fallback for authors who have left.
+        const live = awarenessNames.get(client);
+        if (live) return live;
         const name: unknown = pud.getUserByClientId(client);
         return typeof name === "string" ? name : null;
       };
