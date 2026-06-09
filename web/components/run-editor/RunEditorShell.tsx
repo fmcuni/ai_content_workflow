@@ -14,6 +14,10 @@ interface RunEditorShellProps {
   dek: ReactNode;
   /** Right side of the back-link row (e.g. hitl2 save controls). */
   headerActions?: ReactNode;
+  /** Connected-editors presence indicator (e.g. <CollabPresence>), shown left of
+   *  headerActions in the back-link row. Renders nothing when collab is off or
+   *  the operator is alone, so the shell stays collab-agnostic. */
+  presence?: ReactNode;
   /** The two columns: main `<section>` + rail `<aside>`. */
   children: ReactNode;
   /** Contents of the sticky bottom action bar. */
@@ -32,6 +36,7 @@ export function RunEditorShell({
   hed,
   dek,
   headerActions,
+  presence,
   children,
   actionBar,
 }: RunEditorShellProps) {
@@ -39,26 +44,20 @@ export function RunEditorShell({
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 pb-32">
-      {headerActions ? (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <Link
-            href={`/runs/${runId}`}
-            className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-          >
-            ← Run · {shortId}
-          </Link>
-          {headerActions}
-        </div>
-      ) : (
-        <div className="mb-4">
-          <Link
-            href={`/runs/${runId}`}
-            className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
-          >
-            ← Run · {shortId}
-          </Link>
-        </div>
-      )}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <Link
+          href={`/runs/${runId}`}
+          className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider"
+        >
+          ← Run · {shortId}
+        </Link>
+        {(presence || headerActions) && (
+          <div className="flex items-center gap-3">
+            {presence}
+            {headerActions}
+          </div>
+        )}
+      </div>
 
       <SectionHead kicker={kicker} hed={hed} dek={dek} />
 

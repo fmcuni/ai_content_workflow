@@ -106,4 +106,23 @@ describe("RunEditorShell", () => {
     );
     expect(screen.getByText("save controls")).toBeInTheDocument();
   });
+
+  it("renders the presence slot in the back-link row when provided", () => {
+    renderShell(
+      <RunEditorShell
+        runId={RUN_ID}
+        run={undefined}
+        kicker="k"
+        hed="h"
+        dek="d"
+        presence={<span>presence avatars</span>}
+        headerActions={<span>save controls</span>}
+        actionBar={null}
+      >
+        <div />
+      </RunEditorShell>,
+    );
+    expect(screen.getByText("presence avatars")).toBeInTheDocument();
+    expect(screen.getByText("save controls")).toBeInTheDocument();
+  });
 });

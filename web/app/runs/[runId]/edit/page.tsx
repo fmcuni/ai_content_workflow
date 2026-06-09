@@ -14,6 +14,7 @@ import { WpPayloadView } from "@/components/WpPayloadView";
 import { Hitl2VersionHistory } from "@/components/Hitl2VersionHistory";
 import { RunEditorShell } from "@/components/run-editor/RunEditorShell";
 import { EditorRail, type EditorRailTab } from "@/components/run-editor/EditorRail";
+import { CollabPresence } from "@/components/run-editor/CollabPresence";
 import { ReviewPanel } from "@/components/run-editor/ReviewPanel";
 import { computeTrackedChanges } from "@/lib/tracked-changes";
 import { useArticleComments } from "@/lib/useArticleComments";
@@ -103,7 +104,14 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     () => ({ name: editorName || editorEmail || "Editor", email: editorEmail }),
     [editorName, editorEmail],
   );
-  const { ydoc, provider, status: collabStatus, color: collabColor } = useCollabDoc(runId, {
+  const {
+    ydoc,
+    awareness,
+    provider,
+    status: collabStatus,
+    color: collabColor,
+    isSeedAuthority,
+  } = useCollabDoc(runId, {
     enabled: collabEnabled,
     user: collabUser,
   });
@@ -118,6 +126,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     status: collabStatus,
     draftHtml: render.data?.html_body ?? "",
     enabled: collabActive && render.data !== undefined,
+    isSeedAuthority,
   });
 
   // Stable flatten callback (keyed on the live doc) so the autosave hook's
@@ -388,6 +397,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
           onOpenHistory={() => setHistoryOpen(true)}
         />
       }
+      presence={<CollabPresence awareness={awareness} />}
       actionBar={
         <>
           <RoleButton
