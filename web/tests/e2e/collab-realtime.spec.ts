@@ -87,10 +87,10 @@ async function openEditor(
 }
 
 /** Type `text` at the start of the editor body. */
-async function typeAtStart(page: Page, text: string): Promise<void> {
+async function typeAtEdge(page: Page, edge: "Home" | "End", text: string): Promise<void> {
   const body = page.locator(EDITOR);
   await body.click();
-  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press(`ControlOrMeta+${edge}`);
   await page.keyboard.type(text, { delay: 20 });
 }
 
@@ -123,8 +123,12 @@ test.describe("realtime collab — two editors on one run", () => {
       const tokenA = `ZZAAA-${stamp}`;
       const tokenB = `ZZBBB-${stamp}`;
 
-      // 1) Concurrent typing from both sides.
-      await Promise.all([typeAtStart(pageA, tokenA), typeAtStart(pageB, tokenB)]);
+      // 1) Concurrent typing from both sides, at DIFFERENT ends of the doc.
+      //    Concurrent inserts at the SAME offset legitimately interleave under
+      //    any CRDT, which would shred a contiguous-token assertion; typing at
+      //    opposite ends keeps each token contiguous while still exercising the
+      //    concurrent-merge path. A at the start, B at the end.
+      await Promise.all([typeAtEdge(pageA, "Home", tokenA), typeAtEdge(pageB, "End", tokenB)]);
 
       // 2) Convergence: each token reaches BOTH editors (CRDT merge, no loss).
       await expect(pageA.locator(EDITOR)).toContainText(tokenA, { timeout: 15_000 });
