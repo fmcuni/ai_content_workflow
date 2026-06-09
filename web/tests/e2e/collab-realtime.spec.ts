@@ -155,12 +155,17 @@ test.describe("realtime collab — two editors on one run", () => {
       // 5) Review-changes blame: switch A to Review mode, open a hunk popover,
       //    assert per-author attribution renders ("…by {name}").
       await pageA.getByRole("button", { name: /Review changes/i }).click();
-      // A pending insertion (our tokens) renders as an <ins>; click it to open
-      // the accept/reject/comment popover, which carries the blame line.
-      const insertion = pageA.locator("ins").first();
+      // Click the insertion carrying tokenB — a CLEAN concurrent insert from the
+      // other editor. (The first <ins> can be a diff-artifact hunk that straddles
+      // the seed-baseline boundary, mixing authored + unauthored chars so its
+      // dominant author legitimately doesn't resolve — see collab-blame.ts.)
+      const insertion = pageA.locator("ins", { hasText: tokenB }).first();
       await expect(insertion).toBeVisible({ timeout: 15_000 });
       await insertion.click();
-      await expect(pageA.getByText(/\bby\b/i).first()).toBeVisible({ timeout: 15_000 });
+      // The popover's attribution line ("Added by {name}") lives in the actions
+      // group; scope to it so we assert the blame line, not stray "by" text.
+      const popover = pageA.getByRole("group", { name: /Tracked change actions/i });
+      await expect(popover.getByText(/\bby\b/i)).toBeVisible({ timeout: 15_000 });
     } finally {
       await ctxA.close();
       await ctxB.close();
