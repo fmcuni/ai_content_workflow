@@ -172,11 +172,11 @@ app.get("/me", async (c) => {
 // authenticated (viewer) session for them.
 
 // prompts: edit (PUT) + revert (POST) → admin (config change). preview (POST) is
-// a pure render of a candidate template, no persistence → reviewer (the legacy
-// `editor` tier; revisit to `author` in WS1 when routes retarget to app_user).
+// a pure render of a candidate template, no persistence → author (a content
+// authoring action under the 4-role capability map).
 app.put("/prompts/templates/:id", requireRole("admin"));
 app.post("/prompts/templates/:id/revert", requireRole("admin"));
-app.post("/prompts/templates/:id/preview", requireRole("reviewer"));
+app.post("/prompts/templates/:id/preview", requireRole("author"));
 
 // personas: create / duplicate / edit / archive / restore → admin (config change).
 app.post("/personas", requireRole("admin"));
@@ -186,10 +186,10 @@ app.post("/personas/:slug/archive", requireRole("admin"));
 app.post("/personas/:slug/restore", requireRole("admin"));
 
 // source-policy: edit (PUT) + revert (POST) → admin (config change).
-// preview (POST) → editor.
+// preview (POST) → author (a content authoring action).
 app.put("/source-policy", requireRole("admin"));
 app.post("/source-policy/revert", requireRole("admin"));
-app.post("/source-policy/preview", requireRole("reviewer"));
+app.post("/source-policy/preview", requireRole("author"));
 
 // publish-targets: CRUD → admin (CMS-destination config). The readiness probe
 // reveals which credential secrets are provisioned, so it is admin-only too.
@@ -200,17 +200,18 @@ app.post("/publish-targets/:id/archive", requireRole("admin"));
 app.post("/publish-targets/:id/restore", requireRole("admin"));
 app.get("/publish-targets/:id/readiness", requireRole("admin"));
 
-// topic-batches: create batch + promote topics → editor. skip a candidate +
-// close a batch are editorial mutations → editor. DELETE batch → admin.
-app.post("/topic-batches", requireRole("reviewer"));
-app.post("/topic-batches/:id/promote", requireRole("reviewer"));
-app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("reviewer"));
-app.post("/topic-batches/:id/close", requireRole("reviewer"));
+// topic-batches: create batch + promote topics → author (create_run /
+// promote_topics). skip a candidate + close a batch are editorial authoring
+// mutations → author. DELETE batch → admin.
+app.post("/topic-batches", requireRole("author"));
+app.post("/topic-batches/:id/promote", requireRole("author"));
+app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("author"));
+app.post("/topic-batches/:id/close", requireRole("author"));
 app.delete("/topic-batches/:id", requireRole("admin"));
 
-// refresh: kick a re-audit scan (existing post) → editor.
-app.post("/refresh/scan", requireRole("reviewer"));
-app.post("/refresh/scan/:articleId", requireRole("reviewer"));
+// refresh: kick a re-audit scan (existing post) → author (content authoring).
+app.post("/refresh/scan", requireRole("author"));
+app.post("/refresh/scan/:articleId", requireRole("author"));
 
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
 // Admin-only: the response enumerates content_tool table names + Postgres

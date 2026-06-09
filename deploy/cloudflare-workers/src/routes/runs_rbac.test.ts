@@ -6,16 +6,22 @@
  * Four-role model (viewer < author < reviewer < admin), NO segregation of
  * duties: a reviewer may approve and publish their OWN run.
  *
- * WS0 is a behavior-preserving rename of the legacy `editor` tier → `reviewer`
- * (create/HITL/publish stays gated at that renamed tier). Content-editing
- * routes still admit a `viewer` here; WS1 retargets them to `author` when
- * loadRole moves to app_user.
+ * WS1 retiers the route gates onto the 4-role capability map:
+ *   - author: create_run, regenerate/restart, edit_outline, edit_article,
+ *     apply_edits, save_snapshot, review-thread mutations.
+ *   - reviewer: hitl1_approve (resume), hitl2_decide, publish (dry-publish,
+ *     republish).
+ *   - admin: delete_run.
+ * The *new* viewer is read-only — content-editing routes now require author, so
+ * a viewer is blocked (403) on them.
  *
  * Coverage:
  *   - requireRole: below-bar → 403, at/above-bar → proceeds
  *   - DELETE /runs/:id (admin gate): reviewer 403, admin 200
- *   - create / HITL approve / publish require reviewer; viewer blocked
- *   - content editing (article/outline/apply-edits/snapshots) admits a viewer
+ *   - create / restart require author; viewer blocked
+ *   - HITL approve / publish require reviewer; author blocked
+ *   - content editing (article/outline/apply-edits/snapshots) requires author;
+ *     viewer blocked, author admitted
  *   - a reviewer may approve + publish a run they created (no self-approval bar)
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -195,14 +201,41 @@ describe("requireRole gate (DELETE /runs/:id → admin)", () => {
   });
 });
 
-describe("requireRole gate (POST /runs → reviewer)", () => {
-  it("returns 403 for a viewer", async () => {
+describe("requireRole gate (POST /runs → author)", () => {
+  it("returns 403 for a viewer (new viewer is read-only)", async () => {
     state.userRole = "viewer";
     const res = await req(appWith("viewer@b.com"), "POST", "/", {
       start_mode: "create",
       topic: "t",
     });
     expect(res.status).toBe(403);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.required_role).toBe("author");
+  });
+
+  it("admits an author past the gate", async () => {
+    state.userRole = "author";
+    const res = await req(appWith("author@b.com"), "POST", "/", {
+      start_mode: "create",
+      topic: "t",
+    });
+    expect(res.status).not.toBe(403);
+  });
+});
+
+describe("requireRole gate (POST /runs/:id/restart → author)", () => {
+  it("returns 403 for a viewer", async () => {
+    state.userRole = "viewer";
+    state.run = { run_id: "r1", status: "failed", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("viewer@b.com"), "POST", "/r1/restart", {});
+    expect(res.status).toBe(403);
+  });
+
+  it("admits an author past the gate (not 403)", async () => {
+    state.userRole = "author";
+    state.run = { run_id: "r1", status: "failed", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("author@b.com"), "POST", "/r1/restart", {});
+    expect(res.status).not.toBe(403);
   });
 });
 
@@ -215,6 +248,16 @@ describe("HITL_2 approve (reviewer, no SoD)", () => {
     state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
     const res = await req(appWith("viewer@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
     expect(res.status).toBe(403);
+    expect(state.run.status).toBe("hitl_2");
+  });
+
+  it("returns 403 for an author (below the reviewer bar)", async () => {
+    state.userRole = "author";
+    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("author@b.com"), "POST", "/r1/hitl-2", { decision: "approve" });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.required_role).toBe("reviewer");
     expect(state.run.status).toBe("hitl_2");
   });
 
@@ -251,6 +294,14 @@ describe("HITL_1 resume approve (reviewer, no SoD)", () => {
     expect(state.run.status).toBe("hitl_1");
   });
 
+  it("returns 403 for an author (below the reviewer bar)", async () => {
+    state.userRole = "author";
+    state.run = { run_id: "r1", status: "hitl_1", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("author@b.com"), "POST", "/r1/resume", { decision: "approve" });
+    expect(res.status).toBe(403);
+    expect(state.run.status).toBe("hitl_1");
+  });
+
   it("lets a reviewer approve their OWN run's source selection", async () => {
     state.userRole = "reviewer";
     state.run = { run_id: "r1", status: "hitl_1", hitl_2_iteration: 0, created_by: "editor@b.com" };
@@ -271,6 +322,13 @@ describe("requireRole gate (POST /runs/:id/dry-publish → reviewer)", () => {
     state.userRole = "viewer";
     state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
     const res = await req(appWith("viewer@b.com"), "POST", "/r1/dry-publish", {});
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 for an author (publish is a reviewer capability)", async () => {
+    state.userRole = "author";
+    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("author@b.com"), "POST", "/r1/dry-publish", {});
     expect(res.status).toBe(403);
   });
 
@@ -310,24 +368,36 @@ describe("requireRole gate (POST /runs/:id/republish → reviewer)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Content editing — viewer capability. A viewer may edit & save an existing
-// run's content; the requireRole("viewer") gate admits them (no 403). The fake
-// DB doesn't model every edit handler's writes, so the handler may reach its
-// own 404/500 — the point is the gate PASSED, never returning 403.
+// Content editing — author capability (WS1 retiering). The *new* viewer is
+// read-only, so the requireRole("author") gate now BLOCKS a viewer (403) and
+// ADMITS an author. The fake DB doesn't model every edit handler's writes, so
+// an admitted request may reach its own 404/500 — the point is the gate PASSED,
+// never returning 403.
 // ---------------------------------------------------------------------------
-describe("content editing admits a viewer (not 403)", () => {
+describe("content editing requires author (viewer blocked, author admitted)", () => {
   const editRoutes: { label: string; method: string; path: string; body: unknown }[] = [
     { label: "PUT /:id/article", method: "PUT", path: "/r1/article", body: { html_body: "<p>x</p>" } },
     { label: "PUT /:id/outline", method: "PUT", path: "/r1/outline", body: { outline: {} } },
     { label: "POST /:id/apply-edits", method: "POST", path: "/r1/apply-edits", body: { html_body: "<p>x</p>", notes: "n" } },
     { label: "POST /:id/hitl2-snapshots", method: "POST", path: "/r1/hitl2-snapshots", body: { html_body: "<p>x</p>", trigger: "manual" } },
+    { label: "POST /:id/review-threads", method: "POST", path: "/r1/review-threads", body: { anchor_text: "a", body: "b" } },
+    { label: "POST /:id/review-threads/:tid/replies", method: "POST", path: "/r1/review-threads/t1/replies", body: { body: "b" } },
+    { label: "POST /:id/review-threads/:tid/resolve", method: "POST", path: "/r1/review-threads/t1/resolve", body: {} },
+    { label: "DELETE /:id/review-threads/:tid", method: "DELETE", path: "/r1/review-threads/t1", body: {} },
   ];
 
   for (const route of editRoutes) {
-    it(`${route.label} — viewer is past the gate`, async () => {
+    it(`${route.label} — viewer is blocked (403)`, async () => {
       state.userRole = "viewer";
       state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "someone@b.com" };
       const res = await req(appWith("viewer@b.com"), route.method, route.path, route.body);
+      expect(res.status).toBe(403);
+    });
+
+    it(`${route.label} — author is past the gate (not 403)`, async () => {
+      state.userRole = "author";
+      state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "someone@b.com" };
+      const res = await req(appWith("author@b.com"), route.method, route.path, route.body);
       expect(res.status).not.toBe(403);
     });
   }

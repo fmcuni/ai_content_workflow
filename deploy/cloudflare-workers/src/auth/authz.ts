@@ -120,9 +120,15 @@ type AuthzContext = Context<AuthzEnv>;
  * Load the effective role for the current session, caching it on the context so
  * repeated middleware / handler reads hit the DB once per request.
  *
- * Resolution: SELECT role FROM content_tool."user" WHERE id = userId (else by
- * email), then apply `effectiveRole`. Returns null when there is NO session
- * identity at all (neither id nor email) — the caller maps that to 401.
+ * Resolution is provider-aware so `main` stays deployable under the flag:
+ *   - `AUTH_PROVIDER="supabase"` reads the Supabase-backed `content_tool.app_user`
+ *     table (id = the auth user uuid, else email).
+ *   - any other value (default `better-auth`) reads the legacy
+ *     `content_tool."user"` table exactly as before.
+ * Both paths prefer the id (stable PK) and fall back to email, then apply
+ * `effectiveRole` (bootstrap-admin override + default "viewer"). Returns null
+ * when there is NO session identity at all (neither id nor email) — the caller
+ * maps that to 401.
  */
 export async function loadRole(c: AuthzContext): Promise<Role | null> {
   const cached = c.get(ROLE_CACHE_KEY);
@@ -139,19 +145,29 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
     return null;
   }
 
+  const useAppUser = c.env.AUTH_PROVIDER === "supabase";
+
   const storedRole = await withDb(c.env, c.executionCtx, async (sql) => {
     if (typeof userId === "string" && userId.length > 0) {
-      const rows = await sql<{ role: string | null }[]>`
-        SELECT role FROM content_tool."user" WHERE id = ${userId} LIMIT 1
-      `;
+      const rows = useAppUser
+        ? await sql<{ role: string | null }[]>`
+            SELECT role FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
+          `
+        : await sql<{ role: string | null }[]>`
+            SELECT role FROM content_tool."user" WHERE id = ${userId} LIMIT 1
+          `;
       if (rows[0] !== undefined) {
         return rows[0].role;
       }
     }
     if (typeof userEmail === "string" && userEmail.length > 0) {
-      const rows = await sql<{ role: string | null }[]>`
-        SELECT role FROM content_tool."user" WHERE email = ${userEmail} LIMIT 1
-      `;
+      const rows = useAppUser
+        ? await sql<{ role: string | null }[]>`
+            SELECT role FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
+          `
+        : await sql<{ role: string | null }[]>`
+            SELECT role FROM content_tool."user" WHERE email = ${userEmail} LIMIT 1
+          `;
       return rows[0]?.role ?? null;
     }
     return null;

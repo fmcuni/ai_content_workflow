@@ -317,7 +317,7 @@ const runsRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 // ---------------------------------------------------------------------------
 // POST / — create a run
 // ---------------------------------------------------------------------------
-runsRouter.post("/", requireRole("reviewer"), async (c) => {
+runsRouter.post("/", requireRole("author"), async (c) => {
   const body = await c.req
     .json<CreateRunBody>()
     .catch(() => ({}) as CreateRunBody);
@@ -495,7 +495,7 @@ runsRouter.get("/:id", async (c) => {
 // transient Workflows error would strand the run at `pending`, where the guard
 // would refuse any further restart.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/restart", requireRole("reviewer"), async (c) => {
+runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
 
   // Optional `{ from: { name, count? } }` body: restart FROM a specific step
@@ -1572,7 +1572,7 @@ runsRouter.post("/:id/existing-post/refresh", requireRole("reviewer"), async (c)
 // ---------------------------------------------------------------------------
 // POST /:id/hitl2-snapshots — persist one autosave / version-history snapshot
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl2-snapshots", requireRole("viewer"), async (c) => {
+runsRouter.post("/:id/hitl2-snapshots", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<Hitl2SnapshotBody>()
@@ -1732,7 +1732,7 @@ runsRouter.get("/:id/drafts", async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/outline — persist a post-hoc outline edit (outlines.human_edits)
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/outline", requireRole("viewer"), async (c) => {
+runsRouter.put("/:id/outline", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<OutlineEditBody>().catch(() => ({}) as OutlineEditBody);
 
@@ -1791,7 +1791,7 @@ runsRouter.put("/:id/outline", requireRole("viewer"), async (c) => {
 // ---------------------------------------------------------------------------
 // PUT /:id/article — persist body/SEO onto the latest render + WP meta on the run
 // ---------------------------------------------------------------------------
-runsRouter.put("/:id/article", requireRole("viewer"), async (c) => {
+runsRouter.put("/:id/article", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ArticleEditBody>()
@@ -1993,7 +1993,7 @@ runsRouter.patch("/:id", requireRole("reviewer"), async (c) => {
 // created and nothing is published — that happens through Save / Approve. Works
 // on a paused HITL_2 run or a finished one alike, since it never touches state.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/apply-edits", requireRole("viewer"), async (c) => {
+runsRouter.post("/:id/apply-edits", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<ApplyEditsBody>()
@@ -2360,7 +2360,7 @@ runsRouter.get("/:id/review-threads", async (c) => {
 });
 
 // POST /:id/review-threads — open a new review thread.
-runsRouter.post("/:id/review-threads", requireRole("viewer"), async (c) => {
+runsRouter.post("/:id/review-threads", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   if (!isUuid(runId)) {
     return c.json({ detail: "run not found" }, 404);
@@ -2411,7 +2411,7 @@ runsRouter.post("/:id/review-threads", requireRole("viewer"), async (c) => {
 });
 
 // POST /:id/review-threads/:tid/replies — append a reply.
-runsRouter.post("/:id/review-threads/:tid/replies", requireRole("viewer"), async (c) => {
+runsRouter.post("/:id/review-threads/:tid/replies", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const threadId = c.req.param("tid");
   if (!isUuid(runId) || !isUuid(threadId)) {
@@ -2455,7 +2455,7 @@ runsRouter.post("/:id/review-threads/:tid/replies", requireRole("viewer"), async
 });
 
 // POST /:id/review-threads/:tid/resolve — resolve or reopen.
-runsRouter.post("/:id/review-threads/:tid/resolve", requireRole("viewer"), async (c) => {
+runsRouter.post("/:id/review-threads/:tid/resolve", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const threadId = c.req.param("tid");
   if (!isUuid(runId) || !isUuid(threadId)) {
@@ -2502,7 +2502,7 @@ runsRouter.post("/:id/review-threads/:tid/resolve", requireRole("viewer"), async
 });
 
 // DELETE /:id/review-threads/:tid — delete a thread.
-runsRouter.delete("/:id/review-threads/:tid", requireRole("viewer"), async (c) => {
+runsRouter.delete("/:id/review-threads/:tid", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
   const threadId = c.req.param("tid");
   if (!isUuid(runId) || !isUuid(threadId)) {

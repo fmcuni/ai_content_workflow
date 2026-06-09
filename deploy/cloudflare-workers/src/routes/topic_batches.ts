@@ -501,9 +501,10 @@ topicBatchesRouter.options("/:id/logs", (c) =>
 // fields present in the request are applied (so a default can be cleared to null
 // or toggled false), mirroring `model_dump(exclude_unset=True)`. A default only
 // affects runs promoted AFTER the change, so this is safe in any batch state.
-// Role: editor+. Mirrors content_tool/api/routes/topic_batches.py.
+// Role: author+ (an editorial authoring mutation). Mirrors
+// content_tool/api/routes/topic_batches.py.
 // ---------------------------------------------------------------------------
-topicBatchesRouter.patch("/:id", requireRole("reviewer"), async (c) => {
+topicBatchesRouter.patch("/:id", requireRole("author"), async (c) => {
   const batchId = c.req.param("id");
   const body = await c.req
     .json<TopicBatchDefaultsPatchBody>()

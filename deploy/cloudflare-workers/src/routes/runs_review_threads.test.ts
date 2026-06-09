@@ -68,6 +68,11 @@ function makeFakeSql(): unknown {
     if (!/^\s*(select|update|insert|delete)\b/.test(lower)) {
       return { __frag: true, text } as Fragment;
     }
+    // loadRole: the review-thread mutations now require the `author` capability
+    // (WS1 retiering); the authenticated actor resolves to author here.
+    if (lower.includes('from content_tool."user"')) {
+      return [{ role: "author" }];
+    }
     if (lower.includes("from content_tool.runs")) {
       return state.runExists ? [{ run_id: "run-1" }] : [];
     }
