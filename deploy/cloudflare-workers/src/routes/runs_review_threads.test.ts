@@ -11,6 +11,12 @@ const state: { runExists: boolean; threadExists: boolean } = {
   threadExists: true,
 };
 
+// run_id / thread_id are Postgres `uuid` columns, so the routes guard the path
+// segments for uuid shape before querying. Tests must use real uuids on the
+// happy paths (non-uuid ids are exercised separately, below).
+const RUN = "11111111-1111-4111-8111-111111111111";
+const TID = "22222222-2222-4222-8222-222222222222";
+
 interface Fragment {
   __frag: true;
   text: string;
@@ -141,7 +147,7 @@ beforeEach(() => {
 
 describe("review-thread routes", () => {
   it("GET /:id/review-threads returns the thread list", async () => {
-    const res = await req(appWith("ann@b.com"), "GET", "/run-1/review-threads", null);
+    const res = await req(appWith("ann@b.com"), "GET", `/${RUN}/review-threads`, null);
     // GET has no role gate; the fake list query returns [] for this branch.
     expect(res.status).toBe(200);
     expect(Array.isArray(await res.json())).toBe(true);
@@ -149,7 +155,7 @@ describe("review-thread routes", () => {
 
   it("POST create → 404 when the run is missing", async () => {
     state.runExists = false;
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads`, {
       anchor_id: "r-1",
       anchor_text: "lede",
       body: "needs a citation",
@@ -158,7 +164,7 @@ describe("review-thread routes", () => {
   });
 
   it("POST create → 200 with an open thread and ISO timestamps", async () => {
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads`, {
       anchor_id: "r-1",
       anchor_text: "lede",
       body: "needs a citation",
@@ -175,21 +181,21 @@ describe("review-thread routes", () => {
 
   it("POST reply → 404 when the thread is missing", async () => {
     state.threadExists = false;
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads/t-1/replies", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads/${TID}/replies`, {
       body: "added it",
     });
     expect(res.status).toBe(404);
   });
 
   it("POST reply → 200 when the thread exists", async () => {
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads/t-1/replies", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads/${TID}/replies`, {
       body: "added it",
     });
     expect(res.status).toBe(200);
   });
 
   it("POST resolve {resolved:true} → status becomes 'resolved'", async () => {
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads/t-1/resolve", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads/${TID}/resolve`, {
       resolved: true,
     });
     expect(res.status).toBe(200);
@@ -198,7 +204,7 @@ describe("review-thread routes", () => {
   });
 
   it("POST resolve {resolved:false} → status becomes 'open'", async () => {
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads/t-1/resolve", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads/${TID}/resolve`, {
       resolved: false,
     });
     expect(res.status).toBe(200);
@@ -208,22 +214,70 @@ describe("review-thread routes", () => {
 
   it("POST resolve → 404 when the thread is missing", async () => {
     state.threadExists = false;
-    const res = await req(appWith("ann@b.com"), "POST", "/run-1/review-threads/t-1/resolve", {
+    const res = await req(appWith("ann@b.com"), "POST", `/${RUN}/review-threads/${TID}/resolve`, {
       resolved: true,
     });
     expect(res.status).toBe(404);
   });
 
   it("DELETE → 204", async () => {
-    const res = await req(appWith("ann@b.com"), "DELETE", "/run-1/review-threads/t-1", null);
+    const res = await req(appWith("ann@b.com"), "DELETE", `/${RUN}/review-threads/${TID}`, null);
     expect(res.status).toBe(204);
   });
 
   it("POST create is blocked (401) without an authenticated session", async () => {
-    const res = await req(appWith(null), "POST", "/run-1/review-threads", {
+    const res = await req(appWith(null), "POST", `/${RUN}/review-threads`, {
       anchor_id: "r-1",
       body: "x",
     });
     expect(res.status).toBe(401);
+  });
+
+  // Regression: a non-uuid thread id (e.g. the literal "undefined" sent by a
+  // stale client) must NOT reach the `uuid`-column query — Postgres would throw
+  // `invalid input syntax for type uuid` and surface as a 500. The route guards
+  // the id shape and returns 404 instead. Reproduced live before the fix.
+  it("POST reply with a non-uuid thread id → 404 (not 500)", async () => {
+    const res = await req(
+      appWith("ann@b.com"),
+      "POST",
+      `/${RUN}/review-threads/undefined/replies`,
+      { body: "x" },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("POST resolve with a non-uuid thread id → 404 (not 500)", async () => {
+    const res = await req(
+      appWith("ann@b.com"),
+      "POST",
+      `/${RUN}/review-threads/undefined/resolve`,
+      { resolved: true },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("POST create with a non-uuid run id → 404 (not 500)", async () => {
+    const res = await req(appWith("ann@b.com"), "POST", "/not-a-uuid/review-threads", {
+      anchor_id: "r-1",
+      body: "x",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE with a non-uuid thread id → 204 (no-op, not 500)", async () => {
+    const res = await req(
+      appWith("ann@b.com"),
+      "DELETE",
+      `/${RUN}/review-threads/undefined`,
+      null,
+    );
+    expect(res.status).toBe(204);
+  });
+
+  it("GET with a non-uuid run id → 200 [] (not 500)", async () => {
+    const res = await req(appWith("ann@b.com"), "GET", "/not-a-uuid/review-threads", null);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
   });
 });

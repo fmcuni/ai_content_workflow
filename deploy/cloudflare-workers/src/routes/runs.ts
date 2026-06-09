@@ -2183,6 +2183,18 @@ runsRouter.delete("/:id", requireRole("admin"), async (c) => {
 // to runs ON DELETE CASCADE, so the run-delete route cleans them up implicitly.
 // ===========================================================================
 
+// run_id / thread_id are Postgres `uuid` columns. A non-uuid path segment (e.g.
+// the literal string "undefined" sent by a stale client) makes Postgres throw
+// `invalid input syntax for type uuid`, surfacing as an unhandled 500. Guard the
+// ids up front and return 404 ("not found") instead — matching the Python routes,
+// where FastAPI's `UUID` path params reject malformed ids before the query runs.
+const REVIEW_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return REVIEW_UUID_RE.test(value);
+}
+
 interface ReviewMessage {
   id: string;
   author_email: string | null;
@@ -2289,6 +2301,9 @@ async function writeReviewEvent(
 // GET /:id/review-threads — list a run's review threads, oldest-first.
 runsRouter.get("/:id/review-threads", async (c) => {
   const runId = c.req.param("id");
+  if (!isUuid(runId)) {
+    return c.json([]);
+  }
   const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
     sql<ReviewThreadRow[]>`
       SELECT thread_id, run_id, anchor_id, anchor_text, status, messages,
@@ -2305,6 +2320,9 @@ runsRouter.get("/:id/review-threads", async (c) => {
 // POST /:id/review-threads — open a new review thread.
 runsRouter.post("/:id/review-threads", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
+  if (!isUuid(runId)) {
+    return c.json({ detail: "run not found" }, 404);
+  }
   const body = await c.req
     .json<CreateReviewThreadBody>()
     .catch(() => ({}) as CreateReviewThreadBody);
@@ -2354,6 +2372,9 @@ runsRouter.post("/:id/review-threads", requireRole("viewer"), async (c) => {
 runsRouter.post("/:id/review-threads/:tid/replies", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const threadId = c.req.param("tid");
+  if (!isUuid(runId) || !isUuid(threadId)) {
+    return c.json({ detail: "thread not found" }, 404);
+  }
   const body = await c.req.json<ReviewReplyBody>().catch(() => ({}) as ReviewReplyBody);
   const editorEmail = resolveActorIdentity(
     { userEmail: c.get("userEmail"), userId: c.get("userId") },
@@ -2395,6 +2416,9 @@ runsRouter.post("/:id/review-threads/:tid/replies", requireRole("viewer"), async
 runsRouter.post("/:id/review-threads/:tid/resolve", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const threadId = c.req.param("tid");
+  if (!isUuid(runId) || !isUuid(threadId)) {
+    return c.json({ detail: "thread not found" }, 404);
+  }
   const body = await c.req.json<ReviewResolveBody>().catch(() => ({}) as ReviewResolveBody);
   const resolved = body.resolved === true;
   const editorEmail = resolveActorIdentity(
@@ -2439,6 +2463,9 @@ runsRouter.post("/:id/review-threads/:tid/resolve", requireRole("viewer"), async
 runsRouter.delete("/:id/review-threads/:tid", requireRole("viewer"), async (c) => {
   const runId = c.req.param("id");
   const threadId = c.req.param("tid");
+  if (!isUuid(runId) || !isUuid(threadId)) {
+    return c.body(null, 204);
+  }
   await withDb(c.env, c.executionCtx, (sql: Sql) =>
     sql`
       DELETE FROM content_tool.review_threads
