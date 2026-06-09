@@ -158,13 +158,64 @@ author-mixed hunks). USER chose **full insert+delete char-precise + node-level F
   typescript-reviewer pass applied (item-start delete id, null-child walk guard,
   scan try/catch, clarified tag handling, stored PUD).
 
-## Phase 5 — Roll across all run-editor surfaces
+## Phase 5 — Roll across all run-editor surfaces — ✅ DONE 2026-06-09 (local-only, flag still OFF)
 
-- Flip the flag on `/hitl2`, `/edit`, `/regenerate`, read-only `/runs/[id]`
-  (all already share `components/run-editor` + `lib/run-editor`).
-- Read-only surface joins as observer (awareness presence, no write).
-- **E2E:** Playwright two-context test — concurrent typing, cursors visible,
-  blame correct. **Use a dedicated port, not :3000** (shared with another app).
+**Go-live decision (asked, not assumed):** committed default
+`NEXT_PUBLIC_COLLAB_ENABLED` stays **OFF**; every surface RESPECTS the flag and
+was validated with it forced on locally. Prod stays inert until an explicit
+Phase-6 cutover. Session was LOCAL-ONLY: no push, no deploy, no `supabase db
+push/reset`.
+
+**Two brief assumptions corrected against the actual code:**
+- `/regenerate` is a RETIRED server-side redirect to `/edit` (the endpoint was
+  never ported to Workers — see CLAUDE.md). There is no editor to wire collab
+  into → left as the redirect. (User confirmed: skip.)
+- `/runs/[runId]` is a progress/status page with NO article editor. "Observer
+  mode" needs an editor to attach to. (User chose: SKIP the run-detail surface —
+  build the observer capability as infra + tests only; wire presence into the
+  hitl2/edit shell.)
+
+Delivered (commits `27ff915`, `cd492bd`, `aadf83e`, `0d99da4`, `ef16cfb`):
+
+- **Observer / read-only capability (5A, infra — no live surface yet).**
+  `useCollabDoc` gained `readOnly`: opens the socket, RECEIVES remote edits, and
+  PUBLISHES awareness, but relays NO local doc updates and never seeds.
+  `TipTapEditor` gained an `editable` prop: observer mode hides the toolbar +
+  suppresses all selection/link mutations while the bound Yjs doc still streams
+  live remote edits + carets (`setEditable` sync effect). + unit/RTL tests.
+- **Seed-race "you-are-seeder" DO signal (5D).** `RunDoc` MESSAGE_INIT now carries
+  `{ color, primary }`; `primary=true` only for the FIRST connection to reach an
+  empty doc with no seeder assigned (sticky `seederWs`, released on seeder close
+  while still empty; schema-agnostic `docIsEmpty` via `encodeStateAsUpdate`
+  length, biased to "empty" on encode error). `useCollabDoc` parses `primary` →
+  `isSeedAuthority` (forced false in observer mode; missing flag → false,
+  back-compat). `useSeedCollabDoc` now gates seeding on `isSeedAuthority`,
+  closing the two-first-joiners duplicate-seed window the client guard couldn't.
+  +3 pool tests (11 total). **KNOWN caveat (documented in code):** the DO grants
+  `primary` regardless of role, so a read-only observer opening an empty run
+  before any editor would consume the seeder slot. Harmless today (no observer
+  surface); when one is wired, the DO grant must skip observers (e.g. an
+  `?observe=1` upgrade query) — close before shipping an observer surface.
+- **Presence in the shared shell (5C).** `RunEditorShell` gained a collab-agnostic
+  `presence` ReactNode slot in the back-link row; `/hitl2` + `/edit` render
+  `<CollabPresence awareness={…}>` into it (null/empty when collab off or alone)
+  and forward `isSeedAuthority` into `useSeedCollabDoc`. + shell render test.
+- **E2E (5E).** `web/tests/e2e/collab-realtime.spec.ts` — two authenticated
+  contexts on one run's `/edit`: concurrent typing converges, remote caret +
+  name label visible, presence stack shows both, Review popover shows per-author
+  blame. SKIP-gated on `E2E_COLLAB_BASE_URL` (a LOCAL stack with the flag on) so
+  it can NEVER run against prod (collab OFF there; the test types into the body).
+  Validated for discovery + tsc + eslint; NOT executed against a live stack this
+  session (needs `wrangler dev` + web dev on a dedicated port + creds — recipe in
+  the spec header). **Dedicated port, not :3000** (shared with another app).
+
+**Flag-OFF stays byte-identical** (confirmed in code + tests): disabled handle →
+no socket, `awareness` null → `CollabPresence` renders nothing, `editable`
+defaults true, seeding never runs.
+
+Verification: web vitest **388/53** (+9), tsc + eslint clean; workers **11 pool**
+(+3) + **434 node**, `typecheck` + `typecheck:workers` clean. typescript-reviewer
+pass: no CRITICAL/HIGH; one MEDIUM hardening applied (`docIsEmpty` error bias).
 
 ## Phase 6 — Parity, deploy, cleanup
 
