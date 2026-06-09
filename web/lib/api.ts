@@ -278,6 +278,50 @@ export const adminApi = {
     }),
 };
 
+// --- WS3 admin user-management (Supabase Auth provider) -------------------
+// Appended object so the diff stays additive (Agent B owns the http()/header
+// change in this file). Reuses the same ADMIN_USERS_BASE + http() helper.
+//
+// Backend enriches list rows with GoTrue facets (status / last_sign_in /
+// confirmed) on the supabase provider; AdminUserDetail is the superset the UI
+// reads. The base AdminUser type stays frozen — these extra fields are optional.
+
+/** A listed user with the optional GoTrue-enriched facets (supabase provider). */
+export interface AdminUserDetail extends AdminUser {
+  status?: "active" | "disabled";
+  last_sign_in_at?: string | null;
+  confirmed?: boolean;
+}
+
+/** Body for POST /admin/users (create + invite). */
+export interface CreateUserRequest {
+  email: string;
+  role: UserRole;
+}
+
+export const adminUsersApi = {
+  list: () => http<AdminUserDetail[]>(ADMIN_USERS_BASE),
+  create: (body: CreateUserRequest) =>
+    http<AdminUserDetail>(ADMIN_USERS_BASE, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  setRole: (id: string, role: UserRole) =>
+    http<AdminUserDetail>(`${ADMIN_USERS_BASE}/${id}/role`, {
+      method: "PUT",
+      body: JSON.stringify({ role }),
+    }),
+  disable: (id: string) =>
+    http<AdminUserDetail>(`${ADMIN_USERS_BASE}/${id}/disable`, { method: "POST" }),
+  enable: (id: string) =>
+    http<AdminUserDetail>(`${ADMIN_USERS_BASE}/${id}/enable`, { method: "POST" }),
+  remove: (id: string) => http<void>(`${ADMIN_USERS_BASE}/${id}`, { method: "DELETE" }),
+  resendInvite: (id: string) =>
+    http<{ ok: boolean }>(`${ADMIN_USERS_BASE}/${id}/resend-invite`, { method: "POST" }),
+  revokeSessions: (id: string) =>
+    http<{ ok: boolean }>(`${ADMIN_USERS_BASE}/${id}/revoke-sessions`, { method: "POST" }),
+};
+
 const ARTICLES_BASE = "/api/articles";
 const REFRESH_BASE = "/api/refresh";
 

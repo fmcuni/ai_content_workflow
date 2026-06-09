@@ -12,7 +12,14 @@
  * already the audit record-of-truth elsewhere in this backend.
  */
 
-export type AuditEvent = "rbac.role_change";
+export type AuditEvent =
+  | "rbac.role_change"
+  | "rbac.user_create"
+  | "rbac.user_disable"
+  | "rbac.user_enable"
+  | "rbac.user_delete"
+  | "rbac.user_resend_invite"
+  | "rbac.user_revoke_sessions";
 
 /** Emit one structured JSON audit line. Pure side-effect; never throws. */
 export function auditLog(event: AuditEvent, fields: Record<string, unknown>): void {
