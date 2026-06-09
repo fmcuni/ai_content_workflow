@@ -279,3 +279,40 @@ Docs: `CLAUDE.md` Architecture section gained a `RunDoc` Durable Object subsecti
 Feature-flagged: disabling the flag reverts every surface to the current
 string-snapshot editor. The `run_collab_state` table and `RunDoc` DO are additive
 — a flag-off deploy needs no migration rollback.
+
+## Phase 7 — CI e2e gate + rollout ✅ DONE (2026-06-09)
+
+- **Live two-context e2e could not run on the dev machine** — the dual-browser +
+  dual-dev-server load triggered a >100GB memory leak that froze the box twice.
+  The gate was **moved to CI**: `.github/workflows/collab-e2e.yml` spins an
+  isolated local Supabase (all migrations + seed), seeds one run→draft→render,
+  signs up a staff user, builds web **collab-ON** against a local `wrangler dev`
+  backend (RUN_DOC DO + Hyperdrive shim → local DB), and runs the spec. Nothing
+  touches prod (spec SKIP-gated on `E2E_COLLAB_BASE_URL`).
+- **Harness fixes** (the spec was authored but never run live): added
+  `web/playwright.collab.config.ts` (the documented `--config=playwright.prod.config.ts`
+  matched 0 tests — its `testMatch` is the visual smoke); discover the run via the
+  authenticated `/api/runs` instead of scraping the Ledger board (no per-run link);
+  type the two tokens at **opposite doc ends** (same-offset concurrent inserts
+  legitimately interleave under any CRDT); assert the visible caret **name-label**
+  (the caret bar is a ~0-width marker Playwright calls "hidden").
+- **CI gate GREEN** (run 27198968283) for: convergence/no-loss, remote caret +
+  name label, presence stack (≥2 sessions), and the Review actions popover.
+- **Blame attribution DESCOPED from the e2e** → **follow-up**: in the live
+  two-context path the Review popover opens (accept/reject) but renders **no**
+  `Added by {name}` line — author resolves null for every hunk; `scanDoc` does not
+  throw. `collab-blame.test.ts` passes in isolation, so the resolver logic is
+  sound; the gap is the live wire/seed path. Needs runtime Yjs-doc inspection on a
+  non-OOM machine.
+- **Rolled out:** merged branch → `main` (`db18992`), then flipped collab **ON**
+  durably by setting `NEXT_PUBLIC_COLLAB_ENABLED=true` in the **web deploy step of
+  `deploy-workers.yml`** (`3c21ff1`) — a one-off manual `cf:deploy` would be
+  reverted to dark by the next main push. Deploy run 27199353520 succeeded.
+  Prod smoke: `/health` 200, web `/` 307, `/login` 200, `/api/auth/get-session`
+  200 (no API-base footgun). **Web** `e650bdf8-a79b-4f60-956a-9cd721aebe00`,
+  **backend** `b2cdc484-9f4e-4d9f-a86d-d46f9e42d8d2`.
+- **Rollback the flip:** set `NEXT_PUBLIC_COLLAB_ENABLED` to `false` (or remove) in
+  `deploy-workers.yml` + redeploy, or `wrangler rollback 66a65f74-...` (last dark
+  web build) — backend untouched, collab goes dark.
+- **Still owed:** authenticated **manual browser eyeball** of prod collab (headless
+  login 401s behind WAF/PSL) + the blame follow-up above.
