@@ -88,6 +88,14 @@ export async function verifySupabaseJwt(
   const issuer = supabaseUrl ? `${stripTrailingSlash(supabaseUrl)}/auth/v1` : undefined;
 
   if (supabaseUrl) {
+    // Asymmetric / JWKS is authoritative when a project URL is configured, and a
+    // failure here is FINAL — we deliberately do NOT fall back to HS256. Falling
+    // back would (a) let a token forged with the separate, leak-prone shared
+    // secret be accepted on a project that signs asymmetrically, and (b) turn a
+    // transient JWKS-fetch error (cold isolate / DNS blip) into a silent
+    // algorithm downgrade. The HS256 branch below is reachable ONLY when no
+    // SUPABASE_URL is set (local / dev). Production MUST enable asymmetric
+    // signing keys — see the cutover checklist.
     try {
       const { payload } = await jwtVerify(token, jwksFor(supabaseUrl), {
         algorithms: [...ASYMMETRIC_ALGS],
@@ -96,11 +104,12 @@ export async function verifySupabaseJwt(
       });
       return identityFromPayload(payload);
     } catch {
-      // Fall through to HS256 — asymmetric keys may be disabled on the project,
-      // or this token was signed with the legacy shared secret.
+      return null;
     }
   }
 
+  // HS256 fallback — ONLY when no project URL is configured (local/dev or an
+  // HS256-only project with no known URL). Never reached once SUPABASE_URL is set.
   const secret = env.SUPABASE_JWT_SECRET?.trim();
   if (secret) {
     try {

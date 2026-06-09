@@ -148,6 +148,16 @@ export const signOut: () => Promise<unknown> = SUPABASE
   ? supabaseSignOut
   : betterAuthClient.signOut;
 
-export const useSession: () => SessionResult = SUPABASE
-  ? useSupabaseSession
-  : (betterAuthClient.useSession as unknown as () => SessionResult);
+/**
+ * Adapter mapping better-auth's richer useSession() return to the shared
+ * SessionResult envelope. Replaces an `as unknown as` cast that would otherwise
+ * hide a future shape change in the library's return type. Named `use*` so the
+ * rules-of-hooks lint recognizes it as a hook (it calls one).
+ */
+function useBetterAuthSession(): SessionResult {
+  const { data } = betterAuthClient.useSession();
+  const email = data?.user?.email;
+  return email ? { data: { user: { email, name: data.user.name ?? undefined } } } : { data: null };
+}
+
+export const useSession: () => SessionResult = SUPABASE ? useSupabaseSession : useBetterAuthSession;

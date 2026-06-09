@@ -94,22 +94,20 @@ describe("verifySupabaseJwt — no verifier configured", () => {
   });
 });
 
-describe("verifySupabaseJwt — JWKS unreachable → HS256 fallback + issuer pin", () => {
-  // SUPABASE_URL set to an unreachable host: the JWKS verify throws (fetch
-  // fails), then the HS256 fallback runs with the derived issuer enforced.
+describe("verifySupabaseJwt — no HS256 downgrade when SUPABASE_URL is set", () => {
+  // When a project URL is configured, JWKS is authoritative and a failure is
+  // final: an HS256-signed token (even with the right shared secret and issuer)
+  // must NOT be accepted via fallback. This is the algorithm-downgrade guard.
   const env = envWith({ SUPABASE_URL: "https://unreachable.invalid" });
   const issuer = "https://unreachable.invalid/auth/v1";
 
-  it("verifies via HS256 when the token's issuer matches the project", async () => {
+  it("rejects an HS256 token signed with the shared secret (no downgrade)", async () => {
     const token = await makeToken({ sub: "iss-ok", issuer });
-    expect(await verifySupabaseJwt(token, env)).toEqual({
-      sub: "iss-ok",
-      email: "user@bowtie.com.hk",
-    });
+    expect(await verifySupabaseJwt(token, env)).toBeNull();
   });
 
-  it("rejects a token whose issuer does not match the project", async () => {
-    const token = await makeToken({ issuer: "https://evil.example/auth/v1" });
+  it("rejects an HS256 token even without an issuer claim", async () => {
+    const token = await makeToken({ sub: "no-iss" });
     expect(await verifySupabaseJwt(token, env)).toBeNull();
   });
 });

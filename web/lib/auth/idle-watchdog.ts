@@ -66,10 +66,7 @@ export function useIdleWatchdog({
     function onActivity(): void {
       // Ignore the visibility event when the tab is being hidden — only a
       // return-to-foreground (or genuine input) counts as activity.
-      if (
-        document.visibilityState === "hidden" &&
-        document.hasFocus() === false
-      ) {
+      if (document.visibilityState === "hidden") {
         return;
       }
       const now = Date.now();

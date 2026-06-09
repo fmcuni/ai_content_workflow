@@ -130,11 +130,20 @@ export function Masthead() {
   // No masthead chrome on the auth pages.
   if (isAuthRoute(pathname)) return null;
 
-  async function onSignOut() {
-    await signOut();
-    toast("Signed out");
-    router.push("/login");
-    router.refresh();
+  // Sync handler (DropdownMenuItem onClick doesn't await) wrapping a contained
+  // async flow so a signOut() rejection can't become an unhandled rejection. We
+  // still clear the client UI and navigate regardless of the network outcome.
+  function onSignOut(): void {
+    void (async () => {
+      try {
+        await signOut();
+      } catch {
+        // best-effort sign-out — fall through to clear the session UI
+      }
+      toast("Signed out");
+      router.push("/login");
+      router.refresh();
+    })();
   }
 
   return (

@@ -43,8 +43,14 @@ async function supabaseBearer(forceRefresh = false): Promise<string | null> {
 
 // Send the browser to /login, preserving where we were so we can return after
 // re-auth. No-op during SSR. Used when a Supabase 401 survives a token refresh.
+// Guard so a burst of concurrent 401s (e.g. TanStack Query retrying several
+// in-flight requests after the session expires) triggers exactly one navigation
+// instead of racing multiple `assign()` calls.
+let redirectingToLogin = false;
 function redirectToLogin(): void {
   if (typeof window === "undefined") return;
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
   const here = window.location.pathname + window.location.search;
   const target = here && here !== "/login" ? `?redirect=${encodeURIComponent(here)}` : "";
   window.location.assign(`/login${target}`);

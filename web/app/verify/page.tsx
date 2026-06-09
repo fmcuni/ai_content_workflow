@@ -40,10 +40,24 @@ function SupabaseVerify() {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else if (tokenHash) {
-          // Email OTP / magic-link token-hash flow.
+          // Email OTP / magic-link token-hash flow. Validate the attacker-
+          // influenced `type` param against an allowlist rather than casting it.
+          const VALID_OTP_TYPES: readonly EmailOtpType[] = [
+            "magiclink",
+            "signup",
+            "email",
+            "recovery",
+            "invite",
+            "email_change",
+          ];
+          const resolvedType: EmailOtpType = (VALID_OTP_TYPES as readonly string[]).includes(
+            type ?? "",
+          )
+            ? (type as EmailOtpType)
+            : "email";
           const { error } = await supabase.auth.verifyOtp({
             token_hash: tokenHash,
-            type: (type as EmailOtpType) || "email",
+            type: resolvedType,
           });
           if (error) throw error;
         } else {

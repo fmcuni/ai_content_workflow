@@ -52,7 +52,10 @@ function writeCookie(name: string, value: string): void {
 
 function deleteCookie(name: string): void {
   if (!isBrowser()) return;
-  document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
+  // Mirror writeCookie's attributes (incl. Secure) — some browsers require the
+  // deletion directive's attributes to match for a Secure cookie to be cleared.
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
 }
 
 // Storage adapter shape Supabase expects (getItem/setItem/removeItem). Backed by
