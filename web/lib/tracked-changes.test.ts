@@ -146,3 +146,112 @@ describe("buildInlineDiffHtml", () => {
     expect(computeTrackedChanges(result.committed, result.working).hunks).toEqual([]);
   });
 });
+
+// Helper: assert no <ins>/<del> wrapper ever lands inside a tag (attribute soup).
+// A correct render keeps every tag atomic, so the only "<" that immediately
+// precedes "ins"/"del"/"/ins"/"/del" are the wrapper tags themselves — never the
+// interior of another tag.
+function tagsAreIntact(html: string): boolean {
+  // No wrapper opens/closes inside an attribute value (between a quote pair).
+  return !/="[^"]*<(?:ins|del|\/ins|\/del)/.test(html) && !/<[a-z][^>]*<(?:ins|del)\b/i.test(html);
+}
+
+describe("buildInlineDiffHtml — HTML structure integrity (the format-corruption fixes)", () => {
+  it("an attribute-value edit never injects <ins>/<del> inside the tag", () => {
+    const { parts } = computeTrackedChanges(
+      '<p><a href="/old-url">link</a></p>',
+      '<p><a href="/new-url">link</a></p>',
+    );
+    const html = buildInlineDiffHtml(parts);
+    expect(tagsAreIntact(html)).toBe(true);
+    // The working-side link is rendered intact with its new href.
+    expect(html).toContain('<a href="/new-url">link</a>');
+    expect(html).not.toContain('href="/old-url"');
+    expect(html).not.toContain('href="/<');
+  });
+
+  it("a heading-level (tag-name) change renders a valid heading, not a split tag", () => {
+    const { parts } = computeTrackedChanges("<h2>Title</h2>", "<h3>Title</h3>");
+    const html = buildInlineDiffHtml(parts);
+    expect(html).toBe("<h3>Title</h3>");
+  });
+
+  it("wrapping a word in a review-anchor span keeps the span well-formed", () => {
+    const { parts } = computeTrackedChanges(
+      "<p>hello world here</p>",
+      '<p>hello <span data-review-id="r-1">world</span> here</p>',
+    );
+    const html = buildInlineDiffHtml(parts);
+    expect(tagsAreIntact(html)).toBe(true);
+    // The span open/close are never split across separate <ins> wrappers.
+    expect(html).toContain('<span data-review-id="r-1">');
+    expect(html).toContain("</span>");
+    expect(html).not.toMatch(/<ins[^>]*><span/);
+  });
+
+  it("keeps CJK edits at character granularity", () => {
+    const { parts } = computeTrackedChanges("<p>颜色是红色的</p>", "<p>颜色是蓝色的</p>");
+    const html = buildInlineDiffHtml(parts);
+    expect(html).toContain("<del");
+    expect(html).toContain("红</del>");
+    expect(html).toContain("蓝</ins>");
+    expect(html).toContain("颜色是");
+  });
+
+  it("emits an inserted block's tags bare and only wraps its text", () => {
+    const { parts } = computeTrackedChanges("<p>a</p><p>b</p>", "<p>a</p><p>b</p><p>c</p>");
+    const html = buildInlineDiffHtml(parts);
+    expect(html).toContain("<p><ins");
+    expect(html).toContain("c</ins></p>");
+    expect(tagsAreIntact(html)).toBe(true);
+  });
+});
+
+describe("replacement hunks resolve as a pair (no old+new concatenation)", () => {
+  it("accepting the inserted side of a word replacement drops the old word", () => {
+    const committed = "<p>red car</p>";
+    const working = "<p>blue car</p>";
+    const { parts, hunks } = computeTrackedChanges(committed, working);
+    const addHunk = hunks.find((h) => h.type === "add")!;
+    const result = commitHunk(parts, addHunk.index);
+    expect(result.committed).toBe("<p>blue car</p>");
+    expect(result.committed).not.toContain("redblue");
+    expect(computeTrackedChanges(result.committed, result.working).hunks).toEqual([]);
+  });
+
+  it("rejecting the deleted side of a word replacement restores the old word", () => {
+    const committed = "<p>red car</p>";
+    const working = "<p>blue car</p>";
+    const { parts, hunks } = computeTrackedChanges(committed, working);
+    const removeHunk = hunks.find((h) => h.type === "remove")!;
+    const result = dismissHunk(parts, removeHunk.index);
+    expect(result.working).toBe("<p>red car</p>");
+    expect(result.working).not.toContain("redblue");
+    expect(computeTrackedChanges(result.committed, result.working).hunks).toEqual([]);
+  });
+});
+
+describe("insignificant formatting whitespace is not a phantom change", () => {
+  it("inter-block newlines/indentation present in only one body produce no hunks", () => {
+    const rendered = "<p>a</p>\n  <p>b</p>\n  <p>c</p>";
+    const normalized = "<p>a</p><p>b</p><p>c</p>";
+    expect(computeTrackedChanges(rendered, normalized).hunks).toEqual([]);
+    expect(computeTrackedChanges(normalized, rendered).hunks).toEqual([]);
+  });
+
+  it("a whitespace reflow within text (collapsing double spaces) is not a change", () => {
+    expect(computeTrackedChanges("<p>hello  world</p>", "<p>hello world</p>").hunks).toEqual([]);
+  });
+
+  it("differing indentation depths (both newline-led) produce no hunks", () => {
+    expect(computeTrackedChanges("<p>a</p>\n<p>b</p>", "<p>a</p>\n\n    <p>b</p>").hunks).toEqual(
+      [],
+    );
+  });
+
+  it("a real text edit still surfaces even amid whitespace differences", () => {
+    const { hunks } = computeTrackedChanges("<p>a</p>\n<p>old</p>", "<p>a</p><p>new</p>");
+    expect(hunks.some((h) => h.type === "add" && h.value.includes("new"))).toBe(true);
+    expect(hunks.some((h) => h.type === "remove" && h.value.includes("old"))).toBe(true);
+  });
+});

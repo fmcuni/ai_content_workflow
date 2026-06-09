@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, MessagesSquare, X } from "lucide-react";
 
 import {
@@ -30,9 +30,14 @@ interface ActiveChange {
   /** Viewport coords of the change, for positioning the floating popover. */
   left: number;
   bottom: number;
+  /** How the popover was opened — keyboard activation moves focus into it. */
+  source: "pointer" | "keyboard";
 }
 
 const stripTags = (s: string) => s.replace(/<[^>]*>/g, "").trim();
+const POPOVER_ID = "tracked-change-actions";
+/** Min gap from the viewport edge when clamping the popover. */
+const EDGE_MARGIN = 8;
 
 /**
  * In-editor tracked-changes review surface for HUMAN edits. Renders the
@@ -49,15 +54,17 @@ const stripTags = (s: string) => s.replace(/<[^>]*>/g, "").trim();
 export function InlineTrackedChanges({ committed, working, onChange, onComment }: Props) {
   const { parts, hunks } = computeTrackedChanges(committed, working);
   const [active, setActive] = useState<ActiveChange | null>(null);
+  const diffRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
-  const openFor = useCallback((el: HTMLElement) => {
+  const openFor = useCallback((el: HTMLElement, source: ActiveChange["source"]) => {
     const raw = el.getAttribute("data-tc-i");
     const type = el.getAttribute("data-tc");
     if (raw === null || (type !== "add" && type !== "del")) return;
     const index = Number(raw);
     if (!Number.isInteger(index)) return;
     const rect = el.getBoundingClientRect();
-    setActive({ index, type, left: rect.left, bottom: rect.bottom });
+    setActive({ index, type, left: rect.left, bottom: rect.bottom, source });
   }, []);
 
   // Event delegation over the rendered diff (which is injected HTML, so we can't
@@ -65,7 +72,7 @@ export function InlineTrackedChanges({ committed, working, onChange, onComment }
   const onPointer = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tc-i]");
-      if (el) openFor(el);
+      if (el) openFor(el, "pointer");
     },
     [openFor],
   );
@@ -75,41 +82,64 @@ export function InlineTrackedChanges({ committed, working, onChange, onComment }
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tc-i]");
       if (!el) return;
       e.preventDefault();
-      openFor(el);
+      openFor(el, "keyboard");
     },
     [openFor],
   );
   const onFocus = useCallback(
     (e: React.FocusEvent<HTMLDivElement>) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tc-i]");
-      if (el) openFor(el);
+      if (el) openFor(el, "keyboard");
     },
     [openFor],
   );
 
-  // Escape closes the popover.
+  // Escape closes the popover; scroll/resize close it too, since its fixed
+  // position is captured once and would otherwise drift away from its change.
   useEffect(() => {
     if (!active) return;
+    const close = () => setActive(null);
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setActive(null);
+      if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onEsc);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [active]);
+
+  // Clamp the popover within the viewport once it has a measured width, and (for
+  // keyboard activation) move focus into it so the actions are operable.
+  useLayoutEffect(() => {
+    const pop = popoverRef.current;
+    if (!active || !pop) return;
+    const width = pop.offsetWidth;
+    const maxLeft = window.innerWidth - width - EDGE_MARGIN;
+    const left = Math.max(EDGE_MARGIN, Math.min(active.left, maxLeft));
+    pop.style.left = `${left}px`;
+    if (active.source === "keyboard") {
+      pop.querySelector<HTMLButtonElement>("button")?.focus();
+    }
   }, [active]);
 
   // accept/reject re-index the parts in the parent, so close the (now-stale)
-  // popover as we apply the change.
-  const accept = (index: number) => {
-    onChange(commitHunk(parts, index));
+  // popover as we apply the change. For keyboard reviewers, return focus to the
+  // diff so they continue from the article instead of dropping to <body>.
+  const applyAndClose = (result: CommitResult) => {
+    const wasKeyboard = active?.source === "keyboard";
+    onChange(result);
     setActive(null);
+    if (wasKeyboard) diffRef.current?.focus();
   };
-  const reject = (index: number) => {
-    onChange(dismissHunk(parts, index));
-    setActive(null);
-  };
+  const accept = (index: number) => applyAndClose(commitHunk(parts, index));
+  const reject = (index: number) => applyAndClose(dismissHunk(parts, index));
   const comment = (index: number) => {
     const part = parts[index];
-    if (part) onComment(stripTags(part.value).slice(0, 120));
+    if (part) onComment(stripTags(part.value.join("")).slice(0, 120));
     setActive(null);
   };
 
@@ -151,15 +181,18 @@ export function InlineTrackedChanges({ committed, working, onChange, onComment }
       </div>
 
       {/* The diff rendered AS the article. <ins>/<del> carry data-tc-i so the
-          delegated handlers below resolve a click/hover/focus back to its hunk. */}
+          delegated handlers below resolve a click/hover/focus back to its hunk.
+          tabindex -1 lets us re-home focus here after a keyboard accept/reject. */}
       <div
+        ref={diffRef}
+        tabIndex={-1}
         onClick={onPointer}
         onMouseOver={onPointer}
         onKeyDown={onKeyDown}
         onFocus={onFocus}
         dangerouslySetInnerHTML={{ __html: buildInlineDiffHtml(parts) }}
         className={[
-          "editorial-prose max-w-none min-h-[480px] rounded border border-rule bg-paper px-6 py-5",
+          "editorial-prose max-w-none min-h-[480px] rounded border border-rule bg-paper px-6 py-5 focus:outline-none",
           "[&_ins[data-tc]]:bg-emerald-100 [&_ins[data-tc]]:text-emerald-900 [&_ins[data-tc]]:no-underline [&_ins[data-tc]]:rounded-sm [&_ins[data-tc]]:px-0.5 [&_ins[data-tc]]:cursor-pointer",
           "[&_ins[data-tc]:hover]:ring-1 [&_ins[data-tc]:hover]:ring-emerald-400 [&_ins[data-tc]:focus-visible]:outline-none [&_ins[data-tc]:focus-visible]:ring-2 [&_ins[data-tc]:focus-visible]:ring-emerald-500",
           "[&_del[data-tc]]:bg-rose-100 [&_del[data-tc]]:text-rose-900 [&_del[data-tc]]:line-through [&_del[data-tc]]:rounded-sm [&_del[data-tc]]:px-0.5 [&_del[data-tc]]:cursor-pointer",
@@ -169,11 +202,13 @@ export function InlineTrackedChanges({ committed, working, onChange, onComment }
 
       {active && (
         <div
+          ref={popoverRef}
+          id={POPOVER_ID}
           role="group"
           aria-label="Tracked change actions"
           style={{
             position: "fixed",
-            left: Math.min(active.left, (typeof window !== "undefined" ? window.innerWidth : 9999) - 140),
+            left: active.left,
             top: active.bottom + 6,
             zIndex: 50,
           }}
