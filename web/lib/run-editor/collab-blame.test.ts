@@ -78,6 +78,27 @@ describe("buildBlameResolver", () => {
     b.destroy();
   });
 
+  it("attributes an insertion AFTER HTML entities in prose (entity-drift regression)", () => {
+    // getHTML escapes each `&`→`&amp;` (+4 raw chars over the decoded `&` the Yjs
+    // char stream holds). Four ampersands desync the cursor by 16; a 2-char
+    // insertion at the tail then resolves to NOTHING unless the cursor advances by
+    // the DECODED token length. Before the fix `h.author` is undefined here.
+    const { docA, committed } = seedByAlice("<p>A & B & C & D & E end</p>");
+    expect(committed).toContain("&amp;"); // confirm the entities survived into the baseline
+    const { docB, b } = joinAsBob(docA);
+    b.commands.insertContentAt(b.state.doc.content.size - 1, " Z");
+    mergeIntoA(docA, docB);
+    const working = flatten(docA);
+
+    const resolver = buildBlameResolver(docA)!;
+    const hunks = resolver.annotate(computeTrackedChanges(committed, working));
+
+    const adds = hunks.filter((h) => h.type === "add");
+    expect(adds.length).toBeGreaterThan(0);
+    expect(adds.some((h) => h.author?.name === "Bob")).toBe(true);
+    b.destroy();
+  });
+
   it("attributes a DELETION hunk to the deleter (gc:false + flushed ds)", async () => {
     const { docA, committed } = seedByAlice("<p>one two three four</p>");
     const { docB, b } = joinAsBob(docA);

@@ -78,6 +78,15 @@ interface Props {
   restoring?: boolean;
   /** The snapshot currently being restored, for a per-row "Restoring…" label. */
   restoringId?: string | null;
+  /**
+   * The editor's current working body, used as the Diff "after" baseline. Sourced
+   * from the page (under collab: the flattened Yjs doc) so the diff compares the
+   * selected version against what the operator is ACTUALLY editing. The list-derived
+   * `liveBody` (is_current snapshot / newest draft) is unreliable for an edited run —
+   * is_current matches the original render, so every autosaved edit falls back to the
+   * AI draft, diffing against the wrong baseline. Falls back to `liveBody` when unset.
+   */
+  currentBody?: string;
 }
 
 export function Hitl2VersionHistory({
@@ -87,6 +96,7 @@ export function Hitl2VersionHistory({
   onRestore,
   restoring = false,
   restoringId = null,
+  currentBody,
 }: Props) {
   const snapshots = useQuery({
     queryKey: ["hitl2-snapshots", runId],
@@ -258,7 +268,7 @@ export function Hitl2VersionHistory({
         {diffEntry && (
           <VersionDiff
             before={diffEntry.body}
-            after={liveBody ?? ""}
+            after={currentBody ?? liveBody ?? ""}
             className="max-h-[55vh]"
             emptyLabel="This is the current live body — no differences."
           />

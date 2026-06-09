@@ -43,6 +43,30 @@ const FAQ_ATOM_NODE = "faqAccordion";
 
 const TAG_RE = /^<[^>]*>$/;
 const isTag = (token: string): boolean => TAG_RE.test(token);
+
+/** Decoded code-unit length of a NON-tag text token.
+ *
+ * The diff (`computeTrackedChanges`) runs over ProseMirror `getHTML()` output,
+ * which ENTITY-ESCAPES `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;` (and `"`→`&quot;`) in
+ * text content. The Yjs char stream (`scan.liveChars`/`scan.delChars`) instead
+ * holds the DECODED characters — one entry per UTF-16 code unit of the stored
+ * `ContentString.str`, where `&amp;` is a single `&`. Advancing the cursors by the
+ * raw `token.length` therefore OVERSHOOTS by the entity expansion (e.g. `&amp;` is
+ * +4) and desyncs every downstream attribution for the rest of the document, so a
+ * hunk after any entity loses its author (the reported "missing user name per
+ * change"). Measure the decoded length instead. Counts UTF-16 code units to match
+ * `walk()`'s `j < str.length` loop. `&amp;` is decoded LAST so `&amp;lt;` does not
+ * double-decode into `<`. */
+function decodedTextLen(token: string): number {
+  const decoded = token
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&amp;/g, "&");
+  return decoded.length;
+}
 /** Opening `<div …>` (not the self-less close). */
 const isDivOpen = (token: string): boolean => /^<div(?:\s|>)/i.test(token);
 const isDivClose = (token: string): boolean => token.toLowerCase() === "</div>";
@@ -296,21 +320,17 @@ export function buildBlameResolver(
         // Accumulate this part's author candidates (only meaningful for hunks).
         const names: Array<string | null> = [];
 
-        for (const token of part.value) {
-          if (isTag(token)) {
-            // A tag tracks atom nesting on the side(s) it appears on: added tags on
-            // the working side, removed on the committed side, unchanged on BOTH.
-            if (added) {
-              applyTag(w, token, false);
-            } else if (removed) {
-              applyTag(c, token, true);
-            } else {
-              applyTag(w, token, false);
-              applyTag(c, token, false);
-            }
-            continue;
-          }
-          const len = token.length;
+        // The Yjs char cursors count DECODED characters, but the diff tokenizer
+        // FRAGMENTS an entity across tokens (`&amp;` → "&", "amp", ";"), so a token
+        // is not independently decodable. Buffer consecutive text tokens into a run
+        // (broken only by tags, which alone change atom depth) and decode the whole
+        // run before advancing the cursor — otherwise every entity overshoots by
+        // its expansion (+4 for `&amp;`) and strands blame for the rest of the doc.
+        let textRun = "";
+        const flushTextRun = (): void => {
+          if (textRun === "") return;
+          const len = decodedTextLen(textRun);
+          textRun = "";
           const inAtom = state.inAtomDepth > 0;
           if (added) {
             if (inAtom) names.push(atomAuthor(scan.liveAtoms, state.atomOrd, false));
@@ -323,7 +343,28 @@ export function buildBlameResolver(
             // unchanged text is never deleted, so the del cursor is untouched.
             if (!inAtom) liveCursor += len;
           }
+        };
+
+        for (const token of part.value) {
+          if (isTag(token)) {
+            // Flush the buffered text BEFORE the tag toggles atom depth, so it is
+            // attributed under the depth that was active while it was emitted.
+            flushTextRun();
+            // A tag tracks atom nesting on the side(s) it appears on: added tags on
+            // the working side, removed on the committed side, unchanged on BOTH.
+            if (added) {
+              applyTag(w, token, false);
+            } else if (removed) {
+              applyTag(c, token, true);
+            } else {
+              applyTag(w, token, false);
+              applyTag(c, token, false);
+            }
+            continue;
+          }
+          textRun += token;
         }
+        flushTextRun();
 
         if ((added || removed) && names.some((n) => n)) {
           const name = dominant(names);

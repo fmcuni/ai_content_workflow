@@ -26,7 +26,7 @@ describe("useWorkingBody", () => {
   it("collab OFF: passes the updater straight to setHtml and never touches a ydoc", () => {
     const setHtml = vi.fn<(updater: (html: string) => string) => void>();
     const { result } = renderHook(() =>
-      useWorkingBody({ collabActive: false, ydoc: null, html: "<p>a</p>", setHtml }),
+      useWorkingBody({ collabActive: false, collabReady: false, ydoc: null, html: "<p>a</p>", setHtml }),
     );
 
     const updater = (prev: string) => prev + "x";
@@ -45,7 +45,7 @@ describe("useWorkingBody", () => {
 
     const setHtml = vi.fn<(updater: (html: string) => string) => void>();
     const { result } = renderHook(() =>
-      useWorkingBody({ collabActive: true, ydoc, html: SEED_HTML, setHtml }),
+      useWorkingBody({ collabActive: true, collabReady: true, ydoc, html: SEED_HTML, setHtml }),
     );
 
     result.current(() => NEXT_HTML);
@@ -65,7 +65,7 @@ describe("useWorkingBody", () => {
 
     const setHtml = vi.fn<(updater: (html: string) => string) => void>();
     const { result } = renderHook(() =>
-      useWorkingBody({ collabActive: true, ydoc, html: SEED_HTML, setHtml }),
+      useWorkingBody({ collabActive: true, collabReady: true, ydoc, html: SEED_HTML, setHtml }),
     );
 
     // Updater returns content that flattens to the SAME HTML the doc already holds.
@@ -85,7 +85,7 @@ describe("useWorkingBody", () => {
 
     const setHtml = vi.fn<(updater: (html: string) => string) => void>();
     const { result, rerender } = renderHook(
-      ({ html }) => useWorkingBody({ collabActive: true, ydoc, html, setHtml }),
+      ({ html }) => useWorkingBody({ collabActive: true, collabReady: true, ydoc, html, setHtml }),
       { initialProps: { html: SEED_HTML } },
     );
 
@@ -96,5 +96,50 @@ describe("useWorkingBody", () => {
     result.current((prev) => prev.replace("</p>", " more</p>"));
 
     expect(flattenCollabDoc(ydoc)).toBe("<p>goodbye more</p>");
+  });
+
+  it("collab ON but NOT synced: DEFERS the replace, then flushes it once connected", () => {
+    // The restore/hydrate race: replacing before sync step-2 lands would diff
+    // against an unsynced doc and merge the old body back in (CRDT union).
+    const ydoc = new Y.Doc();
+    seedCollabDocIfEmpty(ydoc, SEED_HTML);
+    const before = Y.encodeStateVector(ydoc);
+
+    const setHtml = vi.fn<(updater: (html: string) => string) => void>();
+    const { result, rerender } = renderHook(
+      ({ collabReady }) =>
+        useWorkingBody({ collabActive: true, collabReady, ydoc, html: SEED_HTML, setHtml }),
+      { initialProps: { collabReady: false } },
+    );
+
+    // Restore-style write while the doc is still "connecting".
+    result.current(() => NEXT_HTML, { force: true });
+
+    // React state updated immediately, but the CRDT is untouched (deferred).
+    expect(setHtml).toHaveBeenCalledTimes(1);
+    expect(Y.encodeStateVector(ydoc)).toEqual(before);
+    expect(flattenCollabDoc(ydoc)).toBe(SEED_HTML);
+
+    // Doc connects → the queued replace flushes via the effect.
+    rerender({ collabReady: true });
+    expect(flattenCollabDoc(ydoc)).toBe(NEXT_HTML);
+  });
+
+  it("collab ON force: replaces the CRDT even when next equals the stale html ref", () => {
+    // The doc already holds NEXT_HTML, but React `html` lags at SEED_HTML (e.g. the
+    // live editor is unmounted in Review mode, so onUpdate never refreshed it).
+    const ydoc = new Y.Doc();
+    seedCollabDocIfEmpty(ydoc, NEXT_HTML);
+
+    const setHtml = vi.fn<(updater: (html: string) => string) => void>();
+    const { result } = renderHook(() =>
+      useWorkingBody({ collabActive: true, collabReady: true, ydoc, html: SEED_HTML, setHtml }),
+    );
+
+    // Restore SEED_HTML — equals the stale React ref, so without `force` the
+    // `next === prev` guard would skip the write and strand the doc on NEXT_HTML.
+    result.current(() => SEED_HTML, { force: true });
+
+    expect(flattenCollabDoc(ydoc)).toBe(SEED_HTML);
   });
 });

@@ -117,6 +117,9 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     user: collabUser,
   });
   const collabActive = collabEnabled && ydoc !== null && provider !== null;
+  // A whole-doc replace (restore/hydrate/reject/apply-edits) is only safe once the
+  // shared doc has synced — see useWorkingBody. Before that, replaces are deferred.
+  const collabReady = collabActive && collabStatus === "connected";
   const collab: TipTapCollab | null =
     collabActive && ydoc && provider
       ? { ydoc, provider, user: { name: collabUser.name, color: collabColor ?? NEUTRAL_COLLAB_COLOR } }
@@ -141,7 +144,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   // Collab-aware working-body writer: when collab is on, external writes also
   // push into the shared Yjs doc (the live editor ignores its value prop then).
   // When collab is off this is byte-identical to calling setHtml.
-  const applyWorking = useWorkingBody({ collabActive, ydoc, html, setHtml });
+  const applyWorking = useWorkingBody({ collabActive, collabReady, ydoc, html, setHtml });
 
   const {
     comments,
@@ -288,7 +291,9 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
   }, [render.data, run.data, existingPost.data, existingPostSettled]);
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
-    applyWorking(() => s.html_body);
+    // force: a restore/hydrate must replace the CRDT even if the resolved body
+    // equals the (effect-synced, possibly stale) React `html` ref.
+    applyWorking(() => s.html_body, { force: true });
     setCommittedHtml(s.committed_html_body ?? s.html_body);
     setComments(s.comments ?? []);
     setForm((f) => applySnapshotToForm(f, s));
@@ -537,6 +542,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
         }}
         restoring={restore.isPending}
         restoringId={restoringId}
+        currentBody={collab && historyOpen ? flattenCollabDoc(collab.ydoc) : html}
       />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

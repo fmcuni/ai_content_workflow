@@ -97,6 +97,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
     user: collabUser,
   });
   const collabActive = collabEnabled && ydoc !== null && provider !== null;
+  // A whole-doc replace (restore/hydrate/reject/apply-edits) is only safe once the
+  // shared doc has synced — see useWorkingBody. Before that, replaces are deferred.
+  const collabReady = collabActive && collabStatus === "connected";
   const collab: TipTapCollab | null =
     collabActive && ydoc && provider
       ? { ydoc, provider, user: { name: collabUser.name, color: collabColor ?? NEUTRAL_COLLAB_COLOR } }
@@ -184,7 +187,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   // Collab-aware working-body writer: when collab is on, external writes also
   // push into the shared Yjs doc (the live editor ignores its value prop then).
   // When collab is off this is byte-identical to calling setHtml.
-  const applyWorking = useWorkingBody({ collabActive, ydoc, html, setHtml });
+  const applyWorking = useWorkingBody({ collabActive, collabReady, ydoc, html, setHtml });
   const {
     comments,
     setComments,
@@ -351,7 +354,9 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   }, [render.data, existingPost.data, existingPost.isFetched]);
 
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
-    applyWorking(() => s.html_body);
+    // force: a restore/hydrate must replace the CRDT even if the resolved body
+    // equals the (effect-synced, possibly stale) React `html` ref.
+    applyWorking(() => s.html_body, { force: true });
     // Restore the tracked-changes baseline; older snapshots without one have no
     // pending changes (committed == body).
     setCommittedHtml(s.committed_html_body ?? s.html_body);
@@ -632,6 +637,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
         onRestore={(s) => restore.mutate(s)}
         restoring={restore.isPending}
         restoringId={restore.variables?.snapshot_id ?? null}
+        currentBody={collab && historyOpen ? flattenCollabDoc(collab.ydoc) : html}
       />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
