@@ -1,14 +1,26 @@
 import { DurableObject } from "cloudflare:workers";
+import postgres from "postgres";
 import * as Y from "yjs";
 import * as syncProtocol from "y-protocols/sync";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
+import { parseRunIdFromUrl } from "./run-doc-persistence";
 
 /** Minimal binding env for the RunDoc collab sync DO (spike-local; Phase 1 folds
  * this into the app-wide Env in src/index.ts). */
 export interface RunDocEnv {
   RUN_DOC: DurableObjectNamespace<RunDoc>;
+  /**
+   * Hyperdrive binding for the Postgres cold-store / backup layer.
+   *
+   * OPTIONAL on purpose: the hermetic workers-pool harness
+   * (run-doc.harness.ts / vitest.workers.config.ts) binds only `RUN_DOC` and no
+   * Hyperdrive, and its env `{ RUN_DOC }` must still satisfy this type. When the
+   * binding is absent the DO falls back to DO-storage-only (the Phase 0
+   * behaviour) — the Postgres backup/cold-load is a strict no-op.
+   */
+  HYPERDRIVE?: Hyperdrive;
 }
 
 // Wire protocol (mirrors y-websocket so the browser's
@@ -22,6 +34,8 @@ const MESSAGE_INIT = 2;
 const DOC_KEY = "ydoc";
 /** Debounce window before flushing the merged doc to DO storage. */
 const PERSIST_DEBOUNCE_MS = 1_000;
+/** Postgres cold-store table for the per-run merged Yjs doc (DO-eviction backup). */
+const COLLAB_TABLE = "content_tool.run_collab_state";
 
 /**
  * Server-issued cursor palette (decision 2026-06-09: colours are assigned by the
@@ -53,6 +67,13 @@ export class RunDoc extends DurableObject<RunDocEnv> {
   private readonly colours = new Map<WebSocket, string>();
   private loaded = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * This DO's run id, parsed from the upgrade URL (`/runs/:id/doc`). The DO is
+   * addressed via `idFromName(runId)` but never receives that name, so we read
+   * it off the request. Stays null if the URL doesn't match → the Postgres
+   * cold-store path no-ops rather than keying on a guessed/wrong id.
+   */
+  private runId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: RunDocEnv) {
     super(ctx, env);
@@ -102,6 +123,9 @@ export class RunDoc extends DurableObject<RunDocEnv> {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
     }
+    // Capture the run id from the upgrade URL before the first load so the
+    // Postgres cold-store can key on it (see `runId` field).
+    if (this.runId === null) this.runId = parseRunIdFromUrl(request.url);
     await this.ensureLoaded();
 
     const pair = new WebSocketPair();
@@ -217,9 +241,51 @@ export class RunDoc extends DurableObject<RunDocEnv> {
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    const stored = await this.ctx.storage.get<Uint8Array>(DOC_KEY);
-    if (stored) Y.applyUpdate(this.doc, stored, "storage");
-    this.loaded = true;
+    // A DO does NOT serialize concurrent fetch() handlers across await points, so
+    // two simultaneous first connects could both pass the `loaded` check and load
+    // twice. Fence the load (as RunStream does) and re-check inside, so only the
+    // first caller hydrates the doc.
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (this.loaded) return;
+      const stored = await this.ctx.storage.get<Uint8Array>(DOC_KEY);
+      if (stored) {
+        Y.applyUpdate(this.doc, stored, "storage");
+      } else {
+        // DO storage was empty (cold DO, possibly relocated/evicted). Fall back to
+        // the Postgres cold-store so the doc survives DO loss. Strict no-op when
+        // no Hyperdrive is bound (the workers-pool harness) or the run id is
+        // unknown — never throws, so a backup miss can't block the live sync.
+        await this.coldLoadFromDb();
+      }
+      this.loaded = true;
+    });
+  }
+
+  /** Best-effort cold-load of the merged doc from Postgres into this.doc. */
+  private async coldLoadFromDb(): Promise<void> {
+    const env = this.env.HYPERDRIVE;
+    if (!env || !this.runId) return;
+    let sql: ReturnType<typeof postgres> | null = null;
+    try {
+      sql = this.openSql(env);
+      // Read bytea as base64 text (encode(...)) so the round-trip does not depend
+      // on postgres.js bytea OID parsing under `fetch_types: false`.
+      const rows = await sql<{ ydoc_b64: string }[]>`
+        SELECT encode(ydoc, 'base64') AS ydoc_b64
+        FROM ${sql(COLLAB_TABLE)} WHERE run_id = ${this.runId}
+      `;
+      const b64 = rows[0]?.ydoc_b64;
+      if (b64) {
+        const bytes = new Uint8Array(Buffer.from(b64, "base64"));
+        if (bytes.byteLength > 0) Y.applyUpdate(this.doc, bytes, "db");
+      }
+    } catch {
+      // A cold-store miss/failure must never break the live sync; the DO simply
+      // starts from an empty doc and the first persist re-seeds Postgres.
+    } finally {
+      // A DO has no executionCtx — close the socket inline rather than deferring.
+      if (sql) await sql.end().catch(() => undefined);
+    }
   }
 
   private schedulePersist(): void {
@@ -231,10 +297,62 @@ export class RunDoc extends DurableObject<RunDocEnv> {
   }
 
   private async persist(): Promise<void> {
+    let update: Uint8Array;
     try {
-      await this.ctx.storage.put(DOC_KEY, Y.encodeStateAsUpdate(this.doc));
+      update = Y.encodeStateAsUpdate(this.doc);
     } catch {
-      // Persistence must never break the live stream; a later update retries.
+      // Can't snapshot the doc; a later update retries. (Never throw — the timer
+      // fire-and-forgets this, so a reject would be unhandled.)
+      return;
     }
+    // DO storage and the Postgres cold-store are INDEPENDENT best-effort backups:
+    // if DO storage fails, Postgres is the only recovery path, so the DB backup
+    // must still run. Neither failure may break the live stream (a later flush
+    // retries both; both swallow their own errors).
+    await this.ctx.storage.put(DOC_KEY, update).catch(() => undefined);
+    // Cadence (KISS, v1): one upsert per DO-storage flush — already throttled by
+    // the 1s persist debounce, so write volume is bounded without extra bookkeeping.
+    await this.backupToDb(update);
+  }
+
+  /** Best-effort UPSERT of the merged doc into the Postgres cold-store. */
+  private async backupToDb(update: Uint8Array): Promise<void> {
+    const env = this.env.HYPERDRIVE;
+    if (!env || !this.runId) return; // strict no-op without a DB binding / run id
+    let sql: ReturnType<typeof postgres> | null = null;
+    try {
+      sql = this.openSql(env);
+      // Send the binary payloads as base64 text decoded server-side
+      // (decode(...,'base64')), so the write does not depend on postgres.js
+      // serializing a Uint8Array to bytea — robust under `fetch_types: false`.
+      const ydocB64 = Buffer.from(update).toString("base64");
+      const stateVectorB64 = Buffer.from(Y.encodeStateVector(this.doc)).toString("base64");
+      await sql`
+        INSERT INTO ${sql(COLLAB_TABLE)} (run_id, ydoc, state_vector, updated_at)
+        VALUES (
+          ${this.runId},
+          decode(${ydocB64}, 'base64'),
+          decode(${stateVectorB64}, 'base64'),
+          now()
+        )
+        ON CONFLICT (run_id) DO UPDATE
+          SET ydoc = EXCLUDED.ydoc,
+              state_vector = EXCLUDED.state_vector,
+              updated_at = now()
+      `;
+    } catch {
+      // A backup failure must NEVER break the live sync; the next flush retries.
+    } finally {
+      if (sql) await sql.end().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Short-lived postgres client over Hyperdrive. Mirrors src/db/client.ts
+   * (`fetch_types: false`), but `max: 1` — a DO holds one connection at a time
+   * for its single backup/cold-load query, then closes it inline.
+   */
+  private openSql(hyperdrive: Hyperdrive): ReturnType<typeof postgres> {
+    return postgres(hyperdrive.connectionString, { max: 1, fetch_types: false });
   }
 }
