@@ -3,12 +3,73 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { isAuthRoute } from "@/lib/auth-routes";
 import { signOut, useSession } from "@/lib/auth-client";
 import { useRole } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
+
+// First two initials from an email's local part (before @). "ada.lovelace@x"
+// → "AL"; single-token "ada@x" → "AD". Used for the avatar chip.
+function initialsFromEmail(email: string): string {
+  const local = email.split("@")[0] ?? email;
+  const parts = local.split(/[.\-_+]/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  }
+  return local.slice(0, 2).toUpperCase();
+}
+
+interface UserMenuProps {
+  email: string;
+  role: string | null;
+  onSignOut: () => void;
+}
+
+// Initials-avatar button + dropdown (email, role badge, Sign out). Visible on
+// all breakpoints (mobile included) — the avatar is the trigger.
+function UserMenu({ email, role, onSignOut }: UserMenuProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label="Account menu"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15 text-[11px] font-mono font-medium uppercase tracking-wide text-accent transition-colors hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        {initialsFromEmail(email)}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col gap-1.5">
+              <span className="truncate text-[12px] text-ink" title={email}>
+                {email}
+              </span>
+              {role ? (
+                <Badge variant="secondary" className="w-fit uppercase tracking-wide">
+                  {role}
+                </Badge>
+              ) : null}
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onSignOut}>Sign out</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 // `exact` entries match only their own path (so the Desk's "/" and the Ledger's
 // "/runs" don't both light up, and deeper run pages like /runs/{id}/hitl2 don't
@@ -54,7 +115,7 @@ export function Masthead() {
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
-  const { can } = useRole();
+  const { can, role } = useRole();
   const navItems = can("manage_users") ? [...NAV, ...ADMIN_NAV] : NAV;
   const [now, setNow] = useState<Date | null>(null);
 
@@ -71,6 +132,7 @@ export function Masthead() {
 
   async function onSignOut() {
     await signOut();
+    toast("Signed out");
     router.push("/login");
     router.refresh();
   }
@@ -114,23 +176,12 @@ export function Masthead() {
           })}
         </nav>
         <div className="flex items-center gap-4">
-          {session?.user ? (
-            <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-ink-faint">
-              <span className="truncate max-w-[180px]" title={session.user.email}>
-                {session.user.email}
-              </span>
-              <button
-                type="button"
-                onClick={onSignOut}
-                className="uppercase tracking-wider hover:text-ink transition-colors"
-              >
-                Sign out
-              </button>
-            </div>
-          ) : null}
           <Link href="/runs/new">
             <Button variant="primary" size="sm">+ New run</Button>
           </Link>
+          {session?.user ? (
+            <UserMenu email={session.user.email} role={role} onSignOut={onSignOut} />
+          ) : null}
         </div>
       </div>
     </header>

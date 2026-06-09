@@ -13,6 +13,26 @@ import type { NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/verify"];
 
+// Mirror of SUPABASE_COOKIE_NAME in lib/supabase-client.ts. Duplicated here on
+// purpose: that module is a "use client" file that pulls in @supabase/supabase-js,
+// which must not be bundled into the edge middleware. Keep the two in sync.
+const SUPABASE_COOKIE_NAME = "bowtie-sb-auth";
+
+// True when the build is configured for Supabase auth. NEXT_PUBLIC_* vars are
+// inlined at build time, so this is a static check (no runtime toggle).
+function usesSupabaseAuth(): boolean {
+  return process.env.NEXT_PUBLIC_AUTH_PROVIDER === "supabase";
+}
+
+// Optimistic presence check only — does a session cookie exist? Validity is
+// enforced by the backend 401 (and the api.ts refresh-or-/login path).
+function hasSessionCookie(request: NextRequest): boolean {
+  if (usesSupabaseAuth()) {
+    return Boolean(request.cookies.get(SUPABASE_COOKIE_NAME)?.value);
+  }
+  return Boolean(getSessionCookie(request));
+}
+
 export function middleware(request: NextRequest): NextResponse {
   // Local dev points the web app at the Python backend (no auth routes).
   if (process.env.AUTH_DISABLED === "true") return NextResponse.next();
@@ -22,7 +42,7 @@ export function middleware(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  if (!getSessionCookie(request)) {
+  if (!hasSessionCookie(request)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("redirect", pathname);

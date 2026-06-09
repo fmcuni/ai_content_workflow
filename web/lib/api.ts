@@ -21,9 +21,34 @@ import type {
   WpCategoryOption, WpUserOption,
 } from "./types";
 
-import { authClient } from "./auth-client";
+import { getSessionEmail } from "./auth-client";
+import { getSupabaseClient, isSupabaseAuth } from "./supabase-client";
 
 const BASE = "/api/runs";
+
+// When NEXT_PUBLIC_AUTH_PROVIDER === "supabase", requests carry the Supabase
+// access token as a Bearer header (the backend validates the JWT) instead of
+// relying on the better-auth same-origin session cookie. `forceRefresh` asks
+// Supabase to mint a fresh token from the refresh token — used once after a 401.
+async function supabaseBearer(forceRefresh = false): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  if (forceRefresh) {
+    const { data } = await supabase.auth.refreshSession();
+    return data.session?.access_token ?? null;
+  }
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
+// Send the browser to /login, preserving where we were so we can return after
+// re-auth. No-op during SSR. Used when a Supabase 401 survives a token refresh.
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  const here = window.location.pathname + window.location.search;
+  const target = here && here !== "/login" ? `?redirect=${encodeURIComponent(here)}` : "";
+  window.location.assign(`/login${target}`);
+}
 
 /**
  * Build the `?run_id=…&persona=…` query for the /wp-options endpoints. Either
@@ -58,8 +83,7 @@ let cachedEditorEmail: string | null | undefined;
 async function resolveEditorEmail(): Promise<string | undefined> {
   if (cachedEditorEmail === undefined) {
     try {
-      const res = await authClient.getSession();
-      cachedEditorEmail = res.data?.user?.email ?? null;
+      cachedEditorEmail = await getSessionEmail();
     } catch {
       cachedEditorEmail = null;
     }
@@ -78,16 +102,44 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     const editorEmail = await resolveEditorEmail();
     if (editorEmail) extra["X-Editor-Email"] = editorEmail;
   }
-  const r = await fetch(path, {
-    ...init,
-    // Carry the better-auth session cookie (same-origin via the /api proxy).
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...extra,
-      ...(init?.headers ?? {}),
-    },
-  });
+
+  const supabaseAuth = isSupabaseAuth();
+  if (supabaseAuth) {
+    const token = await supabaseBearer();
+    if (token) extra["authorization"] = `Bearer ${token}`;
+  }
+
+  function buildInit(): RequestInit {
+    return {
+      ...init,
+      // better-auth path carries the session cookie same-origin via the /api
+      // proxy; the Supabase path uses the Bearer header above. `credentials`
+      // is harmless on the Supabase path and required on the legacy one.
+      credentials: "include",
+      headers: {
+        "content-type": "application/json",
+        ...extra,
+        ...(init?.headers ?? {}),
+      },
+    };
+  }
+
+  let r = await fetch(path, buildInit());
+
+  // Supabase: a 401 usually means the access token expired. Try one silent
+  // refresh + retry; if it still fails, the session is gone → go to /login.
+  if (r.status === 401 && supabaseAuth) {
+    const refreshed = await supabaseBearer(true);
+    if (refreshed) {
+      extra["authorization"] = `Bearer ${refreshed}`;
+      r = await fetch(path, buildInit());
+    }
+    if (r.status === 401) {
+      redirectToLogin();
+      throw new Error("401: session expired");
+    }
+  }
+
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   // A 204 No Content (or any empty body) carries no JSON — DELETE routes return
   // `204` with a null body. Calling `r.json()` on it throws "Unexpected end of

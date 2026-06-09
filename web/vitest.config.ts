@@ -15,12 +15,13 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    // Scope to the shared-lib + component unit tests only. Never pick up the
-    // Playwright specs under tests/e2e/**.
+    // Scope to the shared-lib, component, and app-route unit tests only. Never
+    // pick up the Playwright specs under tests/e2e/** (those are `*.spec.ts`).
     include: [
       "lib/**/*.test.ts",
       "lib/**/*.test.tsx",
       "components/**/*.test.tsx",
+      "app/**/*.test.tsx",
     ],
   },
 });

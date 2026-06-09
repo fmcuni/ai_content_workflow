@@ -49,8 +49,8 @@ export const BULK_ACTIONS: readonly BulkActionDef[] = [
   { key: "approve", label: "Approve outline", need: "hitl1_approve" },
   { key: "publish", label: "Publish", need: "publish", publishes: true },
   { key: "republish", label: "Republish", need: "publish", publishes: true },
-  { key: "assign_author", label: "Assign author…", need: "editor", picks: "author" },
-  { key: "assign_category", label: "Assign category…", need: "editor", picks: "category" },
+  { key: "assign_author", label: "Assign author…", need: "reviewer", picks: "author" },
+  { key: "assign_category", label: "Assign category…", need: "reviewer", picks: "category" },
   { key: "restart", label: "Restart failed", need: "create_run" },
   { key: "delete", label: "Delete", need: "delete_run", danger: true },
 ];

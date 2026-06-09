@@ -3,28 +3,32 @@
 // what controls to show/disable. Keep ROLE_RANK and CAPABILITY_MIN_ROLE in sync
 // with the backend.
 
-export type Role = "viewer" | "editor" | "admin";
+export type Role = "viewer" | "author" | "reviewer" | "admin";
 
-export const ROLES: readonly Role[] = ["viewer", "editor", "admin"] as const;
+export const ROLES: readonly Role[] = ["viewer", "author", "reviewer", "admin"] as const;
 
-// Cumulative ranks: viewer < editor < admin.
+// Cumulative ranks: viewer < author < reviewer < admin. Keep in sync with the
+// backend `ROLE_RANK` in deploy/cloudflare-workers/src/auth/authz.ts.
 export const ROLE_RANK: Record<Role, number> = {
   viewer: 0,
-  editor: 1,
-  admin: 2,
+  author: 1,
+  reviewer: 2,
+  admin: 3,
 };
 
 // Capability → minimum role required.
 //
-// Roles split content authoring from publishing:
-//   - viewer  — read + edit & save an existing run's content (outline, article
-//               body, AI apply-edits, autosave/version-history snapshots). A
-//               viewer CANNOT publish, approve/reject at a HITL gate, create a
-//               new run, regenerate, or restart.
-//   - editor  — everything a viewer can, plus create/regenerate/restart runs,
-//               decide HITL gates, and publish to WordPress.
-//   - admin   — everything an editor can, plus config (prompts/personas/source
-//               policy), deletes, and user management.
+// 4-role cumulative model (replaces the old viewer/editor/admin map). NOTE the
+// semantic shift: the OLD `viewer` could edit content; the NEW `viewer` is
+// read-only and content editing moves up to `author`.
+//   - viewer   — read-only.
+//   - author   — viewer + edit/save an existing run's content (outline, article
+//                body, AI apply-edits, snapshots) AND run authoring
+//                (create/regenerate runs, promote topics). CANNOT publish or
+//                decide a HITL gate.
+//   - reviewer — author + decide HITL gates and publish to WordPress.
+//   - admin    — reviewer + config (prompts/personas/source policy), deletes,
+//                and user management.
 export type Capability =
   // viewer — read + content editing on existing runs
   | "read"
@@ -49,18 +53,20 @@ export type Capability =
 
 export const CAPABILITY_MIN_ROLE: Record<Capability, Role> = {
   read: "viewer",
-  // Content editing on an existing run is a viewer capability; publishing is not.
-  edit_outline: "viewer",
-  edit_article: "viewer",
-  apply_edits: "viewer",
-  save_snapshot: "viewer",
 
-  create_run: "editor",
-  regenerate: "editor",
-  promote_topics: "editor",
-  hitl1_approve: "editor",
-  hitl2_decide: "editor",
-  publish: "editor",
+  // Content editing + run authoring → author (was viewer/editor in the 3-role map).
+  edit_outline: "author",
+  edit_article: "author",
+  apply_edits: "author",
+  save_snapshot: "author",
+  create_run: "author",
+  regenerate: "author",
+  promote_topics: "author",
+
+  // HITL decisions + publishing → reviewer (was editor).
+  hitl1_approve: "reviewer",
+  hitl2_decide: "reviewer",
+  publish: "reviewer",
 
   edit_prompts: "admin",
   manage_personas: "admin",
@@ -80,7 +86,7 @@ function isCapability(value: string): value is Capability {
 
 /**
  * True when `role` ranks at or above `required`. `required` may be a bare role
- * ("editor") or a capability name ("publish") — the latter is resolved to its
+ * ("reviewer") or a capability name ("publish") — the latter is resolved to its
  * minimum role via CAPABILITY_MIN_ROLE.
  *
  * Unknown role/requirement strings fail closed (return false) rather than
