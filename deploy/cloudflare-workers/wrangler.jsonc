@@ -52,6 +52,11 @@
 			{
 				"name": "GEMINI_PROXY",
 				"class_name": "GeminiProxy"
+			},
+			// Per-run Yjs collab-sync DO — backs realtime collaborative editing.
+			{
+				"name": "RUN_DOC",
+				"class_name": "RunDoc"
 			}
 		]
 	},
@@ -79,6 +84,13 @@
 			"tag": "v4",
 			"deleted_classes": [
 				"GeminiProbe"
+			]
+		},
+		// Realtime-collab Phase 1A — add the per-run RunDoc collab-sync DO.
+		{
+			"tag": "v5",
+			"new_sqlite_classes": [
+				"RunDoc"
 			]
 		}
 	],
