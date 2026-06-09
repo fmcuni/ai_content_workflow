@@ -29,6 +29,10 @@ interface UseSnapshotAutosaveArgs {
   hydratedFromSnapshotRef: { current: boolean };
   /** Apply a restored / hydrated snapshot to the caller's editor state. */
   onHydrate: (snapshot: Hitl2Snapshot) => void;
+  /** When true, the run body is owned by the live collab doc (RunDoc DO), so the
+   *  snapshot autosave must NOT persist body writes — flatten-on-event lands in
+   *  Phase 3. Defaults false (the current string-snapshot behaviour). */
+  collabActive?: boolean;
 }
 
 export interface SnapshotAutosave {
@@ -58,6 +62,7 @@ export function useSnapshotAutosave({
   hydrateEnabled,
   hydratedFromSnapshotRef,
   onHydrate,
+  collabActive = false,
 }: UseSnapshotAutosaveArgs): SnapshotAutosave {
   const qc = useQueryClient();
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -88,6 +93,11 @@ export function useSnapshotAutosave({
 
   const saveSnapshot = useCallback(
     async (trigger: Hitl2SnapshotTrigger): Promise<"saved" | "unchanged" | "error"> => {
+      // Under live collab the RunDoc DO owns the body; the string-snapshot
+      // autosave is fully gated (the whole snapshot, not just the body — KISS).
+      // Metadata-only persistence under collab is a Phase 3 concern. The
+      // interval / navigate effects call this and so no-op automatically.
+      if (collabActive) return "unchanged";
       if (submittedRef.current || lastSavedKeyRef.current == null) return "unchanged";
       const snap = snapshotRef.current;
       // Never persist a blank body — TipTap reports empty mid-teardown, and a
@@ -113,7 +123,7 @@ export function useSnapshotAutosave({
         return "error";
       }
     },
-    [runId, qc, editorEmailRef, submittedRef],
+    [runId, qc, editorEmailRef, submittedRef, collabActive],
   );
 
   const handleManualSave = useCallback(async () => {
@@ -135,6 +145,8 @@ export function useSnapshotAutosave({
   // Tab close / reload: an awaited fetch would be cancelled, so beacon instead.
   useEffect(() => {
     const handler = () => {
+      // Collab body is owned by the RunDoc DO — no beacon write (see saveSnapshot).
+      if (collabActive) return;
       if (submittedRef.current || lastSavedKeyRef.current == null) return;
       const snap = snapshotRef.current;
       if (isBlankBody(snap.html_body)) return;
@@ -147,7 +159,7 @@ export function useSnapshotAutosave({
     };
     window.addEventListener("pagehide", handler);
     return () => window.removeEventListener("pagehide", handler);
-  }, [runId, editorEmailRef, submittedRef]);
+  }, [runId, editorEmailRef, submittedRef, collabActive]);
 
   // On load, reopen the editor at the most recent saved snapshot (autosave or
   // manual) rather than the pristine render, and treat it as the clean baseline.

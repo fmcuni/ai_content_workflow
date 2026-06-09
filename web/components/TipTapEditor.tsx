@@ -7,6 +7,9 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
+import Collaboration from "@tiptap/extension-collaboration";
+import { CollaborationCaret } from "@tiptap/extension-collaboration-caret";
+import type { Extensions } from "@tiptap/core";
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -36,6 +39,8 @@ import { openExternal } from "@/lib/external-link";
 import { CommentAnchor } from "@/components/tiptap/CommentAnchor";
 import { ReviewAnchor } from "@/components/tiptap/ReviewAnchor";
 import { FaqAccordion } from "@/components/tiptap/FaqAccordion";
+import type { CollabProvider } from "@/lib/run-editor/useCollabDoc";
+import { safeCollabColor } from "@/lib/run-editor/collab-color";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -76,6 +81,33 @@ function ToolbarButton({ onClick, active, disabled, label, children }: ToolbarBu
 
 function Divider() {
   return <span aria-hidden className="mx-1 h-5 w-px bg-rule" />;
+}
+
+/**
+ * CollaborationCaret render: a thin caret span coloured with the peer's
+ * server-issued colour, carrying a small name label above it. Mirrors the
+ * example in the extension's `.d.ts`; the two classes
+ * (`.collaboration-carets__caret` / `__label`) are global and styled in
+ * `app/globals.css` (component `.css` imports aren't allowed in the Next 16 app
+ * router). The colour/name come from the awareness `user` state.
+ */
+function renderCollabCaret(user: { name?: string; color?: string }): HTMLElement {
+  // Validate the colour before it lands in an inline `style` attribute —
+  // setAttribute bypasses React escaping, so an untrusted peer/server colour
+  // could otherwise inject arbitrary CSS.
+  const color = safeCollabColor(user.color);
+  const name = user.name ?? "Anonymous";
+  const caret = document.createElement("span");
+  caret.classList.add("collaboration-carets__caret");
+  caret.setAttribute("style", `border-color: ${color}`);
+
+  const label = document.createElement("div");
+  label.classList.add("collaboration-carets__label");
+  label.setAttribute("style", `background-color: ${color}`);
+  label.insertBefore(document.createTextNode(name), null);
+
+  caret.insertBefore(label, null);
+  return caret;
 }
 
 /** Short anchor id with a domain prefix (`c-` AI comment, `r-` review note). */
@@ -397,6 +429,14 @@ function LinkPanel({ state, onSave, onStartEdit, onRemove, onClose }: LinkPanelP
   );
 }
 
+/** Live-collaboration binding: a shared Yjs doc + the provider's awareness +
+ *  this session's display identity. Present only when realtime collab is on. */
+interface TipTapCollab {
+  ydoc: import("yjs").Doc;
+  provider: CollabProvider; // has `.awareness` for CollaborationCaret
+  user: { name: string; color: string };
+}
+
 interface TipTapEditorProps {
   value: string;
   onChange: (html: string) => void;
@@ -406,6 +446,11 @@ interface TipTapEditorProps {
   /** Human review-thread anchor (separate pipeline — `data-review-id`). */
   onAddReviewNote?: (id: string, anchorText: string) => void;
   onReviewClick?: (id: string) => void;
+  /** When set, the editor binds its body to this shared Yjs doc for realtime
+   *  collaboration (Collaboration + CollaborationCaret). When undefined/null the
+   *  editor is the standalone string-backed editor (default; byte-identical to
+   *  before). */
+  collab?: TipTapCollab | null;
 }
 
 export function TipTapEditor({
@@ -415,7 +460,9 @@ export function TipTapEditor({
   onCommentClick,
   onAddReviewNote,
   onReviewClick,
+  collab,
 }: TipTapEditorProps) {
+  const collabActive = !!collab;
   const [selectionPill, setSelectionPill] = useState<{ x: number; y: number } | null>(null);
   const [linkPanel, setLinkPanel] = useState<LinkPanelState | null>(null);
   // Read by the editor's selection/click callbacks (registered once) so they see
@@ -430,8 +477,10 @@ export function TipTapEditor({
       // StarterKit v3 bundles its own Link extension; disable it so our
       // explicitly-configured LinkExtension below is the sole registration.
       // (Two registrations triggered TipTap's "Duplicate extension names:
-      // ['link']" console warning.)
-      StarterKit.configure({ link: false }),
+      // ['link']" console warning.) In collab mode also disable StarterKit's
+      // history — Yjs (Collaboration) supplies undo/redo, and a second history
+      // plugin fights the CRDT (mirrors collab-roundtrip.test.tsx).
+      StarterKit.configure(collab ? { link: false, undoRedo: false } : { link: false }),
       LinkExtension.configure({
         openOnClick: false,
         autolink: true,
@@ -447,8 +496,27 @@ export function TipTapEditor({
       // Preserve the Bowtie FAQ accordion (div.editor__faq) — without this the
       // editor flattens the widget to bare <p> tags and publishes it that way.
       FaqAccordion,
+      // Realtime collaboration: bind the body to the shared Yjs doc and render
+      // remote carets from the provider's awareness. Appended only when a
+      // `collab` binding is supplied — otherwise the array is byte-identical to
+      // the standalone editor above.
+      ...(collab
+        ? ([
+            Collaboration.configure({ document: collab.ydoc }),
+            CollaborationCaret.configure({
+              // The caret extension types `provider` as `any`; our binding is
+              // typed via CollabProvider so this single localized cast is the
+              // only `any` at the boundary.
+              provider: collab.provider as unknown,
+              user: collab.user,
+              render: renderCollabCaret,
+            }),
+          ] as Extensions)
+        : []),
     ],
-    content: value,
+    // Yjs is the source of truth in collab mode; passing `content` alongside
+    // Collaboration would duplicate the doc, so seed nothing here.
+    content: collab ? undefined : value,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     onSelectionUpdate: ({ editor }) => {
       // Dismiss the link panel once the cursor leaves the link — unless we're
@@ -499,13 +567,19 @@ export function TipTapEditor({
       },
     },
     immediatelyRender: false,
-  });
+  // Recreate the editor only when collab presence flips. Collab presence is
+  // stable per mount (driven by a feature flag), so this never thrashes — and
+  // it avoids a stale closure over `collab`/`collabActive` in the callbacks.
+  }, [collabActive]);
 
   // TipTap's `content` prop is only consumed on init. When `value` changes
   // externally (e.g. after the render query resolves), sync it in here —
   // otherwise the editor stays empty until it is unmounted and remounted.
   useEffect(() => {
     if (!editor) return;
+    // In collab mode the Yjs doc is the source of truth — never setContent, it
+    // fights the CRDT (and would clobber concurrent peers' edits).
+    if (collabActive) return;
     // Never re-set content mid-IME-composition: CJK input (pinyin/cangjie/zhuyin)
     // stays "open" across several keystrokes, and setContent during that window
     // wipes the in-progress characters. Western typing commits per keystroke so
@@ -513,7 +587,7 @@ export function TipTapEditor({
     if (editor.view.composing) return;
     if (editor.getHTML() === value) return;
     editor.commands.setContent(value, { emitUpdate: false });
-  }, [editor, value]);
+  }, [editor, value, collabActive]);
 
   const addComment = useCallback(() => {
     if (!editor || !onAddComment) return;
