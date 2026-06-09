@@ -317,7 +317,7 @@ const runsRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 // ---------------------------------------------------------------------------
 // POST / — create a run
 // ---------------------------------------------------------------------------
-runsRouter.post("/", requireRole("editor"), async (c) => {
+runsRouter.post("/", requireRole("reviewer"), async (c) => {
   const body = await c.req
     .json<CreateRunBody>()
     .catch(() => ({}) as CreateRunBody);
@@ -495,7 +495,7 @@ runsRouter.get("/:id", async (c) => {
 // transient Workflows error would strand the run at `pending`, where the guard
 // would refuse any further restart.
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/restart", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/restart", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
 
   // Optional `{ from: { name, count? } }` body: restart FROM a specific step
@@ -563,7 +563,7 @@ runsRouter.post("/:id/restart", requireRole("editor"), async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/resume — HITL_1 decision
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/resume", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<ResumeBody>().catch(() => ({}) as ResumeBody);
   const decision = body.decision ?? "approve";
@@ -635,7 +635,7 @@ runsRouter.post("/:id/resume", requireRole("editor"), async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/hitl-2 — HITL_2 decision
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/hitl-2", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req.json<Hitl2Body>().catch(() => ({}) as Hitl2Body);
   const decision = body.decision ?? "approve";
@@ -863,7 +863,7 @@ runsRouter.options("/:id/logs", (c) =>
 // ---------------------------------------------------------------------------
 // POST /:id/dry-publish — preview the WP REST payload WITHOUT calling WP
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/dry-publish", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
   const ov = await c.req
     .json<DryPublishBody>()
@@ -1477,7 +1477,7 @@ runsRouter.get("/:id/existing-post", async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/existing-post/refresh — re-read the post from WP, update the cache
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/existing-post/refresh", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/existing-post/refresh", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
 
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -1894,7 +1894,7 @@ runsRouter.put("/:id/article", requireRole("viewer"), async (c) => {
 // canonicalized (decode-then-encode). Role: editor+.
 // Mirrors content_tool/api/routes/runs.py::patch_run_wp_meta.
 // ---------------------------------------------------------------------------
-runsRouter.patch("/:id", requireRole("editor"), async (c) => {
+runsRouter.patch("/:id", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
   const body = await c.req
     .json<RunWpMetaPatchBody>()
@@ -2038,7 +2038,7 @@ runsRouter.post("/:id/apply-edits", requireRole("viewer"), async (c) => {
 // ---------------------------------------------------------------------------
 // POST /:id/republish — re-push the persisted render + WP metadata to WordPress
 // ---------------------------------------------------------------------------
-runsRouter.post("/:id/republish", requireRole("editor"), async (c) => {
+runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
 
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {

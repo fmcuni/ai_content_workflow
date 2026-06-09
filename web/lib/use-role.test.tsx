@@ -26,34 +26,51 @@ beforeEach(() => {
 
 describe("useRole", () => {
   it("exposes the role from /me and gates capabilities by rank", async () => {
-    mockGetMe.mockResolvedValue({ email: "ed@bowtie.com.hk", role: "editor" });
+    mockGetMe.mockResolvedValue({ email: "rv@bowtie.com.hk", role: "reviewer" });
     const { result } = renderHook(() => useRole(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.role).toBe("editor"));
-    expect(result.current.email).toBe("ed@bowtie.com.hk");
-    // editor can publish + create, cannot edit prompts (admin)
+    await waitFor(() => expect(result.current.role).toBe("reviewer"));
+    expect(result.current.email).toBe("rv@bowtie.com.hk");
+    // reviewer can publish + create, cannot edit prompts (admin)
     expect(result.current.can("publish")).toBe(true);
     expect(result.current.can("create_run")).toBe(true);
     expect(result.current.can("edit_prompts")).toBe(false);
     expect(result.current.isDevFallback).toBe(false);
   });
 
-  it("a viewer cannot create, approve, or publish", async () => {
+  it("a viewer is read-only: cannot edit, create, approve, or publish", async () => {
     mockGetMe.mockResolvedValue({ email: "v@bowtie.com.hk", role: "viewer" });
     const { result } = renderHook(() => useRole(), { wrapper: wrapper() });
 
     await waitFor(() => expect(result.current.role).toBe("viewer"));
     expect(result.current.can("read")).toBe(true);
+    expect(result.current.can("edit_article")).toBe(false);
     expect(result.current.can("create_run")).toBe(false);
     expect(result.current.can("hitl2_decide")).toBe(false);
     expect(result.current.can("publish")).toBe(false);
   });
 
-  it("an editor can create, approve, and publish but cannot manage prompts/users", async () => {
-    mockGetMe.mockResolvedValue({ email: "ed2@bowtie.com.hk", role: "editor" });
+  it("an author can edit content and author runs but cannot publish or decide HITL", async () => {
+    mockGetMe.mockResolvedValue({ email: "au@bowtie.com.hk", role: "author" });
     const { result } = renderHook(() => useRole(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.role).toBe("editor"));
+    await waitFor(() => expect(result.current.role).toBe("author"));
+    expect(result.current.can("edit_outline")).toBe(true);
+    expect(result.current.can("edit_article")).toBe(true);
+    expect(result.current.can("apply_edits")).toBe(true);
+    expect(result.current.can("save_snapshot")).toBe(true);
+    expect(result.current.can("create_run")).toBe(true);
+    expect(result.current.can("promote_topics")).toBe(true);
+    expect(result.current.can("hitl1_approve")).toBe(false);
+    expect(result.current.can("hitl2_decide")).toBe(false);
+    expect(result.current.can("publish")).toBe(false);
+  });
+
+  it("a reviewer can create, approve, and publish but cannot manage prompts/users", async () => {
+    mockGetMe.mockResolvedValue({ email: "rv2@bowtie.com.hk", role: "reviewer" });
+    const { result } = renderHook(() => useRole(), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.role).toBe("reviewer"));
     expect(result.current.can("create_run")).toBe(true);
     expect(result.current.can("promote_topics")).toBe(true);
     expect(result.current.can("hitl1_approve")).toBe(true);

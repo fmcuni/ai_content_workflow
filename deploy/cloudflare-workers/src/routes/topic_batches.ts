@@ -503,7 +503,7 @@ topicBatchesRouter.options("/:id/logs", (c) =>
 // affects runs promoted AFTER the change, so this is safe in any batch state.
 // Role: editor+. Mirrors content_tool/api/routes/topic_batches.py.
 // ---------------------------------------------------------------------------
-topicBatchesRouter.patch("/:id", requireRole("editor"), async (c) => {
+topicBatchesRouter.patch("/:id", requireRole("reviewer"), async (c) => {
   const batchId = c.req.param("id");
   const body = await c.req
     .json<TopicBatchDefaultsPatchBody>()

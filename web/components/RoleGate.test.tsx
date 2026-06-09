@@ -20,13 +20,14 @@ function setRole(role: Role | null, isLoading = false) {
     can: (required: string) => {
       const rank: Record<string, number> = {
         viewer: 0,
-        editor: 1,
-        admin: 2,
+        author: 1,
+        reviewer: 2,
+        admin: 3,
       };
       const capMin: Record<string, string> = {
         read: "viewer",
-        create_run: "editor",
-        publish: "editor",
+        create_run: "author",
+        publish: "reviewer",
         edit_prompts: "admin",
         manage_users: "admin",
       };
@@ -77,7 +78,7 @@ describe("RoleGate (hide)", () => {
 
 describe("RoleButton (disable with hint)", () => {
   it("is enabled when the role can perform the action", () => {
-    setRole("editor");
+    setRole("reviewer");
     render(
       <RoleButton need="publish" onClick={() => undefined}>
         Publish
@@ -89,13 +90,13 @@ describe("RoleButton (disable with hint)", () => {
   it("is disabled with a hint when the role cannot perform the action", () => {
     setRole("viewer");
     render(
-      <RoleButton need="publish" deniedHint="Editor required" onClick={() => undefined}>
+      <RoleButton need="publish" deniedHint="Reviewer required" onClick={() => undefined}>
         Publish
       </RoleButton>,
     );
     const btn = screen.getByRole("button", { name: "Publish" });
     expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute("title", "Editor required");
+    expect(btn).toHaveAttribute("title", "Reviewer required");
   });
 
   it("preserves an existing disabled state even when the role is allowed", () => {

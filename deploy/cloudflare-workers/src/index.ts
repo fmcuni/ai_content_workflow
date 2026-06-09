@@ -68,6 +68,23 @@ export interface Env {
   EMAIL_VERIFICATION?: string;
   // Var — set "true" to bypass the auth gate for local dev (Python backend).
   AUTH_DISABLED?: string;
+  // --- Auth provider selector (flagged parallel cutover) ---
+  // Var — "supabase" routes session validation through the Supabase JWT branch
+  // (src/auth/jwt.ts + the supabase branch in middleware.ts, wired in WS1).
+  // Anything else, or unset, keeps the legacy better-auth cookie path. Default
+  // is better-auth so `main` stays behaviorally unchanged until cutover.
+  AUTH_PROVIDER?: string;
+  // --- Supabase Auth (GoTrue) — consumed once AUTH_PROVIDER="supabase" ---
+  // Var — Supabase project URL, e.g. https://<ref>.supabase.co. Used to derive
+  // the public JWKS URL (`/auth/v1/.well-known/jwks.json`) for JWT verify and as
+  // the GoTrue admin REST base (WS3). Unset → supabase branch degrades safely.
+  SUPABASE_URL?: string;
+  // Secret — GoTrue service_role key. Worker-only (never shipped to the browser);
+  // authorizes the admin user-management REST calls (WS3).
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  // Secret — HS256 shared JWT secret. Fallback verifier used only when asymmetric
+  // signing keys (JWKS) are not enabled on the project. See src/auth/jwt.ts.
+  SUPABASE_JWT_SECRET?: string;
   // Var — comma-separated email allowlist (case-insensitive) that is always
   // granted the `admin` effective role, regardless of the stored DB role. This
   // is the RBAC break-glass bootstrap: it guarantees a fresh DB (every user
@@ -155,10 +172,11 @@ app.get("/me", async (c) => {
 // authenticated (viewer) session for them.
 
 // prompts: edit (PUT) + revert (POST) → admin (config change). preview (POST) is
-// a pure render of a candidate template, no persistence → editor.
+// a pure render of a candidate template, no persistence → reviewer (the legacy
+// `editor` tier; revisit to `author` in WS1 when routes retarget to app_user).
 app.put("/prompts/templates/:id", requireRole("admin"));
 app.post("/prompts/templates/:id/revert", requireRole("admin"));
-app.post("/prompts/templates/:id/preview", requireRole("editor"));
+app.post("/prompts/templates/:id/preview", requireRole("reviewer"));
 
 // personas: create / duplicate / edit / archive / restore → admin (config change).
 app.post("/personas", requireRole("admin"));
@@ -171,7 +189,7 @@ app.post("/personas/:slug/restore", requireRole("admin"));
 // preview (POST) → editor.
 app.put("/source-policy", requireRole("admin"));
 app.post("/source-policy/revert", requireRole("admin"));
-app.post("/source-policy/preview", requireRole("editor"));
+app.post("/source-policy/preview", requireRole("reviewer"));
 
 // publish-targets: CRUD → admin (CMS-destination config). The readiness probe
 // reveals which credential secrets are provisioned, so it is admin-only too.
@@ -184,15 +202,15 @@ app.get("/publish-targets/:id/readiness", requireRole("admin"));
 
 // topic-batches: create batch + promote topics → editor. skip a candidate +
 // close a batch are editorial mutations → editor. DELETE batch → admin.
-app.post("/topic-batches", requireRole("editor"));
-app.post("/topic-batches/:id/promote", requireRole("editor"));
-app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("editor"));
-app.post("/topic-batches/:id/close", requireRole("editor"));
+app.post("/topic-batches", requireRole("reviewer"));
+app.post("/topic-batches/:id/promote", requireRole("reviewer"));
+app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("reviewer"));
+app.post("/topic-batches/:id/close", requireRole("reviewer"));
 app.delete("/topic-batches/:id", requireRole("admin"));
 
 // refresh: kick a re-audit scan (existing post) → editor.
-app.post("/refresh/scan", requireRole("editor"));
-app.post("/refresh/scan/:articleId", requireRole("editor"));
+app.post("/refresh/scan", requireRole("reviewer"));
+app.post("/refresh/scan/:articleId", requireRole("reviewer"));
 
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
 // Admin-only: the response enumerates content_tool table names + Postgres

@@ -77,8 +77,8 @@ describe("BulkActionBar role gating", () => {
     }
   });
 
-  it("shows lifecycle + assign actions for an editor but hides Delete (admin-only)", () => {
-    setRole("editor");
+  it("shows lifecycle + assign actions for a reviewer but hides Delete (admin-only)", () => {
+    setRole("reviewer");
     renderBar();
     for (const label of LIFECYCLE) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();

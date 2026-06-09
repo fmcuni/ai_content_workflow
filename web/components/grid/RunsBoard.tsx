@@ -62,7 +62,9 @@ export function RunsBoard() {
 
   // Inline-edit wiring (Phase 3): optimistic PATCH mutations + role gate.
   const { can } = useRole();
-  const canEdit = can("editor");
+  // Behavior-preserving rename of the legacy `editor` tier → `reviewer` (WS0).
+  // WS1 may relax board inline-edit down to the new `author` tier.
+  const canEdit = can("reviewer");
   const runPatch = useRunPatch();
   const batchPatch = useBatchPatch();
 

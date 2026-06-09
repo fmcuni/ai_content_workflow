@@ -1,10 +1,18 @@
 /**
  * Role-based authorization (RBAC) for the Workers backend.
  *
- * Roles are cumulative: viewer < editor < admin. A capability is
+ * Roles are cumulative: viewer < author < reviewer < admin. A capability is
  * granted to a role iff that role's rank meets-or-exceeds the capability's
- * minimum-role rank. There is NO segregation of duties: an editor may approve
+ * minimum-role rank. There is NO segregation of duties: a reviewer may approve
  * and publish their OWN run.
+ *
+ * The role set was widened from the legacy 3-role model (viewer < editor <
+ * admin). The old `editor` tier — create/HITL/publish — maps onto the new
+ * `reviewer` tier; content authoring splits down into the new `author` tier.
+ * `coerceRole` aliases a stored legacy "editor" → "reviewer" so rows written
+ * under the old model (and the still-active better-auth path before the
+ * AUTH_PROVIDER cutover) keep their authority. This matches the WS4
+ * user-migration mapping (admin→admin, editor→reviewer, viewer→author).
  *
  * The *effective* role layers a break-glass bootstrap on top of the stored
  * role: an email listed in BOOTSTRAP_ADMIN_EMAILS is always `admin`, so a fresh
@@ -24,24 +32,43 @@ import type { AuthVars } from "./middleware";
 /** The Hono environment shape every authenticated route shares. */
 type AuthzEnv = { Bindings: Env; Variables: AuthVars };
 
-export const ROLES = ["viewer", "editor", "admin"] as const;
+export const ROLES = ["viewer", "author", "reviewer", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
 /** Cumulative rank — higher number = more capability. */
 export const ROLE_RANK: Readonly<Record<Role, number>> = {
   viewer: 0,
-  editor: 1,
-  admin: 2,
+  author: 1,
+  reviewer: 2,
+  admin: 3,
+};
+
+/**
+ * Legacy stored-role aliases. The pre-4-role model persisted "editor" for the
+ * create/HITL/publish tier; map it onto "reviewer" so existing rows (and the
+ * better-auth path before cutover) retain that authority. Aliases apply only to
+ * `coerceRole` (reading stored/legacy values) — NOT to `isRole`, so an admin can
+ * never *assign* the dead "editor" token via the role-change endpoint.
+ */
+const LEGACY_ROLE_ALIASES: Readonly<Record<string, Role>> = {
+  editor: "reviewer",
 };
 
 /** Context variable key under which the resolved effective role is cached. */
 const ROLE_CACHE_KEY = "effectiveRole" as const;
 
-/** Narrow an arbitrary string to a Role, defaulting to "viewer". */
+/**
+ * Narrow an arbitrary string to a Role, defaulting to "viewer". A recognized
+ * legacy alias (e.g. "editor") resolves to its modern equivalent.
+ */
 export function coerceRole(value: string | null | undefined): Role {
-  return value !== null && value !== undefined && (ROLES as readonly string[]).includes(value)
-    ? (value as Role)
-    : "viewer";
+  if (value === null || value === undefined) {
+    return "viewer";
+  }
+  if ((ROLES as readonly string[]).includes(value)) {
+    return value as Role;
+  }
+  return LEGACY_ROLE_ALIASES[value] ?? "viewer";
 }
 
 /** True iff `value` is a valid role string (for request-body validation). */

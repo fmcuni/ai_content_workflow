@@ -65,7 +65,7 @@ adminRouter.put("/users/:id/role", async (c) => {
 
   if (!isRole(body.role)) {
     return c.json(
-      { error: "invalid_role", message: "role must be one of viewer, editor, admin" },
+      { error: "invalid_role", message: "role must be one of viewer, author, reviewer, admin" },
       400,
     );
   }

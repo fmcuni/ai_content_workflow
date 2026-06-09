@@ -66,11 +66,19 @@ beforeEach(() => {
 
 describe("GET /me", () => {
   it("returns the stored effective role", async () => {
+    state.storedRole = "reviewer";
+    const res = await get(appWith("user@b.com"), "");
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json).toEqual({ email: "user@b.com", role: "reviewer" });
+  });
+
+  it("aliases a legacy stored 'editor' to 'reviewer'", async () => {
     state.storedRole = "editor";
     const res = await get(appWith("user@b.com"), "");
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
-    expect(json).toEqual({ email: "user@b.com", role: "editor" });
+    expect(json).toEqual({ email: "user@b.com", role: "reviewer" });
   });
 
   it("applies the bootstrap admin override", async () => {
