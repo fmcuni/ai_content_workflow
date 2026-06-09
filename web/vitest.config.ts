@@ -15,14 +15,14 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    // Scope to the shared-lib + component unit tests only. Never pick up the
-    // Playwright specs under tests/e2e/**.
+    // Scope to the shared-lib, component, and app-route unit tests only. Never
+    // pick up the Playwright specs under tests/e2e/** (those are `*.spec.ts`).
     include: [
       "lib/**/*.test.ts",
       "lib/**/*.test.tsx",
       "components/**/*.test.tsx",
-      // WS3 admin user-management page lives under app/admin/users; its RTL
-      // test sits beside it. Still excludes the Playwright specs (tests/e2e/**).
+      // app-route unit tests (WS2 login/verify, WS3 admin users page) sit beside
+      // their routes. Still excludes the Playwright specs (tests/e2e/** = *.spec.ts).
       "app/**/*.test.tsx",
     ],
   },

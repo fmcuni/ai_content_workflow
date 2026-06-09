@@ -1,16 +1,52 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signUp } from "@/lib/auth-client";
+import { isSupabaseAuth } from "@/lib/supabase-client";
 
 const ALLOWED_DOMAIN = "bowtie.com.hk";
 
-export default function SignupPage() {
+// Under Supabase auth, self-service signup is retired — accounts are
+// invite-only (provisioned by an admin). Show a brief notice and bounce to the
+// sign-in page so the route still resolves for anyone with a stale bookmark.
+function RetiredSignup() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const id = setTimeout(() => router.replace("/login"), 4000);
+    return () => clearTimeout(id);
+  }, [router]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center px-5">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>Account creation is managed</CardTitle>
+          <CardDescription>Bowtie Content Desk · staff access</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-ink-soft">
+            Self-service signup is no longer available. To get access, contact
+            your admin to be added. You’ll then sign in with a magic link.
+          </p>
+          <p className="mt-4 text-sm text-ink-soft">
+            <Link href="/login" className="text-accent hover:underline">
+              Go to sign in
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function LegacySignup() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -105,4 +141,8 @@ export default function SignupPage() {
       </Card>
     </div>
   );
+}
+
+export default function SignupPage() {
+  return isSupabaseAuth() ? <RetiredSignup /> : <LegacySignup />;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import type { Role } from "@/lib/roles";
 
@@ -8,10 +9,14 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 
+const mockSignOut = vi.fn();
 vi.mock("@/lib/auth-client", () => ({
-  useSession: () => ({ data: { user: { email: "user@bowtie.com.hk" } } }),
-  signOut: vi.fn(),
+  useSession: () => ({ data: { user: { email: "ada.lovelace@bowtie.com.hk" } } }),
+  signOut: () => mockSignOut(),
 }));
+
+const toastFn = vi.fn();
+vi.mock("sonner", () => ({ toast: (msg: string) => toastFn(msg) }));
 
 const mockUseRole = vi.fn();
 vi.mock("@/lib/use-role", () => ({
@@ -28,7 +33,6 @@ function setRole(role: Role) {
     isLoading: false,
     isDevFallback: false,
     can: (required: string) => {
-      // Only manage_users is consulted by the nav.
       if (required === "manage_users") return rank[role] >= rank.admin;
       return true;
     },
@@ -37,6 +41,8 @@ function setRole(role: Role) {
 
 beforeEach(() => {
   mockUseRole.mockReset();
+  mockSignOut.mockReset();
+  toastFn.mockReset();
 });
 
 describe("Masthead nav role gating", () => {
@@ -51,5 +57,38 @@ describe("Masthead nav role gating", () => {
     setRole("reviewer");
     render(<Masthead />);
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Masthead user menu", () => {
+  it("renders an initials avatar trigger from the email local part", () => {
+    setRole("author");
+    render(<Masthead />);
+    const trigger = screen.getByRole("button", { name: "Account menu" });
+    // ada.lovelace → AL
+    expect(trigger).toHaveTextContent("AL");
+  });
+
+  it("opens to show email, role badge, and a Sign out item", async () => {
+    setRole("author");
+    const user = userEvent.setup();
+    render(<Masthead />);
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("ada.lovelace@bowtie.com.hk")).toBeInTheDocument();
+    expect(within(menu).getByText("author")).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("signs out and toasts when Sign out is chosen", async () => {
+    setRole("author");
+    const user = userEvent.setup();
+    render(<Masthead />);
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Signed out"));
   });
 });
