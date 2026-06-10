@@ -55,6 +55,18 @@ function mergeIntoA(docA: Y.Doc, docB: Y.Doc): void {
   Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB, Y.encodeStateVector(docA)));
 }
 
+/** Rewrite the FAQ widget's `items` attribute — exactly what the FaqNodeView's
+ *  add/edit/remove buttons do (`updateAttributes({ items })` on the live atom). */
+function setFaqItems(editor: Editor, items: Array<{ q: string; a: string }>): void {
+  let pos = -1;
+  editor.state.doc.descendants((node, p) => {
+    if (node.type.name === "faqAccordion") pos = p;
+    return pos < 0;
+  });
+  expect(pos).toBeGreaterThanOrEqual(0);
+  editor.view.dispatch(editor.state.tr.setNodeAttribute(pos, "items", items));
+}
+
 describe("buildBlameResolver", () => {
   it("returns null when there is no doc (non-collab path stays untouched)", () => {
     expect(buildBlameResolver(null)).toBeNull();
@@ -146,6 +158,76 @@ describe("buildBlameResolver", () => {
     for (const h of adds) expect(h.author?.name).toBe("Bob");
     // And the FAQ widget itself survived the round-trip.
     expect(working).toContain('<div class="editor__item editor__faq">');
+    b.destroy();
+  });
+
+  it("attributes a per-item FAQ DELETION (items attr rewrite on a live widget) to the deleter", async () => {
+    // Deleting one Q/A item never deletes the Yjs atom element — the FaqAccordion
+    // NodeView rewrites the `items` ATTRIBUTE on the live node. The removed hunk
+    // must attribute to the attribute's last writer (the deleter), not fall into
+    // the (empty) deleted-atom ordinals and render nameless.
+    const seed = `<p>Intro.</p>
+<div class="editor__item editor__faq">
+  <div class="e-faq__wrap">
+    <div class="e-faq__list is--active">
+      <div class="e-faq__head">Q one<span class="e-faq__icon icon-add"></span></div>
+      <div class="e-faq__body" style="display: block;"><p>A one.</p></div>
+    </div>
+    <div class="e-faq__list">
+      <div class="e-faq__head">Q two<span class="e-faq__icon icon-add"></span></div>
+      <div class="e-faq__body"><p>A two.</p></div>
+    </div>
+  </div>
+</div>
+<p>Tail.</p>`;
+    const { docA, committed } = seedByAlice(seed);
+    const { docB, b } = joinAsBob(docA);
+    setFaqItems(b, [{ q: "Q one", a: "A one." }]); // Bob removes item 2
+    await tick();
+    mergeIntoA(docA, docB);
+    await tick();
+    const working = flatten(docA);
+    expect(working).not.toContain("Q two");
+
+    const resolver = buildBlameResolver(docA)!;
+    const hunks = resolver.annotate(computeTrackedChanges(committed, working));
+    const removes = hunks.filter((h) => h.type === "remove");
+    expect(removes.length).toBeGreaterThan(0);
+    expect(removes.some((h) => h.author?.name === "Bob")).toBe(true);
+    b.destroy();
+  });
+
+  it("attributes a WHOLE FAQ widget deletion to the deleter (tombstoned atom path)", async () => {
+    const seed = `<p>Intro.</p>
+<div class="editor__item editor__faq">
+  <div class="e-faq__wrap">
+    <div class="e-faq__list is--active">
+      <div class="e-faq__head">Q one<span class="e-faq__icon icon-add"></span></div>
+      <div class="e-faq__body" style="display: block;"><p>A one.</p></div>
+    </div>
+  </div>
+</div>
+<p>Tail.</p>`;
+    const { docA, committed } = seedByAlice(seed);
+    const { docB, b } = joinAsBob(docA);
+    let pos = -1;
+    b.state.doc.descendants((node, p) => {
+      if (node.type.name === "faqAccordion") pos = p;
+      return pos < 0;
+    });
+    expect(pos).toBeGreaterThanOrEqual(0);
+    b.commands.deleteRange({ from: pos, to: pos + b.state.doc.nodeAt(pos)!.nodeSize });
+    await tick();
+    mergeIntoA(docA, docB);
+    await tick();
+    const working = flatten(docA);
+    expect(working).not.toContain("editor__faq");
+
+    const resolver = buildBlameResolver(docA)!;
+    const hunks = resolver.annotate(computeTrackedChanges(committed, working));
+    const removes = hunks.filter((h) => h.type === "remove");
+    expect(removes.length).toBeGreaterThan(0);
+    expect(removes.some((h) => h.author?.name === "Bob")).toBe(true);
     b.destroy();
   });
 

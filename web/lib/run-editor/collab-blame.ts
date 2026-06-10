@@ -88,6 +88,20 @@ interface AtomEl {
   client: number;
   id: Y.ID;
   deleted: boolean;
+  /** ClientID of the most recent `items` attribute write. Per-item add/edit/
+   *  DELETE inside a live widget is an attribute rewrite (the Q/A pairs live in
+   *  node attrs, not Yjs chars), so this — not the element's inserter — names
+   *  who made the latest item-level change. Null when unreadable. */
+  attrClient: number | null;
+}
+
+/** Last writer of the FAQ atom's `items` attribute. Yjs keeps the CURRENT
+ *  attribute item per key in the element type's `_map`; its item id carries the
+ *  writer's clientID. Duck-typed + defensive, like the rest of the walk. */
+function lastItemsAttrClient(child: unknown): number | null {
+  const map = (child as { _map?: Map<string, { id?: { client?: unknown } }> })._map;
+  const client = map?.get?.("items")?.id?.client;
+  return typeof client === "number" ? client : null;
 }
 
 interface DocScan {
@@ -141,6 +155,7 @@ function walk(type: unknown, scan: DocScan): void {
           client: item.id.client,
           id: Y.createID(item.id.client, item.id.clock),
           deleted: !!item.deleted,
+          attrClient: lastItemsAttrClient(child),
         };
         (atom.deleted ? scan.delAtoms : scan.liveAtoms).push(atom);
         // Do NOT recurse — the atom's text is in attributes, not Yjs chars.
@@ -181,6 +196,10 @@ interface SideState {
   inAtomDepth: number;
   /** How many atoms have been ENTERED on this side so far. */
   atomOrd: number;
+  /** Whether the CURRENT atom was entered via a wrapper tag in a REMOVED part
+   *  (whole widget deleted → tombstoned element, deleted-atom ordinals) as
+   *  opposed to an unchanged wrapper (live widget, per-item attr rewrite). */
+  enteredViaRemoved: boolean;
 }
 
 /** Build a name → colour map from the current peers' awareness (server-issued,
@@ -260,8 +279,8 @@ export function buildBlameResolver(
 
       let liveCursor = 0;
       let delCursor = 0;
-      const w: SideState = { inAtomDepth: 0, atomOrd: 0 };
-      const c: SideState = { inAtomDepth: 0, atomOrd: 0 };
+      const w: SideState = { inAtomDepth: 0, atomOrd: 0, enteredViaRemoved: false };
+      const c: SideState = { inAtomDepth: 0, atomOrd: 0, enteredViaRemoved: false };
       /** Atoms entered specifically within REMOVED parts (→ deleted-atom ordinals). */
       let delAtomOrd = 0;
 
@@ -272,6 +291,7 @@ export function buildBlameResolver(
           if (isFaqOpen(token)) {
             state.inAtomDepth = 1;
             state.atomOrd += 1;
+            state.enteredViaRemoved = removedSide;
             if (removedSide) delAtomOrd += 1;
           }
         } else if (isDivOpen(token)) {
@@ -310,7 +330,10 @@ export function buildBlameResolver(
       const atomAuthor = (atoms: AtomEl[], ord: number, deleted: boolean): string | null => {
         const el = atoms[ord - 1];
         if (!el) return null;
-        return deleted ? pud.getUserByDeletedId(el.id) : nameByClientId(el.client);
+        // A live atom's hunks come from `items` attribute rewrites, so the
+        // attribute's last writer — not the widget's original inserter — is the
+        // person who made the change.
+        return deleted ? pud.getUserByDeletedId(el.id) : nameByClientId(el.attrClient ?? el.client);
       };
 
       parts.forEach((part: DiffPart, index: number) => {
@@ -336,8 +359,17 @@ export function buildBlameResolver(
             if (inAtom) names.push(atomAuthor(scan.liveAtoms, state.atomOrd, false));
             else resolveLiveAuthors(len, names);
           } else if (removed) {
-            if (inAtom) names.push(atomAuthor(scan.delAtoms, delAtomOrd, true));
-            else resolveDelAuthors(len, names);
+            if (inAtom) {
+              // Two distinct removals land here: a WHOLE deleted widget (wrapper
+              // itself was in a removed part → tombstoned element, deleted-atom
+              // ordinals) vs a per-item delete/edit inside a LIVE widget (wrapper
+              // unchanged → the change is an `items` attribute rewrite on the
+              // live element; scan.delAtoms has no entry for it). For the latter,
+              // attribute to the live atom: the unchanged wrapper advanced BOTH
+              // sides' ordinals, so `w.atomOrd` indexes scan.liveAtoms here.
+              if (state.enteredViaRemoved) names.push(atomAuthor(scan.delAtoms, delAtomOrd, true));
+              else names.push(atomAuthor(scan.liveAtoms, w.atomOrd, false));
+            } else resolveDelAuthors(len, names);
           } else {
             // Unchanged: advance the live cursor so subsequent `added` parts align;
             // unchanged text is never deleted, so the del cursor is untouched.
