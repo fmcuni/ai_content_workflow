@@ -11,8 +11,6 @@ from content_tool.db.models import FetchedArticle, Run
 from content_tool.publishers.wp_factory import resolve_wp_target
 from content_tool.wordpress.client import WordPressClient
 
-_WP_BASE_DEFAULT = "https://www.bowtie.com.hk/blog/wp-json/wp/v2"
-
 # Direct live-page fetch timeout (s) used when the URL isn't a WP post.
 _LIVE_FETCH_TIMEOUT = 20.0
 
@@ -58,7 +56,6 @@ async def fetch_article(
     session: AsyncSession,
     run_id: UUID,
     article_url: str,
-    wp_base: str = _WP_BASE_DEFAULT,
     client: httpx.AsyncClient | None = None,
     wp_client: WordPressClient | None = None,
 ) -> dict[str, Any]:
@@ -143,12 +140,15 @@ async def fetch_article(
     cat_ids = post.categories
     cats: list[dict[str, Any]] = []
     if cat_ids:
-        # Use wp_base for the categories endpoint (keeps backwards-compat with tests)
+        # Hydrate categories from the SAME WordPress the post came from (the
+        # voice's resolved target) — not the default base. Otherwise a
+        # non-default voice (e.g. VHIS101) gets its category names from the
+        # wrong CMS. Mirrors hydrateCategories in the TS backend.
         own_client = client is None
         http_client = client or httpx.AsyncClient(timeout=15.0)
         try:
             cat_resp = await http_client.get(
-                f"{wp_base}/categories",
+                f"{wp_client.base_url}/wp-json/wp/v2/categories",
                 params={"include": ",".join(map(str, cat_ids)), "_fields": "id,name,slug"},
             )
             cat_resp.raise_for_status()

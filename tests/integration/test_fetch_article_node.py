@@ -76,7 +76,6 @@ async def test_fetch_article_resolves_via_slug_and_writes(db_session):
             session=db_session,
             run_id=run_id,
             article_url="https://www.bowtie.com.hk/blog/zh/cancer-screening/",
-            wp_base=f"{_WP_BASE}/wp-json/wp/v2",
             wp_client=wp_client,
         )
 
@@ -226,7 +225,6 @@ async def test_fetch_article_external_source_does_not_block(db_session):
             session=db_session,
             run_id=run_id,
             article_url=external_url,
-            wp_base=f"{_WP_BASE}/wp-json/wp/v2",
             wp_client=wp_client,
         )
 
@@ -277,7 +275,6 @@ async def test_fetch_article_external_source_live_fetch_failure_degrades(db_sess
             session=db_session,
             run_id=run_id,
             article_url=external_url,
-            wp_base=f"{_WP_BASE}/wp-json/wp/v2",
             wp_client=wp_client,
         )
 
