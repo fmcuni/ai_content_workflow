@@ -26,9 +26,17 @@ function usesSupabaseAuth(): boolean {
 
 // Optimistic presence check only — does a session cookie exist? Validity is
 // enforced by the backend 401 (and the api.ts refresh-or-/login path).
+//
+// The Supabase session is chunked across `${name}.0`, `${name}.1`, … (a full
+// session exceeds the ~4096-byte single-cookie limit — see lib/supabase-client.ts),
+// so the first chunk `${name}.0` is the presence signal. The bare `${name}` is
+// also accepted for any legacy pre-chunking cookie still in a browser.
 function hasSessionCookie(request: NextRequest): boolean {
   if (usesSupabaseAuth()) {
-    return Boolean(request.cookies.get(SUPABASE_COOKIE_NAME)?.value);
+    return Boolean(
+      request.cookies.get(`${SUPABASE_COOKIE_NAME}.0`)?.value ||
+        request.cookies.get(SUPABASE_COOKIE_NAME)?.value,
+    );
   }
   return Boolean(getSessionCookie(request));
 }

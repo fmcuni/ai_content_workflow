@@ -58,12 +58,58 @@ function deleteCookie(name: string): void {
   document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
 }
 
+// Max RAW (pre-encode) chars per cookie chunk. A full Supabase session (ES256
+// access token + the GoTrue user object with identities/metadata) serializes to
+// ~3.7 KB, which after encodeURIComponent (~1.3x) blows past the ~4096-byte
+// per-cookie browser limit — the browser then silently drops the cookie and the
+// session never persists (→ middleware sees no cookie → /login bounce). So we
+// chunk the value across `${key}.0`, `${key}.1`, … exactly like @supabase/ssr.
+// 3000 raw chars keeps name + encoded value well under 4096.
+const COOKIE_CHUNK_SIZE = 3000;
+
+// Read a possibly-chunked value. Prefers chunks (`${key}.0`, `${key}.1`, …);
+// falls back to a legacy single `${key}` cookie written before chunking existed.
+function readChunkedCookie(key: string): string | null {
+  const first = readCookie(`${key}.0`);
+  if (first === null) return readCookie(key);
+  let value = first;
+  for (let i = 1; ; i++) {
+    const part = readCookie(`${key}.${i}`);
+    if (part === null) break;
+    value += part;
+  }
+  return value;
+}
+
+// Write a value as N chunks and clear stale state: a legacy single cookie and
+// higher-index chunks left by a previously-larger value.
+function writeChunkedCookie(key: string, value: string): void {
+  if (!isBrowser()) return;
+  deleteCookie(key); // drop any pre-chunking single cookie
+  const chunks: string[] = [];
+  for (let i = 0; i < value.length; i += COOKIE_CHUNK_SIZE) {
+    chunks.push(value.slice(i, i + COOKIE_CHUNK_SIZE));
+  }
+  chunks.forEach((chunk, i) => writeCookie(`${key}.${i}`, chunk));
+  for (let i = chunks.length; readCookie(`${key}.${i}`) !== null; i++) {
+    deleteCookie(`${key}.${i}`);
+  }
+}
+
+// Delete the legacy single cookie and every chunk.
+function deleteChunkedCookie(key: string): void {
+  deleteCookie(key);
+  for (let i = 0; readCookie(`${key}.${i}`) !== null; i++) {
+    deleteCookie(`${key}.${i}`);
+  }
+}
+
 // Storage adapter shape Supabase expects (getItem/setItem/removeItem). Backed by
-// document.cookie so the session token lands in a cookie the middleware reads.
+// document.cookie (chunked) so the session lands in cookies the middleware reads.
 const cookieStorage = {
-  getItem: (key: string): string | null => readCookie(key),
-  setItem: (key: string, value: string): void => writeCookie(key, value),
-  removeItem: (key: string): void => deleteCookie(key),
+  getItem: (key: string): string | null => readChunkedCookie(key),
+  setItem: (key: string, value: string): void => writeChunkedCookie(key, value),
+  removeItem: (key: string): void => deleteChunkedCookie(key),
 };
 
 /** True when the app is configured to use Supabase auth (vs better-auth). */
