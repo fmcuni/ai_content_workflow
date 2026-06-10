@@ -37,6 +37,8 @@ export const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ["X-Frame-Options", "DENY"],
   ["X-Content-Type-Options", "nosniff"],
   ["Referrer-Policy", "strict-origin-when-cross-origin"],
+  // Internal tool — never index, follow, cache, or snippet any response.
+  ["X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet"],
 ];
 
 /**

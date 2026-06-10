@@ -50,6 +50,10 @@ export const SECURITY_HEADERS: ReadonlyArray<{ key: string; value: string }> = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  // Internal tool — never index, follow, cache, or snippet any response.
+  // Paired with app/robots.txt (disallow all) and the crawler-UA block in
+  // middleware.ts. Mirrors the backend's security-headers.ts entry.
+  { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet" },
 ];
 
 /** Apply the security headers to a mutable `Headers` instance (in place). */

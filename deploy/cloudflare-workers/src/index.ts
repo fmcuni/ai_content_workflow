@@ -19,6 +19,7 @@ import { getAuth } from "./auth/auth";
 import { requireAuth, type AuthVars } from "./auth/middleware";
 import { loadRole, requireRole } from "./auth/authz";
 import { mintTicket } from "./auth/ticket";
+import { blockKnownCrawlers, ROBOTS_TXT } from "./http/bot-guard";
 import { applySecurityHeaders, isWebSocketUpgrade } from "./http/security-headers";
 
 export { ProductionWorkflow } from "./workflows/production";
@@ -201,6 +202,14 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// --- Bot / crawler hygiene ---------------------------------------------------
+// Internal tool on a public workers.dev URL: tell crawlers to go away and 403
+// the well-known ones that show up anyway. /robots.txt is registered BEFORE
+// both the crawler block (bots must be able to read the disallow) and
+// requireAuth (it must be publicly fetchable). See src/http/bot-guard.ts.
+app.get("/robots.txt", (c) => c.text(ROBOTS_TXT));
+app.use("*", blockKnownCrawlers);
 
 // --- Auth (better-auth) ----------------------------------------------------
 // Mounted at a PATH-PRESERVING /api/auth/* — the frontend rewrite keeps the

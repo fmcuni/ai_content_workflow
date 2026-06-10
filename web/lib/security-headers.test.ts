@@ -7,7 +7,7 @@ import {
 } from "./security-headers";
 
 describe("security-headers", () => {
-  it("includes all four required hardening headers", () => {
+  it("includes all five required hardening headers", () => {
     // Arrange
     const keys = SECURITY_HEADERS.map((h) => h.key);
 
@@ -16,6 +16,7 @@ describe("security-headers", () => {
     expect(keys).toContain("X-Frame-Options");
     expect(keys).toContain("X-Content-Type-Options");
     expect(keys).toContain("Referrer-Policy");
+    expect(keys).toContain("X-Robots-Tag");
   });
 
   it("sets the exact hardening header values", () => {
@@ -23,6 +24,7 @@ describe("security-headers", () => {
     expect(byKey["X-Frame-Options"]).toBe("DENY");
     expect(byKey["X-Content-Type-Options"]).toBe("nosniff");
     expect(byKey["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
+    expect(byKey["X-Robots-Tag"]).toBe("noindex, nofollow, noarchive, nosnippet");
   });
 
   it("CSP locks the default-src to self and forbids unsafe-eval", () => {
@@ -58,5 +60,6 @@ describe("security-headers", () => {
     expect(headers.get("X-Frame-Options")).toBe("DENY");
     expect(headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+    expect(headers.get("X-Robots-Tag")).toBe("noindex, nofollow, noarchive, nosnippet");
   });
 });

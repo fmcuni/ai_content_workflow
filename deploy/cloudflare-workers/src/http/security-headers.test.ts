@@ -50,16 +50,18 @@ const REQUIRED_HEADERS = [
   ["x-frame-options", "DENY"],
   ["x-content-type-options", "nosniff"],
   ["referrer-policy", "strict-origin-when-cross-origin"],
+  ["x-robots-tag", "noindex, nofollow, noarchive, nosnippet"],
 ] as const;
 
 describe("security-headers constant", () => {
-  it("exports all four required headers", () => {
+  it("exports all five required headers", () => {
     const keys = SECURITY_HEADERS.map(([k]) => k);
     expect(keys).toEqual([
       "Content-Security-Policy",
       "X-Frame-Options",
       "X-Content-Type-Options",
       "Referrer-Policy",
+      "X-Robots-Tag",
     ]);
   });
 
@@ -84,7 +86,7 @@ describe("security-headers constant", () => {
 });
 
 describe("security-headers middleware", () => {
-  it("stamps all four headers on a normal JSON route", async () => {
+  it("stamps all five headers on a normal JSON route", async () => {
     const res = await makeApp().request("/health");
     expect(res.status).toBe(200);
     for (const [key, value] of REQUIRED_HEADERS) {
