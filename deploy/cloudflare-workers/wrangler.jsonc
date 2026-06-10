@@ -137,6 +137,32 @@
 			"id": "58b74deb12184195a83526e6b7040a32"
 		}
 	],
+	// Rate Limiting bindings (Cloudflare native `ratelimit`). Abuse-prevention
+	// throttles, NOT product quotas — generous caps. Keyed in src/index.ts by
+	// authenticated user id (else client IP), per-user AND per-IP. `period` MUST
+	// be 10 or 60 (Cloudflare constraint); we use 60 and surface it as the 429
+	// `Retry-After`. namespace_id is a unique string-integer per binding; dev
+	// (env.dev below) uses DISTINCT ids so dev/prod counters never share state.
+	"ratelimits": [
+		{
+			// Run create/resume(publish)/apply-edits + topic-batch creation.
+			"name": "RATE_LIMITER_MUTATION",
+			"namespace_id": "2001",
+			"simple": {
+				"limit": 30,
+				"period": 60
+			}
+		},
+		{
+			// Public /api/auth/* surface (credential-stuffing / signup abuse).
+			"name": "RATE_LIMITER_AUTH",
+			"namespace_id": "2002",
+			"simple": {
+				"limit": 20,
+				"period": 60
+			}
+		}
+	],
 	// ─────────────────────────────────────────────────────────────────────────
 	// Dev environment — a parallel, fully isolated copy of this backend Worker,
 	// deployed as `bowtie-content-tool-poc-dev` via `wrangler deploy --env dev`
@@ -221,6 +247,27 @@
 				{
 					"binding": "HYPERDRIVE",
 					"id": "98015877c2cc48f4b047f340129df945"
+				}
+			],
+			// Rate Limiting (non-inheritable — repeated for dev). DISTINCT
+			// namespace_ids from prod (2001/2002) so dev abuse counters never
+			// share state with prod. Same generous caps + 60s period.
+			"ratelimits": [
+				{
+					"name": "RATE_LIMITER_MUTATION",
+					"namespace_id": "3001",
+					"simple": {
+						"limit": 30,
+						"period": 60
+					}
+				},
+				{
+					"name": "RATE_LIMITER_AUTH",
+					"namespace_id": "3002",
+					"simple": {
+						"limit": 20,
+						"period": 60
+					}
 				}
 			]
 		}

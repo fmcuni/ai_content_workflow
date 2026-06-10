@@ -76,11 +76,27 @@ export function resetPasswordHtml(url: string): string {
   );
 }
 
+/**
+ * Escape a value for safe interpolation into HTML text or a double-quoted
+ * attribute. The link comes from auth config / request input, so escaping the
+ * five significant characters prevents it from breaking out of the `href="..."`
+ * attribute or injecting markup into the email body.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function emailShell(heading: string, body: string, cta: string, url: string): string {
+  const safeUrl = escapeHtml(url);
   return `<!doctype html><html><body style="font-family:system-ui,sans-serif;color:#1a1a1a;line-height:1.5;padding:24px">
   <h2 style="margin:0 0 12px">${heading}</h2>
   <p style="margin:0 0 20px;color:#444">${body}</p>
-  <p style="margin:0 0 24px"><a href="${url}" style="background:#1a1a1a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">${cta}</a></p>
-  <p style="margin:0;color:#888;font-size:12px">Or paste this link into your browser:<br>${url}</p>
+  <p style="margin:0 0 24px"><a href="${safeUrl}" style="background:#1a1a1a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">${cta}</a></p>
+  <p style="margin:0;color:#888;font-size:12px">Or paste this link into your browser:<br>${safeUrl}</p>
 </body></html>`;
 }
