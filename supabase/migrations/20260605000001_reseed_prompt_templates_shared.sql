@@ -458,7 +458,7 @@ $pt$, 'cb739b079f382768aa6e404225d35e655b3e0e6b2ef35b97bda17d329a5c83c1', 367),
    一句解釋（≤ 60 字，香港繁體中文）
    %%end%%
    ```
-   - `name` 為單一字串，不含空格與引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
+   - `name` 為單行字串，可含空格（多字詞術語如 `Surat Rujukan`、`Klinik Kesihatan` 可接受），但不可含 `%` 或引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
    - 全文最多 6 個 `defterm`；如全文無真正需要解釋的術語，可不輸出
    - 不要為已在 H2 標題出現的常用詞重複定義
    - 不要在 description 內嵌 HTML / Markdown 連結 / 表情符號
@@ -466,7 +466,7 @@ $pt$, 'cb739b079f382768aa6e404225d35e655b3e0e6b2ef35b97bda17d329a5c83c1', 367),
      - ✅ 正確：正文先寫「自願醫保（VHIS）為政府推行嘅醫保計劃」，之後留一個空行，再三行獨立寫 shortcode。
      - ❌ 錯誤：`配置一份「%%defterm name=自願醫保%%（VHIS）係政府推行嘅醫保計劃。%%end%%」亦是…`
    - 不要 emit 其他 schema 類型（如 `MedicalCondition`、`HowTo`、`Review`、`AggregateRating`、`Drug`、`MedicalProcedure`），renderer 不會處理，且部分有合規風險。
-$pt$, '82bbe0d5d0bcc1a0953a6156ee916a1b47df5fe3d0ef2de371ff02b85fe2d421', 2401),
+$pt$, 'b38d6908983e6dd3a2055280da14edb70b058f42def4c8fccc06888be9e7b834', 2492),
   ('__shared__', '_writer_seo', 'partial', '_writer_seo.md', $pt$SEO 及 AI Search 優化要求：
 1. H1 自然、清楚、具搜尋意圖，整合 focus_keywords 及語義相關字詞，但不可堆砌。
 2. meta description 具體、自然、可讀。
