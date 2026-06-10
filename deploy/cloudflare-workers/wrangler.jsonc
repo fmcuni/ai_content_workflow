@@ -118,7 +118,18 @@
 		// Verbose per-step event log: persist raw *.thinking events too. Default
 		// ON; set "0"/"false"/"off" to stream thinking live but skip persisting it
 		// to content_tool.run_event_logs. Read by the RunStream DO.
-		"PERSIST_THINKING": "on"
+		"PERSIST_THINKING": "on",
+		// Auth provider selector. MUST be pinned here (non-secret) so it is
+		// deterministic across deploys — a `wrangler deploy` rewrites the var set,
+		// so an out-of-band dashboard value would be wiped, silently reverting the
+		// backend to better-auth and 401-ing every Supabase Bearer token.
+		"AUTH_PROVIDER": "supabase",
+		// Supabase project URL — public (also baked into the web bundle). Required
+		// for JWKS verification of the GoTrue access token (src/auth/jwt.ts). With
+		// AUTH_PROVIDER=supabase this is authoritative; there is no HS256 fallback.
+		// Secrets SUPABASE_SERVICE_ROLE_KEY (admin user-mgmt) + optional
+		// SUPABASE_JWT_SECRET are set via `wrangler secret put`.
+		"SUPABASE_URL": "https://gfpkqsiyeslscgsuehmj.supabase.co"
 	},
 	"hyperdrive": [
 		{
