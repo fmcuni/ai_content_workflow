@@ -99,6 +99,16 @@ function buildInitFrameWithPrimary(color: string, primary: boolean): Uint8Array 
   return encoding.toUint8Array(encoder);
 }
 
+/** Server sync step-2 frame (the DO's doc state in full). Applying this is what
+ *  flips the hook's status to "connected" — INIT alone must not, else gated Yjs
+ *  writes can land on a pre-sync empty fragment and union-duplicate the doc. */
+function buildSyncStep2Frame(serverDoc?: Y.Doc): Uint8Array {
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, MESSAGE_SYNC);
+  syncProtocol.writeSyncStep2(encoder, serverDoc ?? new Y.Doc());
+  return encoding.toUint8Array(encoder);
+}
+
 /** Insert a paragraph into the doc's body fragment (a local content edit). */
 function insertLocalEdit(ydoc: Y.Doc): void {
   const frag = ydoc.getXmlFragment("default");
@@ -187,7 +197,7 @@ describe("useCollabDoc — connection", () => {
     expect(firstSentMessageType(ws)).toBe(MESSAGE_SYNC);
   });
 
-  it("INIT frame sets color + local awareness user colour and marks status connected", async () => {
+  it("INIT frame sets color + local awareness user colour but does NOT mark connected (pre-sync)", async () => {
     const { result } = renderHook(() => useCollabDoc("run-1", { enabled: true, user: identity }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const ws = FakeWebSocket.instances[0]!;
@@ -195,8 +205,11 @@ describe("useCollabDoc — connection", () => {
 
     act(() => ws.fireServerMessage(buildInitFrame("#ef4444")));
 
-    await waitFor(() => expect(result.current.status).toBe("connected"));
-    expect(result.current.color).toBe("#ef4444");
+    // INIT is the DO's FIRST frame, sent before its sync step-2 — the local doc
+    // is still empty here. Consumers gate Yjs writes on "connected", so flipping
+    // now would let a queued whole-doc replace union-duplicate the article.
+    await waitFor(() => expect(result.current.color).toBe("#ef4444"));
+    expect(result.current.status).toBe("connecting");
 
     const awareness = result.current.awareness!;
     const localState = awareness.getLocalState() as {
@@ -204,6 +217,25 @@ describe("useCollabDoc — connection", () => {
     };
     expect(localState.user?.color).toBe("#ef4444");
     expect(localState.user?.name).toBe("Alice");
+  });
+
+  it("marks status connected only once the server's sync step-2 is applied", async () => {
+    const { result } = renderHook(() => useCollabDoc("run-1", { enabled: true, user: identity }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ws = FakeWebSocket.instances[0]!;
+    act(() => ws.fireOpen());
+    act(() => ws.fireServerMessage(buildInitFrame("#ef4444")));
+    expect(result.current.status).toBe("connecting");
+
+    // Server step-2 carries the DO's doc state; applying it = synced.
+    const serverDoc = new Y.Doc();
+    serverDoc.getXmlFragment("default").insert(0, [new Y.XmlText("persisted body")]);
+    act(() => ws.fireServerMessage(buildSyncStep2Frame(serverDoc)));
+
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    // The persisted content is already in the local doc by the time consumers
+    // see "connected" — a flushed whole-doc replace now diffs against it.
+    expect(result.current.ydoc!.getXmlFragment("default").length).toBeGreaterThan(0);
   });
 
   it("surfaces a second client from a server MESSAGE_AWARENESS frame", async () => {
@@ -287,6 +319,7 @@ describe("useCollabDoc — seed authority", () => {
     act(() => ws.fireOpen());
 
     act(() => ws.fireServerMessage(buildInitFrame("#ef4444")));
+    act(() => ws.fireServerMessage(buildSyncStep2Frame()));
 
     await waitFor(() => expect(result.current.status).toBe("connected"));
     expect(result.current.isSeedAuthority).toBe(false);
@@ -318,6 +351,7 @@ describe("useCollabDoc — observer (read-only)", () => {
     act(() => ws.fireOpen());
 
     act(() => ws.fireServerMessage(buildInitFrameWithPrimary("#ef4444", true)));
+    act(() => ws.fireServerMessage(buildSyncStep2Frame()));
 
     await waitFor(() => expect(result.current.status).toBe("connected"));
     expect(result.current.isSeedAuthority).toBe(false);

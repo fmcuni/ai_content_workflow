@@ -16,6 +16,12 @@ const MESSAGE_AWARENESS = 1;
 /** Server→client control frame: this session's server-issued cursor colour. */
 const MESSAGE_INIT = 2;
 
+/** "connected" means SYNCED: the server's sync step-2 (the DO's doc state) has
+ *  been applied to the local ydoc — not merely that the socket/INIT arrived.
+ *  Consumers gate Yjs WRITES on this (seed emptiness check, useWorkingBody's
+ *  pending whole-doc replace, editor mount), so flipping it any earlier lets a
+ *  write land on an empty fragment and CRDT-union with the server state when
+ *  step-2 then applies — duplicating the entire document. */
 export type CollabStatus = "disabled" | "connecting" | "connected" | "disconnected";
 
 /** Minimal provider surface @tiptap/extension-collaboration-caret needs (it reads `provider.awareness`). */
@@ -90,7 +96,9 @@ function toWsScheme(httpUrl: string): string {
  * RunDoc Durable Object (the stock `y-websocket` package can't be used because
  * the DO emits a custom MESSAGE_INIT control frame). On `open` we send sync
  * step 1; the DO answers with INIT (cursor colour) + sync step 2 + current
- * presence. Outbound local doc/awareness updates are relayed back to the DO,
+ * presence — INIT arrives FIRST, a round-trip before step 2, so status stays
+ * "connecting" until the step-2 doc state is applied (see CollabStatus).
+ * Outbound local doc/awareness updates are relayed back to the DO,
  * skipping anything that originated FROM the server (origin === provider).
  *
  * Reconnect (KISS, Phase 2): exactly ONE connection attempt per effect run — no
@@ -286,8 +294,15 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
           const encoder = encoding.createEncoder();
           encoding.writeVarUint(encoder, MESSAGE_SYNC);
           // `provider` as the transaction origin → onDocUpdate skips the echo.
-          syncProtocol.readSyncMessage(decoder, encoder, doc, provider);
+          const syncMessageType = syncProtocol.readSyncMessage(decoder, encoder, doc, provider);
           if (encoding.length(encoder) > 1) send(encoding.toUint8Array(encoder));
+          // Status flips to "connected" only once the server's step-2 reply (the
+          // DO's doc state, answering our on-open step 1) has been APPLIED above.
+          // Flipping on INIT instead opened a race: consumers gate Yjs writes on
+          // "connected", and a queued whole-doc replace flushed into the still-
+          // empty fragment would CRDT-union with the late-arriving server state,
+          // duplicating the whole article (compounding per page revisit).
+          if (syncMessageType === syncProtocol.messageYjsSyncStep2) setStatus("connected");
           break;
         }
         case MESSAGE_AWARENESS: {
@@ -336,7 +351,8 @@ export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): C
           } catch (err: unknown) {
             console.warn("useCollabDoc: malformed INIT frame", err);
           }
-          setStatus("connected");
+          // Deliberately NOT "connected" yet — INIT is the DO's first frame,
+          // sent before its sync step-2; the doc is still empty here.
           break;
         }
         default:
