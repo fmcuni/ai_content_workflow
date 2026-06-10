@@ -92,7 +92,15 @@ function bootstrapAdminEmails(env: Env): Set<string> {
 
 /**
  * The effective role for a session: `admin` when the email is a bootstrap admin
- * (case-insensitive), otherwise the stored role (default "viewer" when null).
+ * (case-insensitive), otherwise the stored role.
+ *
+ * `unprovisionedFloor` is returned when there is NO stored role (null/undefined,
+ * i.e. no `app_user` / legacy `user` row). It defaults to `"viewer"` to preserve
+ * the legacy better-auth behavior, but the supabase path passes `null` so that an
+ * authenticated-but-unprovisioned user is DENIED rather than silently granted
+ * read access — invite-only is enforced here at the authorization layer, since
+ * Google OAuth (unlike magic-link's `shouldCreateUser:false`) auto-creates a
+ * GoTrue user for anyone who signs in.
  *
  * Pure — unit-testable without an HTTP/DB harness.
  */
@@ -100,11 +108,15 @@ export function effectiveRole(
   storedRole: string | null | undefined,
   email: string | null | undefined,
   env: Env,
-): Role {
+  unprovisionedFloor: Role | null = "viewer",
+): Role | null {
   if (email !== null && email !== undefined && email.trim().length > 0) {
     if (bootstrapAdminEmails(env).has(email.trim().toLowerCase())) {
       return "admin";
     }
+  }
+  if (storedRole === null || storedRole === undefined) {
+    return unprovisionedFloor;
   }
   return coerceRole(storedRole);
 }
@@ -173,7 +185,10 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
     return null;
   });
 
-  const resolved = effectiveRole(storedRole, userEmail, c.env);
+  // Supabase path: an authenticated user with no app_user row is DENIED (null),
+  // not floored to "viewer" — Google OAuth auto-creates GoTrue users, so the
+  // invite-only gate lives here. Legacy better-auth path keeps the viewer floor.
+  const resolved = effectiveRole(storedRole, userEmail, c.env, useAppUser ? null : "viewer");
   c.set(ROLE_CACHE_KEY, resolved);
   return resolved;
 }

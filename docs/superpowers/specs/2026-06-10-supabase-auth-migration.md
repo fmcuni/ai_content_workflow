@@ -2,6 +2,15 @@
 
 Date: 2026-06-10
 Status: Approved (design interview complete)
+
+> **Amendment 2026-06-10 — sign-in changed magic-link → Google OAuth.** Magic-link
+> delivery was blocked on email (no Bowtie-owned SMTP sender). Sign-in is now
+> **Google OAuth** via Supabase; the JWT/JWKS verification and role model are
+> unchanged. Because OAuth auto-creates a GoTrue user for anyone, **invite-only
+> moved from the sign-in layer (`shouldCreateUser:false`) to the authorization
+> layer**: `loadRole`/`effectiveRole` deny (null → 401) an authenticated session
+> with no `app_user` row, instead of flooring to `viewer`. The legacy better-auth
+> path keeps the viewer floor. See `CLAUDE.md` → Auth (GoTrue) for the live shape.
 Supersedes (auth portions of): `2026-06-01-cloudflare-email-auth.md`
 
 ## Goal

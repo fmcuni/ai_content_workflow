@@ -22,6 +22,7 @@ import type {
 } from "./types";
 
 import { getSessionEmail } from "./auth-client";
+import { isAuthRoute } from "./auth-routes";
 import { getSupabaseClient, isSupabaseAuth } from "./supabase-client";
 
 const BASE = "/api/runs";
@@ -47,13 +48,33 @@ async function supabaseBearer(forceRefresh = false): Promise<string | null> {
 // in-flight requests after the session expires) triggers exactly one navigation
 // instead of racing multiple `assign()` calls.
 let redirectingToLogin = false;
+/**
+ * Build the `/login` URL to send an unauthenticated user to — or `null` when NO
+ * redirect should happen because we're already on an auth page (login/signup/
+ * verify). Pure + exported for testing.
+ *
+ * Returning null on auth routes is what prevents an infinite refresh loop: authed
+ * calls fire on those pages too (e.g. Masthead's `useRole` → `/me`), and once
+ * `/me` 401s (an unprovisioned/expired session), a redirect to `/login` would
+ * reload the page → re-fire `/me` → 401 → reload, forever. Also strips any
+ * existing `redirect` param so repeated 401s can't nest `?redirect=%3F…`.
+ */
+export function buildLoginUrl(pathname: string, search: string): string | null {
+  if (isAuthRoute(pathname)) return null;
+  const params = new URLSearchParams(search);
+  params.delete("redirect");
+  const cleaned = params.toString();
+  const here = pathname + (cleaned ? `?${cleaned}` : "");
+  return `/login?redirect=${encodeURIComponent(here)}`;
+}
+
 function redirectToLogin(): void {
   if (typeof window === "undefined") return;
   if (redirectingToLogin) return;
+  const url = buildLoginUrl(window.location.pathname, window.location.search);
+  if (url === null) return; // already on an auth page — do not reload it
   redirectingToLogin = true;
-  const here = window.location.pathname + window.location.search;
-  const target = here && here !== "/login" ? `?redirect=${encodeURIComponent(here)}` : "";
-  window.location.assign(`/login${target}`);
+  window.location.assign(url);
 }
 
 /**

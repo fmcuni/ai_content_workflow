@@ -102,17 +102,31 @@ describe("loadRole — app_user path (supabase)", () => {
     expect(state.queries.filter((q) => q.includes("from content_tool.app_user")).length).toBe(2);
   });
 
-  it("defaults to viewer when app_user has no matching row at all", async () => {
+  it("DENIES (null) when app_user has no matching row at all — invite-only gate", async () => {
+    // Under Google OAuth, GoTrue auto-creates a user for anyone who signs in, so an
+    // authenticated-but-unprovisioned session must be denied here rather than floored
+    // to viewer (which would be open self-signup with read access).
     state.matchById = false;
     state.role = null;
     const role = await resolve({ userId: "x", userEmail: "nobody@bowtie.com.hk", env });
-    expect(role).toBe("viewer");
+    expect(role).toBeNull();
   });
 
   it("the bootstrap-admin override still wins over the stored app_user role", async () => {
     state.role = "viewer";
     const role = await resolve({
       userId: "uuid-1",
+      userEmail: "boss@bowtie.com.hk",
+      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+    });
+    expect(role).toBe("admin");
+  });
+
+  it("a bootstrap admin with NO app_user row is still admin (not denied)", async () => {
+    state.matchById = false;
+    state.role = null;
+    const role = await resolve({
+      userId: "uuid-new",
       userEmail: "boss@bowtie.com.hk",
       env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
     });
@@ -143,5 +157,14 @@ describe("loadRole — legacy user path (default)", () => {
     const role = await resolve({ env: {} });
     expect(role).toBeNull();
     expect(state.queries.length).toBe(0);
+  });
+
+  it("KEEPS the viewer floor when an authenticated legacy user has no row", async () => {
+    // The legacy better-auth path is unchanged by the OAuth invite-only gate:
+    // a session with identity but no stored role still floors to viewer.
+    state.matchById = false;
+    state.role = null;
+    const role = await resolve({ userId: "id-x", userEmail: "a@bowtie.com.hk", env: {} });
+    expect(role).toBe("viewer");
   });
 });

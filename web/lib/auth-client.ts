@@ -62,6 +62,32 @@ async function supabaseSignInWithMagicLink(
   return { error: error ? { message: error.message } : null };
 }
 
+/**
+ * Begin Google OAuth via Supabase. Redirects the browser to Google; the return
+ * leg lands on `/verify`, which exchanges the PKCE `?code=` for a session (see
+ * web/app/verify/page.tsx). `redirect` is the post-login target, preserved
+ * through Supabase's callback via the `?redirect=` query param `/verify` reads.
+ *
+ * Note: invite-only is NOT enforced here — Supabase auto-creates a GoTrue user
+ * for any Google account. The gate is the backend authz layer, which denies a
+ * session with no `content_tool.app_user` row (see authz.ts `effectiveRole`).
+ */
+async function supabaseSignInWithGoogle(
+  redirect?: string,
+): Promise<{ error: { message: string } | null }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { error: { message: "Supabase auth is not configured." } };
+  }
+  const query = redirect ? `?redirect=${encodeURIComponent(redirect)}` : "";
+  const redirectTo = `${window.location.origin}/verify${query}`;
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo, queryParams: { prompt: "select_account" } },
+  });
+  return { error: error ? { message: error.message } : null };
+}
+
 async function supabaseSignOut(): Promise<void> {
   const supabase = getSupabaseClient();
   if (supabase) await supabase.auth.signOut();
@@ -118,6 +144,18 @@ export async function signInWithMagicLink(
 ): Promise<{ error: { message: string } | null }> {
   if (SUPABASE) return supabaseSignInWithMagicLink(email);
   return { error: { message: "Magic-link sign-in is not enabled." } };
+}
+
+/**
+ * Google OAuth sign-in (Supabase path only). On success the browser is
+ * redirected to Google and this never resolves to the caller; a returned error
+ * means the redirect could not be started. `redirect` is the post-login target.
+ */
+export async function signInWithGoogle(
+  redirect?: string,
+): Promise<{ error: { message: string } | null }> {
+  if (SUPABASE) return supabaseSignInWithGoogle(redirect);
+  return { error: { message: "Google sign-in is not enabled." } };
 }
 
 // `authClient` always exposes the better-auth surface (signIn.email,

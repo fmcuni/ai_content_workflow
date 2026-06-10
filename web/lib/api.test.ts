@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { api, buildLoginUrl } from "@/lib/api";
 
 // A DELETE that succeeds returns 204 No Content with an EMPTY body (see the
 // Workers route: `return c.body(null, 204)`). The shared `http` helper must not
@@ -32,5 +32,29 @@ describe("api.deleteReviewThread — 204 No Content handling", () => {
     mockFetch(new Response("nope", { status: 500 }));
 
     await expect(api.deleteReviewThread("run-1", "t-1")).rejects.toThrow(/500/);
+  });
+});
+
+describe("buildLoginUrl — post-401 redirect target", () => {
+  it("encodes the current path as the post-login redirect", () => {
+    expect(buildLoginUrl("/runs/abc", "")).toBe("/login?redirect=%2Fruns%2Fabc");
+  });
+
+  it("preserves non-redirect query params on the current path", () => {
+    expect(buildLoginUrl("/runs", "?tab=open")).toBe(
+      `/login?redirect=${encodeURIComponent("/runs?tab=open")}`,
+    );
+  });
+
+  it("strips an existing redirect param so it cannot nest", () => {
+    // A 401 fired while already at /runs?redirect=/x must not re-wrap /x.
+    expect(buildLoginUrl("/runs", "?redirect=%2Fx")).toBe("/login?redirect=%2Fruns");
+  });
+
+  it("returns null on auth routes so a 401 there can't reload the page (loop guard)", () => {
+    // Masthead's useRole → /me fires on /login too; a 401 must NOT reload it.
+    expect(buildLoginUrl("/login", "?redirect=%2Fruns")).toBeNull();
+    expect(buildLoginUrl("/signup", "")).toBeNull();
+    expect(buildLoginUrl("/verify", "?code=abc")).toBeNull();
   });
 });

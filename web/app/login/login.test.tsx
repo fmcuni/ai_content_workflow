@@ -8,10 +8,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParams,
 }));
 
-const magicLink = vi.fn();
+const google = vi.fn();
 vi.mock("@/lib/auth-client", () => ({
   signIn: { email: vi.fn() },
-  signInWithMagicLink: (email: string) => magicLink(email),
+  signInWithGoogle: (redirect?: string) => google(redirect),
 }));
 
 const supabaseFlag = { value: true };
@@ -22,8 +22,8 @@ vi.mock("@/lib/supabase-client", () => ({
 import LoginPage from "./page";
 
 beforeEach(() => {
-  magicLink.mockReset();
-  magicLink.mockResolvedValue({ error: null });
+  google.mockReset();
+  google.mockResolvedValue({ error: null });
   supabaseFlag.value = true;
   for (const k of [...searchParams.keys()]) searchParams.delete(k);
 });
@@ -31,27 +31,34 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("LoginPage (supabase magic-link)", () => {
-  it("renders the magic-link sign-in button, not a password field", () => {
+describe("LoginPage (supabase Google OAuth)", () => {
+  it("renders the Google sign-in button, not a password or email field", () => {
     render(<LoginPage />);
     expect(
-      screen.getByRole("button", { name: "Email me a sign-in link" }),
+      screen.getByRole("button", { name: "Continue with Google" }),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 
-  it("sends a magic link and shows enumeration-safe copy + resend cooldown", async () => {
+  it("starts Google OAuth with the post-login redirect target", async () => {
     const user = userEvent.setup();
+    searchParams.set("redirect", "/runs/abc");
     render(<LoginPage />);
 
-    await user.type(screen.getByLabelText("Email"), "staff@bowtie.com.hk");
-    await user.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
 
-    expect(magicLink).toHaveBeenCalledWith("staff@bowtie.com.hk");
-    // Always-shown, non-committal copy regardless of whether the email exists.
-    expect(screen.getByRole("status")).toHaveTextContent(/sign-in link is on its way/i);
-    // Cooldown disables the resend button.
-    expect(screen.getByRole("button", { name: /Resend in \d+s/ })).toBeDisabled();
+    expect(google).toHaveBeenCalledWith("/runs/abc");
+  });
+
+  it("surfaces an error when the OAuth redirect cannot be started", async () => {
+    const user = userEvent.setup();
+    google.mockResolvedValue({ error: { message: "boom" } });
+    render(<LoginPage />);
+
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
   });
 
   it("shows the inactivity notice when reason=inactivity", () => {

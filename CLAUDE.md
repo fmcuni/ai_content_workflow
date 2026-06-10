@@ -1,3 +1,19 @@
+# Context discipline
+
+Before reading files, search first with rg.
+
+Prefer:
+- rg for discovery
+- targeted file reads by line range
+- reading only the function, component, or config block needed
+- summarizing findings before opening more files
+
+Avoid:
+- reading whole files unless necessary
+- broad Glob exploration without a reason
+- pasting full logs into context
+- re-reading the same file after small edits unless needed
+
 # Project Instructions
 
 Bowtie AI Content Tool — LangGraph-based article update pipeline with HITL
@@ -198,8 +214,25 @@ Auth (GoTrue)**, selected by a flag so cutover is reversible:
 - **Flag:** `AUTH_PROVIDER` (Workers `Env`, default `better-auth`) and
   `NEXT_PUBLIC_AUTH_PROVIDER` (web build env, default `better-auth`). Set both to
   `supabase` to use GoTrue. Flip back to roll back.
-- **Magic-link only, invite-only.** Self-signup + email confirmations are OFF;
-  accounts are admin-created (Users & Roles → invite). `/signup` redirects.
+- **Google OAuth, invite-only.** Sign-in is **Google OAuth** only
+  (`signInWithOAuth({provider:"google"})` → Supabase `/auth/v1/callback` →
+  `/verify` exchanges the PKCE `?code=`). `/signup` redirects. Magic-link was
+  dropped (email-deliverability); the `signInWithMagicLink` helper remains in
+  `web/lib/auth-client.ts` but is unused by the UI.
+  **Invite-only is enforced at the AUTHORIZATION layer, not sign-in:** Google
+  OAuth auto-creates a GoTrue user for anyone, so `effectiveRole`/`loadRole`
+  (`authz.ts`) return **null (→ 401)** for an authenticated session with no
+  `content_tool.app_user` row (and not a bootstrap admin) — i.e. unprovisioned
+  users are denied, NOT floored to `viewer`. The legacy better-auth path keeps
+  the `viewer` floor. Provisioning is unchanged (admin pre-creates the
+  `app_user` row + GoTrue user; the invitee then signs in with Google on the
+  same email — Google's verified email auto-links to the existing user).
+  **Provider setup:** enable Google in Supabase → Auth → Providers (client
+  id/secret from a Google Cloud OAuth Web client whose authorized redirect URI is
+  `https://<ref>.supabase.co/auth/v1/callback`); add the web origin's `/verify`
+  to the Supabase redirect allow-list. Keep email/password enabled **only** for
+  the `content-tool-e2e` service account (the Playwright harness mints sessions
+  via password grant — OAuth can't run headless).
 - **Token model:** the browser holds a Supabase session in a single cookie
   (`bowtie-sb-auth`, PKCE, cookie storage) and sends `Authorization: Bearer
   <access_token>`. The Workers backend verifies it in `src/auth/jwt.ts` via the

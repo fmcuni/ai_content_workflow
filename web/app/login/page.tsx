@@ -1,53 +1,36 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { signIn, signInWithMagicLink } from "@/lib/auth-client";
+import { signIn, signInWithGoogle } from "@/lib/auth-client";
 import { isSupabaseAuth } from "@/lib/supabase-client";
 
-const RESEND_COOLDOWN_SECONDS = 60;
+// ---- Supabase Google OAuth ------------------------------------------------
 
-// ---- Supabase magic-link form ---------------------------------------------
-
-function MagicLinkForm() {
+function GoogleSignInForm() {
   const params = useSearchParams();
   const reason = params.get("reason");
+  const redirectTo = params.get("redirect") || "/";
 
-  const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
   const [pending, setPending] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const id = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
-    return () => clearInterval(id);
-  }, [cooldown]);
-
-  async function send() {
+  async function onContinue() {
+    if (pending) return;
+    setError(null);
     setPending(true);
-    try {
-      // Fire-and-forget from the UI's perspective: we deliberately ignore the
-      // result so the same "check your inbox" copy shows whether or not the
-      // address exists (enumeration-safe). shouldCreateUser:false is enforced
-      // in signInWithMagicLink.
-      await signInWithMagicLink(email);
-      setSent(true);
-      setCooldown(RESEND_COOLDOWN_SECONDS);
-    } finally {
+    // On success the browser is redirected to Google and we never return here;
+    // only a failed redirect-start resolves with an error (so clear `pending`).
+    const { error } = await signInWithGoogle(redirectTo);
+    if (error) {
+      setError(error.message || "Could not start Google sign-in.");
       setPending(false);
     }
-  }
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (pending || cooldown > 0) return;
-    await send();
   }
 
   return (
@@ -62,41 +45,22 @@ function MagicLinkForm() {
             You were signed out due to inactivity. Sign in again to continue.
           </p>
         ) : null}
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          {sent ? (
-            <p className="text-sm text-accent" role="status">
-              If that email belongs to a Bowtie staff account, a sign-in link is
-              on its way. Check your inbox.
-            </p>
-          ) : null}
-          <Button
-            type="submit"
-            variant="primary"
-            className="w-full"
-            disabled={pending || cooldown > 0}
-          >
-            {pending
-              ? "Sending…"
-              : cooldown > 0
-                ? `Resend in ${cooldown}s`
-                : sent
-                  ? "Resend link"
-                  : "Email me a sign-in link"}
-          </Button>
-        </form>
+        <Button
+          type="button"
+          variant="primary"
+          className="w-full"
+          disabled={pending}
+          onClick={onContinue}
+        >
+          {pending ? "Redirecting…" : "Continue with Google"}
+        </Button>
+        {error ? (
+          <p className="mt-3 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
         <p className="mt-4 text-sm text-ink-soft">
-          Need access?{" "}
+          Access is invite-only. Need an account?{" "}
           <Link href="/signup" className="text-accent hover:underline">
             Contact your admin
           </Link>
@@ -190,7 +154,7 @@ function PasswordForm() {
 }
 
 function LoginForm() {
-  return isSupabaseAuth() ? <MagicLinkForm /> : <PasswordForm />;
+  return isSupabaseAuth() ? <GoogleSignInForm /> : <PasswordForm />;
 }
 
 export default function LoginPage() {
