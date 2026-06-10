@@ -18,6 +18,14 @@ export const metadata: Metadata = {
     template: "%s · Bowtie Content Desk",
   },
   description: "Internal editorial pipeline for Bowtie marketing content.",
+  // Internal tool — belt-and-braces with the X-Robots-Tag header
+  // (lib/security-headers.ts) and app/robots.txt (disallow all).
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false, noimageindex: true },
+  },
 };
 
 const fraunces = Fraunces({

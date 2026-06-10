@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
+import { safeRedirect } from "@/lib/safe-redirect";
 import { getSupabaseClient, isSupabaseAuth } from "@/lib/supabase-client";
 
 type EmailOtpType = "magiclink" | "signup" | "email" | "recovery" | "invite" | "email_change";
@@ -29,7 +30,7 @@ function SupabaseVerify() {
         return;
       }
 
-      const redirectTo = params.get("redirect") || "/";
+      const redirectTo = safeRedirect(params.get("redirect"));
       const code = params.get("code");
       const tokenHash = params.get("token_hash");
       const type = params.get("type");

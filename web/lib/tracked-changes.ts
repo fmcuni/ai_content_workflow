@@ -1,6 +1,7 @@
 import { diffArrays } from "diff";
 
 import { matchDivClose, pushFaqRegionTokens, refineFaqItemEdits } from "@/lib/faq-diff";
+import { sanitizeArticleHtml } from "@/lib/sanitize-html";
 
 /**
  * In-house tracked-changes engine for HUMAN edits (no paid Pro extension).
@@ -190,7 +191,13 @@ function faqItemSubDiff(committedItem: string, workingItem: string): DiffPart[] 
  * Tags are atomic and whitespace-only tokens compare equal to each other so a
  * reflow (`\n` ⇄ spaces) is never a change. */
 export function computeTrackedChanges(committed: string, working: string): TrackedChanges {
-  const raw = diffArrays(tokenizeHtml(committed), tokenizeHtml(working), {
+  // Both inputs are attacker-influenceable (WordPress HTML, fetched-page HTML,
+  // LLM output) and the diff is rendered via dangerouslySetInnerHTML in the
+  // authenticated origin. Sanitize at the boundary, BEFORE tokenizing/diffing, so
+  // the trusted <ins>/<del> markup the diff injects afterward is never stripped.
+  const safeCommitted = sanitizeArticleHtml(committed);
+  const safeWorking = sanitizeArticleHtml(working);
+  const raw = diffArrays(tokenizeHtml(safeCommitted), tokenizeHtml(safeWorking), {
     comparator: (a, b) => a === b || (isWhitespace(a) && isWhitespace(b)),
   }) as DiffPart[];
   // An EDITED FAQ item surfaces as a removed-item-atom run beside an added one;

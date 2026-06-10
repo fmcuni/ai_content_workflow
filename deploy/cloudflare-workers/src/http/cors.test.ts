@@ -3,14 +3,20 @@ import { describe, expect, it } from "vitest";
 import { corsHeaders, corsPreflight, resolveCorsOrigin, withCors } from "./cors";
 
 describe("resolveCorsOrigin", () => {
-  it("reflects the request origin when no allowlist is configured", () => {
-    expect(resolveCorsOrigin("https://app.example.com", undefined)).toBe(
-      "https://app.example.com",
-    );
+  it("fails closed (empty, no reflection) when no allowlist is configured", () => {
+    // SECURITY: an unset FRONTEND_ORIGIN must NOT reflect an arbitrary origin.
+    expect(resolveCorsOrigin("https://app.example.com", undefined)).toBe("");
   });
 
-  it("falls back to * when neither allowlist nor origin is present", () => {
-    expect(resolveCorsOrigin(null, undefined)).toBe("*");
+  it("fails closed when the allowlist is an empty/whitespace string", () => {
+    expect(resolveCorsOrigin("https://app.example.com", "")).toBe("");
+    expect(resolveCorsOrigin("https://app.example.com", "  ,  ")).toBe("");
+  });
+
+  it("never falls back to * when neither allowlist nor origin is present", () => {
+    const resolved = resolveCorsOrigin(null, undefined);
+    expect(resolved).not.toBe("*");
+    expect(resolved).toBe("");
   });
 
   it("echoes the request origin when it is on the allowlist", () => {
@@ -40,6 +46,35 @@ describe("corsHeaders", () => {
     expect(h["access-control-allow-origin"]).toBe("https://app.example.com");
     expect(h["access-control-allow-methods"]).toContain("GET");
     expect(h.vary).toBe("Origin");
+  });
+
+  it("omits Access-Control-Allow-Origin when origin is empty (fail closed)", () => {
+    const h = corsHeaders("");
+    expect(h["access-control-allow-origin"]).toBeUndefined();
+    // Non-origin headers are still present.
+    expect(h["access-control-allow-methods"]).toContain("GET");
+    expect(h.vary).toBe("Origin");
+  });
+});
+
+describe("CORS end-to-end fail-closed", () => {
+  it("withCors does not set a permissive allow-origin when FRONTEND_ORIGIN is unset", () => {
+    const origin = resolveCorsOrigin("https://anything.example.com", undefined);
+    const wrapped = withCors(new Response("data: hi\n\n", { status: 200 }), origin);
+    expect(wrapped.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("corsPreflight does not set a permissive allow-origin when FRONTEND_ORIGIN is unset", () => {
+    const origin = resolveCorsOrigin("https://anything.example.com", undefined);
+    const res = corsPreflight(origin);
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("withCors sets the configured origin when FRONTEND_ORIGIN is set", () => {
+    const origin = resolveCorsOrigin("https://app.example.com", "https://app.example.com");
+    const wrapped = withCors(new Response("data: hi\n\n", { status: 200 }), origin);
+    expect(wrapped.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
   });
 });
 

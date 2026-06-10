@@ -1,5 +1,7 @@
 import { execSync } from "node:child_process";
 
+import { SECURITY_HEADERS } from "./lib/security-headers.ts";
+
 const apiBase = process.env.NEXT_PUBLIC_API_BASE;
 if (!apiBase) {
   throw new Error("NEXT_PUBLIC_API_BASE is required (copy web/.env.local.example to web/.env.local)");
@@ -37,6 +39,18 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_SHA: gitSha(),
     NEXT_PUBLIC_BUILD_DATE: buildDate(),
+  },
+  // Security headers (CSP + hardening) applied to EVERY response — pages,
+  // assets, and `_next/*`. Single source of truth in lib/security-headers.ts;
+  // OpenNext honours next.config `headers()`. See that file for the
+  // script-src 'unsafe-inline' (vs nonce) rationale.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [...SECURITY_HEADERS],
+      },
+    ];
   },
   async rewrites() {
     // Exact (bare-collection) rules come first for every endpoint the app calls

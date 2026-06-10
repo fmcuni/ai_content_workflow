@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import postgres from "postgres";
 
 import { personasRouter } from "./routes/personas";
@@ -18,6 +19,8 @@ import { getAuth } from "./auth/auth";
 import { requireAuth, type AuthVars } from "./auth/middleware";
 import { loadRole, requireRole } from "./auth/authz";
 import { mintTicket } from "./auth/ticket";
+import { blockKnownCrawlers, ROBOTS_TXT } from "./http/bot-guard";
+import { applySecurityHeaders, isWebSocketUpgrade } from "./http/security-headers";
 
 export { ProductionWorkflow } from "./workflows/production";
 export { TopicExpansionWorkflow } from "./workflows/topic_expansion";
@@ -50,6 +53,16 @@ export interface Env {
   GEMINI_PROXY: DurableObjectNamespace<import("./gemini/proxy_do").GeminiProxy>;
   // Per-run collaborative-editing DO — Yjs CRDT sync for the run editor.
   RUN_DOC: DurableObjectNamespace<import("./run-doc").RunDoc>;
+  // --- Rate Limiting (Cloudflare native `ratelimit` binding) ---
+  // Abuse-prevention throttles for the expensive/mutating endpoints. Each
+  // exposes `await env.X.limit({ key }) => { success }`; the middleware in this
+  // file keys on the authenticated user id (else the client IP) and combines a
+  // per-user AND per-IP check. Generous caps (not product quotas):
+  //   - RATE_LIMITER_MUTATION: run create/resume/apply-edits + topic-batches.
+  //   - RATE_LIMITER_AUTH: the public /api/auth/* surface.
+  // Optional (`?`) so local dev / the node test pool (no binding) fail OPEN.
+  RATE_LIMITER_MUTATION?: RateLimit;
+  RATE_LIMITER_AUTH?: RateLimit;
   // Comma-separated allowlist of frontend origins permitted to open the SSE
   // streams cross-origin (the OpenNext frontend Worker). Unset → reflect the
   // request Origin (local dev). See src/http/cors.ts.
@@ -126,15 +139,87 @@ export interface Env {
   LANGFUSE_HOST?: string;
 }
 
+// --- Rate limiting ----------------------------------------------------------
+// Window of the `ratelimit` bindings below — MUST match `simple.period` in
+// wrangler.jsonc (Cloudflare only permits 10 or 60). Used as the `Retry-After`
+// value on a 429.
+const RATE_LIMIT_PERIOD_SECONDS = 60;
+
+/**
+ * Hono middleware factory for the Cloudflare native rate-limit binding named
+ * `bindingName`. Scope it to the abuse-prone POST routes only (never SSE/WS/GET)
+ * by registering it as route-level middleware.
+ *
+ * Key derivation: the authenticated `userId` when present (set by requireAuth),
+ * else the client IP (`cf-connecting-ip`). It runs BOTH a per-user and a per-IP
+ * check against the same limiter so a single abusive account and a single
+ * abusive IP are each capped. On any `{ success:false }` it returns 429 with a
+ * `Retry-After` header (the limiter period in seconds).
+ *
+ * Fails OPEN: if the binding is unset (local dev, the node test pool), the
+ * request passes — throttling is an abuse guard, not an auth gate, so a missing
+ * binding must never wedge the app.
+ */
+export function makeRateLimitMiddleware(
+  bindingName: "RATE_LIMITER_MUTATION" | "RATE_LIMITER_AUTH",
+): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
+  return async (c, next) => {
+    const limiter = c.env[bindingName];
+    if (!limiter) return next(); // unbound → fail open
+
+    const userId = c.get("userId");
+    const ip = c.req.header("cf-connecting-ip") ?? "unknown";
+    // Two independent buckets, both must pass. Prefix-namespaced so a user id
+    // can never collide with an IP literal.
+    const keys = userId ? [`user:${userId}`, `ip:${ip}`] : [`ip:${ip}`];
+    for (const key of keys) {
+      const { success } = await limiter.limit({ key });
+      if (!success) {
+        c.header("Retry-After", String(RATE_LIMIT_PERIOD_SECONDS));
+        return c.json({ error: "rate limit exceeded" }, 429);
+      }
+    }
+    return next();
+  };
+}
+
 const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 
+// --- Security headers (CSP + hardening) ------------------------------------
+// Stamp the shared CSP + hardening headers onto every response. Registered
+// FIRST so it wraps all routes (health, auth, REST, SSE). It runs the handler
+// (`await next()`) then mutates the existing response `Headers` in place — it
+// does NOT re-wrap the body, so the SSE `text/event-stream` stream is
+// preserved and CORS headers set downstream are left untouched. WebSocket
+// upgrades (the `/runs/:id/doc` collab handshake, 101 + `webSocket` handle) are
+// skipped so the handle is never dropped. Shared constant lives in
+// src/http/security-headers.ts (in sync with web/lib/security-headers.ts).
+app.use("*", async (c, next) => {
+  await next();
+  if (c.res && !isWebSocketUpgrade(c.res)) {
+    applySecurityHeaders(c.res.headers);
+  }
+});
+
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// --- Bot / crawler hygiene ---------------------------------------------------
+// Internal tool on a public workers.dev URL: tell crawlers to go away and 403
+// the well-known ones that show up anyway. /robots.txt is registered BEFORE
+// both the crawler block (bots must be able to read the disallow) and
+// requireAuth (it must be publicly fetchable). See src/http/bot-guard.ts.
+app.get("/robots.txt", (c) => c.text(ROBOTS_TXT));
+app.use("*", blockKnownCrawlers);
 
 // --- Auth (better-auth) ----------------------------------------------------
 // Mounted at a PATH-PRESERVING /api/auth/* — the frontend rewrite keeps the
 // `/api` prefix (unlike the bare-path REST rewrites), so the session cookie is
 // same-origin on the web domain. Registered before requireAuth so it stays
 // public. See src/auth/auth.ts.
+// Throttle the public auth surface (per-IP — no session yet) BEFORE the handler
+// to blunt credential-stuffing / signup abuse. Scoped to POST only so GET
+// session/callback reads (and the OAuth redirect dance) stay unthrottled.
+app.post("/api/auth/*", makeRateLimitMiddleware("RATE_LIMITER_AUTH"));
 app.on(["POST", "GET"], "/api/auth/*", async (c) => {
   const { auth, sql } = getAuth(c.env);
   try {
@@ -151,7 +236,13 @@ app.use("*", requireAuth);
 // Issue a short-lived SSE ticket to the authenticated user (cookie-protected by
 // requireAuth above). The browser passes it on the cross-origin SSE URL.
 app.get("/api/auth-ticket", async (c) => {
-  const ticket = await mintTicket(c.env, c.get("userId"));
+  // requireAuth binds `userId` on every authenticated branch, but the
+  // AUTH_DISABLED bypass (and any future bypass) leaves it unset. Never mint a
+  // ticket for an absent identity — otherwise we'd hand out a valid
+  // `undefined.<exp>.<sig>` ticket that the SSE/collab layer would accept.
+  const userId = c.get("userId");
+  if (!userId) return c.json({ error: "unauthorized" }, 401);
+  const ticket = await mintTicket(c.env, userId);
   return c.json({ ticket });
 });
 
@@ -215,6 +306,19 @@ app.delete("/topic-batches/:id", requireRole("admin"));
 // refresh: kick a re-audit scan (existing post) → author (content authoring).
 app.post("/refresh/scan", requireRole("author"));
 app.post("/refresh/scan/:articleId", requireRole("author"));
+
+// --- Rate limiting (abuse prevention) --------------------------------------
+// Throttle the expensive / mutating endpoints. Registered AFTER requireAuth (so
+// `userId` is bound → per-user keying) and BEFORE the router mounts below, so
+// the limiter runs ahead of the heavy handler. Scoped to the exact POST paths —
+// SSE (`/runs/:id/events`), the collab WS (`/runs/:id/doc`), and all GET reads
+// are intentionally untouched. The minimum mandated coverage is run creation +
+// resume (publish), plus apply-edits and topic-batch creation.
+const mutationLimiter = makeRateLimitMiddleware("RATE_LIMITER_MUTATION");
+app.post("/runs", mutationLimiter); // create a run (refresh / create / Front III)
+app.post("/runs/:id/resume", mutationLimiter); // HITL resume → publish at HITL_2
+app.post("/runs/:id/apply-edits", mutationLimiter); // stateless AI edit pass
+app.post("/topic-batches", mutationLimiter); // Front II topic expansion fan-out
 
 // Proof #1 — Postgres (Supabase) reachable from a Worker over TCP sockets.
 // Admin-only: the response enumerates content_tool table names + Postgres

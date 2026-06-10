@@ -103,10 +103,40 @@ async function requireProvisioned(c: AuthContext): Promise<Response | void> {
  *   authenticated by the short-lived `?ticket=` HMAC instead — unchanged across
  *   both providers (the ticket is minted after this session check passes).
  * - `AUTH_DISABLED=true` bypasses the gate for local dev against the Python
- *   backend (which has no auth routes).
+ *   backend (which has no auth routes). It is honored ONLY in a non-production
+ *   runtime (see `authDisabledHonored`); in a production-like env it throws.
  */
+/**
+ * Treat the runtime as "production-like" when the Supabase project is wired
+ * up. Prod MUST set `SUPABASE_URL` (JWKS is authoritative there — see CLAUDE.md
+ * Auth notes), so its presence is a robust signal that this is NOT a throwaway
+ * local/dev process. Local dev against the Python backend runs with
+ * `AUTH_DISABLED=true` and no `SUPABASE_URL`.
+ */
+export function isProductionLikeEnv(env: Env): boolean {
+  const url = env.SUPABASE_URL;
+  return typeof url === "string" && url.trim().length > 0;
+}
+
+/**
+ * Guard the `AUTH_DISABLED` escape hatch. It is a local-dev convenience only —
+ * honoring it in a production-like env would disable the whole auth gate, so we
+ * fail LOUDLY (throw) the moment a request is served with it set against a
+ * production-like runtime. Returns true only when the bypass is safe to honor.
+ */
+export function authDisabledHonored(env: Env): boolean {
+  if (env.AUTH_DISABLED !== "true") return false;
+  if (isProductionLikeEnv(env)) {
+    throw new Error(
+      "AUTH_DISABLED=true is set in a production-like environment (SUPABASE_URL " +
+        "present). Refusing to bypass authentication — unset AUTH_DISABLED in production.",
+    );
+  }
+  return true;
+}
+
 export async function requireAuth(c: AuthContext, next: Next): Promise<Response | void> {
-  if (c.env.AUTH_DISABLED === "true") return next();
+  if (authDisabledHonored(c.env)) return next();
   if (c.req.method === "OPTIONS") return next();
 
   const path = new URL(c.req.url).pathname;

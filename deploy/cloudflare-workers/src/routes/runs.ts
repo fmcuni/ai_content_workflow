@@ -22,6 +22,16 @@ import type { AuthVars } from "../auth/middleware";
 import { resolveActorIdentity } from "./identity";
 import { requireRole } from "../auth/authz";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
+import {
+  articleEditSchema,
+  createRunSchema,
+  dryPublishSchema,
+  hitl2Schema,
+  hitl2SnapshotSchema,
+  resumeSchema,
+  runWpMetaPatchSchema,
+  validationErrorBody,
+} from "./runs.schemas";
 
 // ---------------------------------------------------------------------------
 // Env extension
@@ -318,9 +328,12 @@ const runsRouter = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 // POST / — create a run
 // ---------------------------------------------------------------------------
 runsRouter.post("/", requireRole("author"), async (c) => {
-  const body = await c.req
-    .json<CreateRunBody>()
-    .catch(() => ({}) as CreateRunBody);
+  const raw: unknown = await c.req.json().catch(() => ({}));
+  const parsed = createRunSchema.safeParse(raw);
+  if (!parsed.success) {
+    return c.json(validationErrorBody(parsed.error), 400);
+  }
+  const body = parsed.data as CreateRunBody;
 
   const startMode = normalizeStartMode(body.start_mode);
   const articleUrl = body.article_url ?? null;
@@ -565,7 +578,12 @@ runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
 // ---------------------------------------------------------------------------
 runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
-  const body = await c.req.json<ResumeBody>().catch(() => ({}) as ResumeBody);
+  const rawResume: unknown = await c.req.json().catch(() => ({}));
+  const parsedResume = resumeSchema.safeParse(rawResume);
+  if (!parsedResume.success) {
+    return c.json(validationErrorBody(parsedResume.error), 400);
+  }
+  const body = parsedResume.data as ResumeBody;
   const decision = body.decision ?? "approve";
 
   const guard = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -637,7 +655,12 @@ runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
 // ---------------------------------------------------------------------------
 runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
-  const body = await c.req.json<Hitl2Body>().catch(() => ({}) as Hitl2Body);
+  const rawHitl2: unknown = await c.req.json().catch(() => ({}));
+  const parsedHitl2 = hitl2Schema.safeParse(rawHitl2);
+  if (!parsedHitl2.success) {
+    return c.json(validationErrorBody(parsedHitl2.error), 400);
+  }
+  const body = parsedHitl2.data as Hitl2Body;
   const decision = body.decision ?? "approve";
   const comments = body.comments ?? [];
   // Compliance record-of-truth: the authenticated session identity (NOT the
@@ -865,9 +888,12 @@ runsRouter.options("/:id/logs", (c) =>
 // ---------------------------------------------------------------------------
 runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
-  const ov = await c.req
-    .json<DryPublishBody>()
-    .catch(() => ({}) as DryPublishBody);
+  const rawOv: unknown = await c.req.json().catch(() => ({}));
+  const parsedOv = dryPublishSchema.safeParse(rawOv);
+  if (!parsedOv.success) {
+    return c.json(validationErrorBody(parsedOv.error), 400);
+  }
+  const ov = parsedOv.data as DryPublishBody;
 
   const data = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
     const runRows = await sql<RunDryPublishRow[]>`
@@ -1583,9 +1609,12 @@ runsRouter.post("/:id/existing-post/refresh", requireRole("reviewer"), async (c)
 // ---------------------------------------------------------------------------
 runsRouter.post("/:id/hitl2-snapshots", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
-  const body = await c.req
-    .json<Hitl2SnapshotBody>()
-    .catch(() => ({}) as Hitl2SnapshotBody);
+  const rawSnapshot: unknown = await c.req.json().catch(() => ({}));
+  const parsedSnapshot = hitl2SnapshotSchema.safeParse(rawSnapshot);
+  if (!parsedSnapshot.success) {
+    return c.json(validationErrorBody(parsedSnapshot.error), 400);
+  }
+  const body = parsedSnapshot.data as Hitl2SnapshotBody;
   // Audit identity: bind `created_by` to the authenticated session (email →
   // userId → "unknown"), consistent with the create-run / hitl-2 sites. The
   // snapshot body carries no `editor_email`, so the payload fallback is null.
@@ -1802,9 +1831,12 @@ runsRouter.put("/:id/outline", requireRole("author"), async (c) => {
 // ---------------------------------------------------------------------------
 runsRouter.put("/:id/article", requireRole("author"), async (c) => {
   const runId = c.req.param("id");
-  const body = await c.req
-    .json<ArticleEditBody>()
-    .catch(() => ({}) as ArticleEditBody);
+  const rawArticle: unknown = await c.req.json().catch(() => ({}));
+  const parsedArticle = articleEditSchema.safeParse(rawArticle);
+  if (!parsedArticle.success) {
+    return c.json(validationErrorBody(parsedArticle.error), 400);
+  }
+  const body = parsedArticle.data as ArticleEditBody;
 
   const expectedVersion = body.expected_version ?? null;
 
@@ -1905,9 +1937,12 @@ runsRouter.put("/:id/article", requireRole("author"), async (c) => {
 // ---------------------------------------------------------------------------
 runsRouter.patch("/:id", requireRole("reviewer"), async (c) => {
   const runId = c.req.param("id");
-  const body = await c.req
-    .json<RunWpMetaPatchBody>()
-    .catch(() => ({}) as RunWpMetaPatchBody);
+  const rawPatch: unknown = await c.req.json().catch(() => ({}));
+  const parsedPatch = runWpMetaPatchSchema.safeParse(rawPatch);
+  if (!parsedPatch.success) {
+    return c.json(validationErrorBody(parsedPatch.error), 400);
+  }
+  const body = parsedPatch.data as RunWpMetaPatchBody;
 
   const expectedVersion = body.expected_version ?? null;
   const slug = body.wp_slug != null ? canonicalizeSlug(body.wp_slug) : null;

@@ -8,6 +8,11 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from content_tool.api.rate_limit import (
+    RUN_CREATE_LIMIT,
+    RUN_MUTATION_LIMIT,
+    limiter,
+)
 from content_tool.api.schemas import (
     ApplyEditsRequest,
     ApplyEditsResponse,
@@ -149,7 +154,9 @@ async def _create_run_row(
 
 
 @router.post("", response_model=CreateRunResponse)
+@limiter.limit(RUN_CREATE_LIMIT)
 async def create_run(
+    request: Request,
     payload: CreateRunRequest,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
     runner=Depends(get_runner),  # noqa: ANN001, B008
@@ -359,7 +366,9 @@ async def run_logs(
 
 
 @router.post("/{run_id}/resume")
+@limiter.limit(RUN_MUTATION_LIMIT)
 async def resume_run(
+    request: Request,
     run_id: UUID,
     payload: ResumeRequest,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
@@ -1327,7 +1336,8 @@ async def republish(
                 if_unmodified_since=None,
             )
         except WordPressError as e:
-            raise HTTPException(502, f"WordPress upstream error: {e}") from e
+            logger.warning("WordPress publish failed for run %s: %s", run_id, e)
+            raise HTTPException(status_code=502, detail="WordPress upstream error") from e
 
     return {
         "wp_post_id": result["id"],
@@ -1446,6 +1456,7 @@ async def regenerate_run(
 
 
 @router.post("/{run_id}/apply-edits")
+@limiter.limit(RUN_MUTATION_LIMIT)
 async def apply_edits_run(
     run_id: UUID,
     payload: ApplyEditsRequest,

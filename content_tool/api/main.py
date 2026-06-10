@@ -15,8 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import (
     FastAPIInstrumentor,  # pyright: ignore[reportMissingTypeStubs]
 )
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from content_tool import prompts_store, source_policy_store
+from content_tool.api.rate_limit import limiter, rate_limit_exceeded_handler
 from content_tool.api.routes.articles import router as articles_router
 from content_tool.api.routes.compliance import router as compliance_router
 from content_tool.api.routes.costs import router as costs_router
@@ -158,6 +161,12 @@ def create_app() -> FastAPI:
     configure_tracing()
     init_langfuse()
     app = FastAPI(title="Bowtie AI Content Tool", version="0.1.0", lifespan=lifespan)
+    # Per-user / per-IP throttling (defense-in-depth). The limiter, middleware,
+    # and 429 handler must all be registered for slowapi's @limiter.limit
+    # decorators on the routers to take effect.
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3000"],

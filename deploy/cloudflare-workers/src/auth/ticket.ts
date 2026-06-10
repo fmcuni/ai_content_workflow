@@ -49,7 +49,24 @@ export async function verifyTicket(env: Env, ticket: string): Promise<string | n
   const now = Math.floor(Date.now() / 1000);
   if (!Number.isFinite(exp) || exp < now) return null;
   const expected = await sign(requireSecret(env), `${userId}.${exp}`);
-  // Length-prefixed string equality — both are fixed-length base64url HMACs.
-  if (expected.length !== sig.length || expected !== sig) return null;
+  // Constant-time comparison so a timing side-channel can't be used to forge the
+  // signature byte-by-byte (plain `===` short-circuits on the first mismatch).
+  if (!constantTimeEquals(expected, sig)) return null;
   return userId;
+}
+
+/**
+ * Constant-time string equality. Compares two ASCII strings (base64url HMAC
+ * digests) without an early exit, so the running time does not leak how many
+ * leading characters matched. A length mismatch is folded into the accumulator
+ * instead of short-circuiting; the loop runs over the longer of the two so the
+ * iteration count never reveals the lengths either.
+ */
+function constantTimeEquals(a: string, b: string): boolean {
+  const len = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
 }

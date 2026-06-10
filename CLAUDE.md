@@ -216,6 +216,16 @@ node scripts/claude-debug/browse.mjs '[{"goto":"/runs"},{"shotView":"runs.png"}]
   customer PII, PHI, HKID, or other Bowtie private data passes through it.
   Standard hygiene still applies: no secrets/credentials in commits, logs, or
   external tool calls.
+- **Run access (intentional shared model — NOT an IDOR bug):** run endpoints
+  authorize by *role* (`viewer<author<reviewer<admin`), **not** by per-run
+  ownership. Any authorized user may view/edit/resume/publish/PATCH any run by
+  `run_id`; there is deliberately **no `created_by` ownership gate**. This is by
+  design: the tool is a shared editorial **ops board** for invite-only Bowtie
+  staff working on public content, with no tenant boundary. A security review
+  may flag the by-`run_id`-only handlers (`routes/runs.ts`, `apply_edits`) as an
+  IDOR — it is an accepted trade-off given the trust model. **Revisit and add an
+  owner/tenant gate if that model changes** (external collaborators, multi-org,
+  or any private/customer data entering the pipeline).
 - Costs: `GET /costs/run/{run_id}` and `/costs/summary`; pricing in
   `config/pricing.yaml` (hot-reloaded).
 - Compliance export: `GET /compliance/export.csv`.
