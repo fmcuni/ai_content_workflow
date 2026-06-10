@@ -30,6 +30,10 @@ export interface VerifiedIdentity {
   sub: string;
   /** The user email, when present on the token. */
   email: string | null;
+  /** Token issue time (JWT `iat`, epoch seconds) — the admin "revoke sessions"
+   * gate compares it against `app_user.sessions_revoked_at` to cut off access
+   * tokens that remain cryptographically valid after a revocation. */
+  issuedAt: number | null;
 }
 
 /** GoTrue access tokens carry `aud: "authenticated"` for a logged-in user. */
@@ -67,7 +71,9 @@ function identityFromPayload(payload: JWTPayload): VerifiedIdentity | null {
   }
   const email =
     typeof payload.email === "string" && payload.email.length > 0 ? payload.email : null;
-  return { sub, email };
+  const issuedAt =
+    typeof payload.iat === "number" && Number.isFinite(payload.iat) ? payload.iat : null;
+  return { sub, email, issuedAt };
 }
 
 /**

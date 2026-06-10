@@ -10,14 +10,13 @@
  *   - Every exported function fails CLOSED with a typed `GoTrueAdminError` when
  *     `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are unset, so an unconfigured
  *     environment cannot silently no-op or leak.
- *   - Inputs are validated (non-empty email/id, recognized link type) before any
+ *   - Inputs are validated (non-empty email/id) before any
  *     network call, and `SUPABASE_URL` is parsed via `new URL(...)` so a
  *     malformed base can never produce a surprising request target.
  *
  * GoTrue endpoints (relative to `${SUPABASE_URL}/auth/v1`):
  *   POST   /invite                       — send an invite email           {email}
  *   POST   /admin/users                  — create a user                  {email,password?,email_confirm}
- *   POST   /admin/generate_link          — mint an action link            {type,email,redirect_to?}
  *   DELETE /admin/users/:id              — delete a user
  *   PUT    /admin/users/:id              — update (ban/unban)             {ban_duration}
  *   POST   /admin/users/:id/logout       — revoke all sessions
@@ -37,15 +36,6 @@ export interface GoTrueUser {
   confirmed_at?: string | null;
   invited_at?: string | null;
   banned_until?: string | null;
-}
-
-/** Action-link types we support minting via /admin/generate_link. */
-export type GenerateLinkType = "invite" | "magiclink" | "recovery" | "signup";
-
-/** Response of /admin/generate_link (action_link is the user-facing URL). */
-export interface GenerateLinkResult {
-  action_link: string;
-  verification_type: string;
 }
 
 /**
@@ -226,27 +216,6 @@ export async function createUser(
   return user as GoTrueUser;
 }
 
-/** Mint an action link (invite / magiclink / recovery / signup) for `email`. */
-export async function generateLink(
-  env: GoTrueAdminEnv,
-  type: GenerateLinkType,
-  email: string,
-  opts?: { redirectTo?: string },
-): Promise<GenerateLinkResult> {
-  const cfg = resolveConfig(env);
-  const validEmail = requireEmail(email);
-  const allowed: readonly GenerateLinkType[] = ["invite", "magiclink", "recovery", "signup"];
-  if (!allowed.includes(type)) {
-    throw new GoTrueAdminError("invalid_input", "unsupported link type", 400);
-  }
-  const body: Record<string, unknown> = { type, email: validEmail };
-  if (opts?.redirectTo !== undefined && opts.redirectTo.trim().length > 0) {
-    body.redirect_to = opts.redirectTo.trim();
-  }
-  const result = await adminFetch(cfg, "POST", "/admin/generate_link", body);
-  return result as GenerateLinkResult;
-}
-
 /** Delete a GoTrue user by id. */
 export async function deleteUser(env: GoTrueAdminEnv, id: string): Promise<void> {
   const cfg = resolveConfig(env);
@@ -274,12 +243,10 @@ export async function updateUser(
   return user as GoTrueUser;
 }
 
-/** Revoke ALL of a user's sessions (admin sign-out). */
-export async function signOutUser(env: GoTrueAdminEnv, id: string): Promise<void> {
-  const cfg = resolveConfig(env);
-  const validId = requireNonEmpty(id, "user id");
-  await adminFetch(cfg, "POST", `/admin/users/${encodeURIComponent(validId)}/logout`, {});
-}
+// NOTE: there is deliberately NO signOutUser here. GoTrue's admin REST API has
+// no per-user sign-out endpoint (POST /admin/users/:id/logout does not exist —
+// it 404s on hosted Supabase). Session revocation is done at the DB level via
+// content_tool.revoke_auth_sessions() — see routes/admin.ts revoke-sessions.
 
 /** Far-future ban duration = "disabled indefinitely" (GoTrue idiom). ~100yr. */
 export const DISABLE_BAN_DURATION = "876000h";

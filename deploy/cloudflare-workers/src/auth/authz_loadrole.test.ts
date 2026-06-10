@@ -22,11 +22,13 @@ import type { Env } from "../index";
 const state: {
   role: string | null;
   status: string | null;
+  sessionsRevokedEpoch: number | null;
   matchById: boolean;
   queries: string[];
 } = {
   role: "author",
   status: "active",
+  sessionsRevokedEpoch: null,
   matchById: true,
   queries: [],
 };
@@ -42,9 +44,15 @@ function fakeSql(strings: TemplateStringsArray, ...values: unknown[]): unknown {
   // Return the scripted role only for the lookup we want to "hit"; the other
   // lookup returns no row so the fallback path is exercised when needed.
   if ((byId && state.matchById) || (!byId && !state.matchById)) {
-    // The app_user query projects role+status; the legacy query role only. The
-    // extra key is harmless for the legacy assertions.
-    return Promise.resolve([{ role: state.role, status: state.status }]);
+    // The app_user query projects role+status+sessions_revoked_epoch; the legacy
+    // query role only. The extra keys are harmless for the legacy assertions.
+    return Promise.resolve([
+      {
+        role: state.role,
+        status: state.status,
+        sessions_revoked_epoch: state.sessionsRevokedEpoch,
+      },
+    ]);
   }
   return Promise.resolve([]);
 }
@@ -62,6 +70,7 @@ import type { AuthVars } from "./middleware";
 async function resolve(opts: {
   userId?: string;
   userEmail?: string;
+  tokenIssuedAt?: number;
   env: Partial<Env>;
 }): Promise<string | null> {
   const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
@@ -69,6 +78,7 @@ async function resolve(opts: {
   app.get("/", async (c) => {
     if (opts.userId !== undefined) c.set("userId", opts.userId);
     if (opts.userEmail !== undefined) c.set("userEmail", opts.userEmail);
+    if (opts.tokenIssuedAt !== undefined) c.set("tokenIssuedAt", opts.tokenIssuedAt);
     result = await loadRole(c);
     return c.json({ ok: true });
   });
@@ -84,6 +94,7 @@ async function resolve(opts: {
 beforeEach(() => {
   state.role = "author";
   state.status = "active";
+  state.sessionsRevokedEpoch = null;
   state.matchById = true;
   state.queries = [];
 });
@@ -149,6 +160,53 @@ describe("loadRole — app_user path (supabase)", () => {
     state.status = "disabled";
     const role = await resolve({ userId: "uuid-1", userEmail: "a@bowtie.com.hk", env });
     expect(role).toBeNull();
+  });
+
+  it("DENIES (null) a token issued BEFORE sessions_revoked_at (admin revoke)", async () => {
+    // GoTrue's admin sign-out only kills refresh tokens; the live access token
+    // stays valid until expiry, so the revocation cut-off is enforced here.
+    state.role = "reviewer";
+    state.sessionsRevokedEpoch = 1_000_000;
+    const role = await resolve({
+      userId: "uuid-1",
+      userEmail: "a@bowtie.com.hk",
+      tokenIssuedAt: 999_900,
+      env,
+    });
+    expect(role).toBeNull();
+  });
+
+  it("allows a token issued AFTER sessions_revoked_at (fresh sign-in)", async () => {
+    state.role = "reviewer";
+    state.sessionsRevokedEpoch = 1_000_000;
+    const role = await resolve({
+      userId: "uuid-1",
+      userEmail: "a@bowtie.com.hk",
+      tokenIssuedAt: 1_000_100,
+      env,
+    });
+    expect(role).toBe("reviewer");
+  });
+
+  it("ignores sessions_revoked_at when the request carries no token iat (ticket path)", async () => {
+    state.role = "reviewer";
+    state.sessionsRevokedEpoch = 1_000_000;
+    const role = await resolve({ userId: "uuid-1", userEmail: "a@bowtie.com.hk", env });
+    expect(role).toBe("reviewer");
+  });
+
+  it("the admin-eligible bootstrap break-glass survives a revocation", async () => {
+    // Same lockout-recovery property as the disabled row: BOOTSTRAP_ADMIN_EMAILS
+    // keeps working even when the stored row says revoked.
+    state.role = "admin";
+    state.sessionsRevokedEpoch = 1_000_000;
+    const role = await resolve({
+      userId: "uuid-1",
+      userEmail: "boss@bowtie.com.hk",
+      tokenIssuedAt: 999_900,
+      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+    });
+    expect(role).toBe("admin");
   });
 
   it("the admin-eligible bootstrap break-glass survives a disabled row", async () => {

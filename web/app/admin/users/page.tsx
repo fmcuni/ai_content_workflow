@@ -58,12 +58,6 @@ function UserRow({ user }: { user: AdminUserDetail }) {
     onError: (e: Error) => toast.error(`Couldn't delete user — ${e.message}`),
   });
 
-  const resendInvite = useMutation({
-    mutationFn: () => adminUsersApi.resendInvite(user.id),
-    onSuccess: () => toast.success(`Invite re-sent to ${user.email}`),
-    onError: (e: Error) => toast.error(`Couldn't resend invite — ${e.message}`),
-  });
-
   const revokeSessions = useMutation({
     mutationFn: () => adminUsersApi.revokeSessions(user.id),
     onSuccess: () => toast.success(`Signed ${user.email} out of all sessions`),
@@ -71,11 +65,7 @@ function UserRow({ user }: { user: AdminUserDetail }) {
   });
 
   const busy =
-    setRole.isPending ||
-    toggleStatus.isPending ||
-    remove.isPending ||
-    resendInvite.isPending ||
-    revokeSessions.isPending;
+    setRole.isPending || toggleStatus.isPending || remove.isPending || revokeSessions.isPending;
 
   return (
     <li className="grid grid-cols-[1fr_auto] items-start gap-4 border-b border-rule py-4">
@@ -120,14 +110,6 @@ function UserRow({ user }: { user: AdminUserDetail }) {
             onClick={() => toggleStatus.mutate()}
           >
             {isDisabled ? "Enable" : "Disable"}
-          </button>
-          <button
-            type="button"
-            className={ACTION_CLASSES}
-            disabled={busy}
-            onClick={() => resendInvite.mutate()}
-          >
-            Resend invite
           </button>
           <button
             type="button"
@@ -229,8 +211,9 @@ function CreateUserDialog({ onClose }: { onClose: () => void }) {
           </header>
 
           <p className="text-[13px] text-ink-soft leading-relaxed">
-            An invite email with a magic sign-in link is sent immediately. The account starts
-            with the role you pick here; you can change it afterwards.
+            An invite email is sent immediately; the invitee then signs in with Google using
+            this address. The account starts with the role you pick here; you can change it
+            afterwards.
           </p>
 
           <div>

@@ -44,10 +44,35 @@ async function makeToken(opts: TokenOpts = {}): Promise<string> {
 }
 
 describe("verifySupabaseJwt — HS256 fallback", () => {
-  it("verifies a well-formed token and returns sub + email", async () => {
+  it("verifies a well-formed token and returns sub + email + issuedAt", async () => {
     const token = await makeToken({ sub: "abc", email: "a@bowtie.com.hk" });
     const id = await verifySupabaseJwt(token, envWith());
-    expect(id).toEqual({ sub: "abc", email: "a@bowtie.com.hk" });
+    expect(id).toEqual({ sub: "abc", email: "a@bowtie.com.hk", issuedAt: expect.any(Number) });
+  });
+
+  it("surfaces the token's exact iat as issuedAt (revoke-sessions gate input)", async () => {
+    const iat = Math.floor(Date.now() / 1000) - 120;
+    const token = await new SignJWT({ email: "a@bowtie.com.hk" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt(iat)
+      .setExpirationTime(iat + 3600)
+      .setSubject("iat-check")
+      .setAudience("authenticated")
+      .sign(KEY);
+    const id = await verifySupabaseJwt(token, envWith());
+    expect(id?.issuedAt).toBe(iat);
+  });
+
+  it("returns issuedAt null when the token has no iat claim", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({ email: "a@bowtie.com.hk" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setExpirationTime(now + 3600)
+      .setSubject("no-iat")
+      .setAudience("authenticated")
+      .sign(KEY);
+    const id = await verifySupabaseJwt(token, envWith());
+    expect(id?.issuedAt).toBeNull();
   });
 
   it("returns email null when the claim is absent", async () => {
@@ -59,7 +84,11 @@ describe("verifySupabaseJwt — HS256 fallback", () => {
       .setSubject("no-email")
       .setAudience("authenticated")
       .sign(KEY);
-    expect(await verifySupabaseJwt(token, envWith())).toEqual({ sub: "no-email", email: null });
+    expect(await verifySupabaseJwt(token, envWith())).toEqual({
+      sub: "no-email",
+      email: null,
+      issuedAt: expect.any(Number),
+    });
   });
 
   it("rejects an expired token", async () => {

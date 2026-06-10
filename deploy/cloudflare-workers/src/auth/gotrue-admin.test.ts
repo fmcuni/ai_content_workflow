@@ -14,10 +14,8 @@ import {
   GoTrueAdminError,
   createUser,
   deleteUser,
-  generateLink,
   inviteUser,
   listUsers,
-  signOutUser,
   updateUser,
   DISABLE_BAN_DURATION,
 } from "./gotrue-admin";
@@ -126,16 +124,6 @@ describe("input validation (before any fetch)", () => {
     await expect(deleteUser(env, "  ")).rejects.toMatchObject({ code: "invalid_input" });
     expect(spy).not.toHaveBeenCalled();
   });
-
-  it("rejects an unsupported link type", async () => {
-    const spy = vi.fn();
-    vi.stubGlobal("fetch", spy);
-    // @ts-expect-error — deliberately wrong type to test runtime guard.
-    await expect(generateLink(env, "phone_change", "a@b.com")).rejects.toMatchObject({
-      code: "invalid_input",
-    });
-    expect(spy).not.toHaveBeenCalled();
-  });
 });
 
 describe("endpoint shapes", () => {
@@ -152,21 +140,6 @@ describe("endpoint shapes", () => {
     expect(calls[0]!.method).toBe("PUT");
     expect(calls[0]!.url).toBe("https://proj.supabase.co/auth/v1/admin/users/u%201");
     expect(JSON.parse(calls[0]!.body!)).toEqual({ ban_duration: DISABLE_BAN_DURATION });
-  });
-
-  it("signOutUser POSTs /admin/users/:id/logout", async () => {
-    mockFetch(200, null);
-    await signOutUser(env, "u1");
-    expect(calls[0]!.method).toBe("POST");
-    expect(calls[0]!.url).toBe("https://proj.supabase.co/auth/v1/admin/users/u1/logout");
-  });
-
-  it("generateLink POSTs /admin/generate_link with type + email", async () => {
-    mockFetch(200, { action_link: "https://x", verification_type: "invite" });
-    const r = await generateLink(env, "invite", "a@b.com");
-    expect(calls[0]!.url).toBe("https://proj.supabase.co/auth/v1/admin/generate_link");
-    expect(JSON.parse(calls[0]!.body!)).toMatchObject({ type: "invite", email: "a@b.com" });
-    expect(r.action_link).toBe("https://x");
   });
 
   it("listUsers unwraps the { users: [...] } page", async () => {

@@ -8,14 +8,13 @@
  *   POST   /admin/users/:id/disable      → ban in GoTrue + status='disabled'
  *   POST   /admin/users/:id/enable       → unban in GoTrue + status='active'
  *   DELETE /admin/users/:id              → delete GoTrue user + app_user row
- *   POST   /admin/users/:id/resend-invite→ re-send the magic/invite link
  *   POST   /admin/users/:id/revoke-sessions → GoTrue admin sign-out (all sessions)
  *
  * Provider awareness: when `env.AUTH_PROVIDER === "supabase"` the user store is
  * `content_tool.app_user` and GoTrue is the identity provider; otherwise the
  * legacy better-auth path reads/writes `content_tool."user"` exactly as before
  * (so `main` stays behaviorally unchanged until cutover). The GoTrue-only routes
- * (create/disable/enable/delete/resend/revoke) return 501 on the better-auth
+ * (create/disable/enable/delete/revoke) return 501 on the better-auth
  * path or when GoTrue is unconfigured.
  *
  * Every mutation is audited via the structured logger (actor, target, old→new).
@@ -43,10 +42,8 @@ import {
   createUser,
   deleteUser,
   findUserByEmail,
-  generateLink,
   inviteUser,
   listUsers,
-  signOutUser,
   updateUser,
 } from "../auth/gotrue-admin";
 import type { GoTrueUser } from "../auth/gotrue-admin";
@@ -470,12 +467,14 @@ function registerDisableEnable(action: "disable" | "enable"): void {
 
     // Disabling also revokes refresh tokens (best-effort): the ban blocks NEW
     // sign-ins, the middleware provisioning gate kills live access tokens on
-    // their next request, and this sign-out cuts the refresh path so the
-    // session can't silently mint a fresh access token in the meantime. A
-    // failure here is non-fatal — the other two layers already deny.
+    // their next request, and this DB-level session kill cuts the refresh path
+    // so the session can't silently mint a fresh access token in the meantime.
+    // A failure here is non-fatal — the other two layers already deny.
     if (disabling) {
       try {
-        await signOutUser(c.env, targetId);
+        await withDb(c.env, c.executionCtx, (sql: Sql) =>
+          sql`SELECT content_tool.revoke_auth_sessions(${targetId}::uuid)`,
+        );
       } catch {
         // non-fatal by design
       }
@@ -567,41 +566,7 @@ adminRouter.delete("/users/:id", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /admin/users/:id/resend-invite — re-send the magic/invite link
-// ---------------------------------------------------------------------------
-adminRouter.post("/users/:id/resend-invite", async (c) => {
-  if (!isSupabaseProvider(c.env)) {
-    return c.json(
-      { error: "not_supported", message: "resend-invite requires the Supabase auth provider" },
-      501,
-    );
-  }
-  const targetId = c.req.param("id");
-  const existing = await loadAppUser(c, targetId);
-  if (existing === null) return c.json({ detail: "user not found" }, 404);
-
-  try {
-    // generate_link with type "invite" re-issues the action link (and email).
-    await generateLink(c.env, "invite", existing.email);
-  } catch (e: unknown) {
-    if (e instanceof GoTrueAdminError) {
-      const { body, status } = gotrueErrorResponse(e);
-      return c.json(body, status);
-    }
-    throw e;
-  }
-
-  auditLog("rbac.user_resend_invite", {
-    actor: actorOf(c),
-    target_id: existing.id,
-    target_email: existing.email,
-  });
-
-  return c.json({ ok: true });
-});
-
-// ---------------------------------------------------------------------------
-// POST /admin/users/:id/revoke-sessions — GoTrue admin sign-out (all sessions)
+// POST /admin/users/:id/revoke-sessions — sign the user out of all sessions
 // ---------------------------------------------------------------------------
 adminRouter.post("/users/:id/revoke-sessions", async (c) => {
   if (!isSupabaseProvider(c.env)) {
@@ -614,15 +579,18 @@ adminRouter.post("/users/:id/revoke-sessions", async (c) => {
   const existing = await loadAppUser(c, targetId);
   if (existing === null) return c.json({ detail: "user not found" }, 404);
 
-  try {
-    await signOutUser(c.env, targetId);
-  } catch (e: unknown) {
-    if (e instanceof GoTrueAdminError) {
-      const { body, status } = gotrueErrorResponse(e);
-      return c.json(body, status);
-    }
-    throw e;
-  }
+  // Two cuts make revocation complete (GoTrue's admin REST has NO per-user
+  // sign-out endpoint, so both happen in the DB):
+  //   1. revoke_auth_sessions deletes the user's auth.sessions/refresh_tokens
+  //      (SECURITY DEFINER fn) — no new access token can be minted by refresh.
+  //   2. sessions_revoked_at makes the per-request gate (auth/authz.ts
+  //      loadRole) deny every access token issued before now — live tokens die
+  //      on the target's next request instead of at expiry (~1h).
+  // A fresh sign-in afterwards mints a later-iat token and works normally.
+  await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    await sql`SELECT content_tool.revoke_auth_sessions(${targetId}::uuid)`;
+    await sql`UPDATE content_tool.app_user SET sessions_revoked_at = now() WHERE id = ${targetId}`;
+  });
 
   auditLog("rbac.user_revoke_sessions", {
     actor: actorOf(c),

@@ -13,7 +13,6 @@ const adminUsersApi = vi.hoisted(() => ({
   disable: vi.fn(),
   enable: vi.fn(),
   remove: vi.fn(),
-  resendInvite: vi.fn(),
   revokeSessions: vi.fn(),
 }));
 vi.mock("@/lib/api", () => ({ adminUsersApi }));

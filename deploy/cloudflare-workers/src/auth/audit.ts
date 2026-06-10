@@ -18,7 +18,6 @@ export type AuditEvent =
   | "rbac.user_disable"
   | "rbac.user_enable"
   | "rbac.user_delete"
-  | "rbac.user_resend_invite"
   | "rbac.user_revoke_sessions";
 
 /** Emit one structured JSON audit line. Pure side-effect; never throws. */

@@ -29,19 +29,23 @@ const state: { actorRole: string | null; target: UserRow | null; appUser: AppUse
   appUser: null,
 };
 
+const sqlQueries: string[] = [];
+
 function makeFakeSql(): unknown {
   const sql = (strings: TemplateStringsArray, ..._values: unknown[]): unknown => {
     const text = strings.join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+    sqlQueries.push(text);
     const lastStr = _values.find((v) => typeof v === "string") as string | undefined;
 
     // --- Supabase provider: content_tool.app_user ---
     if (text.includes("app_user")) {
       // loadRole (provider-aware, supabase path) reads the ACTING user's role via
-      // `SELECT role, status FROM content_tool.app_user WHERE id/email = ...`. The
-      // admin routes always project more columns, so this narrow projection is
-      // unambiguously the auth gate — return the ACTOR's role, not the target.
-      if (text.startsWith("select role, status from") || text.startsWith("select role from")) {
-        return [{ role: state.actorRole, status: "active" }];
+      // `SELECT role, status, extract(...) FROM content_tool.app_user WHERE
+      // id/email = ...`. The admin routes always project id/email first, so a
+      // leading `role, status` projection is unambiguously the auth gate —
+      // return the ACTOR's role, not the target.
+      if (text.startsWith("select role, status") || text.startsWith("select role from")) {
+        return [{ role: state.actorRole, status: "active", sessions_revoked_epoch: null }];
       }
       if (text.startsWith("insert")) {
         // POST /users create — bound order: id, email, role.
@@ -106,10 +110,8 @@ vi.mock("../db/client", () => ({
 const gotrue = {
   inviteUser: vi.fn(),
   createUser: vi.fn(),
-  generateLink: vi.fn(),
   deleteUser: vi.fn(),
   updateUser: vi.fn(),
-  signOutUser: vi.fn(),
   listUsers: vi.fn(),
   findUserByEmail: vi.fn(),
 };
@@ -119,10 +121,8 @@ vi.mock("../auth/gotrue-admin", async (importOriginal) => {
     ...actual,
     inviteUser: (...a: unknown[]) => gotrue.inviteUser(...a),
     createUser: (...a: unknown[]) => gotrue.createUser(...a),
-    generateLink: (...a: unknown[]) => gotrue.generateLink(...a),
     deleteUser: (...a: unknown[]) => gotrue.deleteUser(...a),
     updateUser: (...a: unknown[]) => gotrue.updateUser(...a),
-    signOutUser: (...a: unknown[]) => gotrue.signOutUser(...a),
     listUsers: (...a: unknown[]) => gotrue.listUsers(...a),
     findUserByEmail: (...a: unknown[]) => gotrue.findUserByEmail(...a),
   };
@@ -206,6 +206,7 @@ beforeEach(() => {
     last_sign_in_at: null,
   };
   auditCalls.length = 0;
+  sqlQueries.length = 0;
   for (const fn of Object.values(gotrue)) fn.mockReset();
 });
 
@@ -466,21 +467,11 @@ describe("Supabase provider: disable / enable", () => {
     expect(auditCalls.some((a) => a.event === "rbac.user_disable")).toBe(true);
   });
 
-  it("disable also revokes the target's sessions (refresh-token kill)", async () => {
+  it("disable also revokes the target's sessions (DB-level refresh-token kill)", async () => {
     gotrue.updateUser.mockResolvedValue({ id: "u1" });
-    gotrue.signOutUser.mockResolvedValue(undefined);
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {}, supabaseEnv());
     expect(res.status).toBe(200);
-    expect(gotrue.signOutUser).toHaveBeenCalledWith(expect.anything(), "u1");
-  });
-
-  it("a failed session revocation does not fail the disable (best-effort)", async () => {
-    gotrue.updateUser.mockResolvedValue({ id: "u1" });
-    gotrue.signOutUser.mockRejectedValue(new GoTrueAdminError("network_error", "down", 502));
-    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {}, supabaseEnv());
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Record<string, unknown>;
-    expect(json.status).toBe("disabled");
+    expect(sqlQueries.some((q) => q.includes("revoke_auth_sessions"))).toBe(true);
   });
 
   it("enable unbans + sets status active", async () => {
@@ -496,7 +487,7 @@ describe("Supabase provider: disable / enable", () => {
     gotrue.updateUser.mockResolvedValue({ id: "u1" });
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/enable", {}, supabaseEnv());
     expect(res.status).toBe(200);
-    expect(gotrue.signOutUser).not.toHaveBeenCalled();
+    expect(sqlQueries.some((q) => q.includes("revoke_auth_sessions"))).toBe(false);
   });
 
   it("404 when the target app_user is absent", async () => {
@@ -536,28 +527,28 @@ describe("Supabase provider: DELETE", () => {
   });
 });
 
-describe("Supabase provider: resend-invite + revoke-sessions", () => {
-  it("resend-invite calls generateLink + audits", async () => {
-    gotrue.generateLink.mockResolvedValue({ action_link: "https://x", verification_type: "invite" });
-    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/resend-invite", {}, supabaseEnv());
-    expect(res.status).toBe(200);
-    expect(gotrue.generateLink).toHaveBeenCalledOnce();
-    expect(auditCalls.some((a) => a.event === "rbac.user_resend_invite")).toBe(true);
-  });
-
-  it("revoke-sessions calls signOutUser + audits", async () => {
-    gotrue.signOutUser.mockResolvedValue(undefined);
+describe("Supabase provider: revoke-sessions", () => {
+  it("kills auth sessions, stamps sessions_revoked_at, and audits", async () => {
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/revoke-sessions", {}, supabaseEnv());
     expect(res.status).toBe(200);
-    expect(gotrue.signOutUser).toHaveBeenCalledOnce();
+    // Refresh-path kill (auth.sessions/refresh_tokens via SECURITY DEFINER fn)...
+    expect(sqlQueries.some((q) => q.includes("revoke_auth_sessions"))).toBe(true);
+    // ...plus the stamp that cuts off still-valid access tokens via the
+    // loadRole gate.
+    expect(sqlQueries.some((q) => q.includes("set sessions_revoked_at = now()"))).toBe(true);
     expect(auditCalls.some((a) => a.event === "rbac.user_revoke_sessions")).toBe(true);
   });
 
-  it("revoke-sessions is admin-gated (403 for reviewer)", async () => {
+  it("is admin-gated (403 for reviewer)", async () => {
     state.actorRole = "reviewer";
     const res = await req(appWith("reviewer@b.com"), "POST", "/admin/users/u1/revoke-sessions", {}, supabaseEnv());
     expect(res.status).toBe(403);
-    expect(gotrue.signOutUser).not.toHaveBeenCalled();
+    expect(sqlQueries.some((q) => q.includes("revoke_auth_sessions"))).toBe(false);
+  });
+
+  it("the retired resend-invite route 404s", async () => {
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/resend-invite", {}, supabaseEnv());
+    expect(res.status).toBe(404);
   });
 });
 

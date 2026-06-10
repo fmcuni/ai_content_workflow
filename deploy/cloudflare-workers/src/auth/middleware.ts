@@ -16,6 +16,11 @@ export interface AuthVars {
    * src/auth/authz.ts `loadRole`. Absent until the first `requireRole`/`loadRole`.
    * `null` is a cached *denial* (authenticated but unprovisioned). */
   effectiveRole?: import("./authz").Role | null;
+  /** Issue time (epoch seconds) of the verified Supabase access token. Set only
+   * on the supabase Bearer path; `loadRole` denies tokens issued before the
+   * user's `app_user.sessions_revoked_at` (admin "revoke sessions"). Absent on
+   * the ticket path — tickets are short-lived and minted from a gated REST call. */
+  tokenIssuedAt?: number;
 }
 
 type AuthContext = Context<{ Bindings: Env; Variables: AuthVars }>;
@@ -52,6 +57,9 @@ async function validateSupabaseSession(c: AuthContext): Promise<Response | void>
   c.set("userId", identity.sub);
   if (identity.email !== null) {
     c.set("userEmail", identity.email);
+  }
+  if (typeof identity.issuedAt === "number") {
+    c.set("tokenIssuedAt", identity.issuedAt);
   }
 }
 

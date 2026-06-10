@@ -218,12 +218,21 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
 
   const useAppUser = c.env.AUTH_PROVIDER === "supabase";
 
-  type StoredRow = { role: string | null; status?: string | null };
+  type StoredRow = {
+    role: string | null;
+    status?: string | null;
+    /** `extract(epoch from sessions_revoked_at)` — float8 epoch seconds, or null
+     * when the user's sessions were never revoked. Coerced via Number() before
+     * use (postgres.js may surface it as a string under `fetch_types: false`). */
+    sessions_revoked_epoch?: number | string | null;
+  };
   const stored = await withDb(c.env, c.executionCtx, async (sql): Promise<StoredRow | null> => {
     if (typeof userId === "string" && userId.length > 0) {
       const rows = useAppUser
         ? await sql<StoredRow[]>`
-            SELECT role, status FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
+            SELECT role, status,
+                   extract(epoch FROM sessions_revoked_at) AS sessions_revoked_epoch
+            FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
           `
         : await sql<StoredRow[]>`
             SELECT role FROM content_tool."user" WHERE id = ${userId} LIMIT 1
@@ -235,7 +244,9 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
     if (typeof userEmail === "string" && userEmail.length > 0) {
       const rows = useAppUser
         ? await sql<StoredRow[]>`
-            SELECT role, status FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
+            SELECT role, status,
+                   extract(epoch FROM sessions_revoked_at) AS sessions_revoked_epoch
+            FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
           `
         : await sql<StoredRow[]>`
             SELECT role FROM content_tool."user" WHERE email = ${userEmail} LIMIT 1
@@ -255,9 +266,29 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
   // break-glass (admin-eligible email in BOOTSTRAP_ADMIN_EMAILS) still wins
   // inside `effectiveRole`, so lockout recovery survives a mass-disable.
   const isDisabled = useAppUser && stored !== null && stored.status === "disabled";
-  const resolved = isDisabled
-    ? effectiveRole(null, userEmail, c.env, null)
-    : effectiveRole(stored?.role ?? null, userEmail, c.env, useAppUser ? null : "viewer");
+
+  // Admin "revoke sessions" gate: GoTrue's admin sign-out only kills REFRESH
+  // tokens — the live access token stays cryptographically valid until expiry
+  // (~1h), so revocation must be enforced here. A token whose `iat` predates
+  // `sessions_revoked_at` is denied exactly like a disabled row; a fresh Google
+  // sign-in mints a token with a later `iat` and passes again. The ticket path
+  // carries no `iat` (tokenIssuedAt unset) and is exempt — tickets are
+  // short-lived and re-minting one requires a Bearer call that IS gated here.
+  const tokenIssuedAt = c.get("tokenIssuedAt");
+  const revokedEpoch =
+    useAppUser && stored?.sessions_revoked_epoch != null
+      ? Number(stored.sessions_revoked_epoch)
+      : null;
+  const isRevoked =
+    revokedEpoch !== null &&
+    Number.isFinite(revokedEpoch) &&
+    typeof tokenIssuedAt === "number" &&
+    tokenIssuedAt < revokedEpoch;
+
+  const resolved =
+    isDisabled || isRevoked
+      ? effectiveRole(null, userEmail, c.env, null)
+      : effectiveRole(stored?.role ?? null, userEmail, c.env, useAppUser ? null : "viewer");
   c.set(ROLE_CACHE_KEY, resolved);
   return resolved;
 }

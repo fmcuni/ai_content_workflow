@@ -384,8 +384,6 @@ export const adminUsersApi = {
   enable: (id: string) =>
     http<AdminUserDetail>(`${ADMIN_USERS_BASE}/${id}/enable`, { method: "POST" }),
   remove: (id: string) => http<void>(`${ADMIN_USERS_BASE}/${id}`, { method: "DELETE" }),
-  resendInvite: (id: string) =>
-    http<{ ok: boolean }>(`${ADMIN_USERS_BASE}/${id}/resend-invite`, { method: "POST" }),
   revokeSessions: (id: string) =>
     http<{ ok: boolean }>(`${ADMIN_USERS_BASE}/${id}/revoke-sessions`, { method: "POST" }),
 };
