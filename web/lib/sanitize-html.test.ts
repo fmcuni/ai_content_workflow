@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sanitizeArticleHtml } from "@/lib/sanitize-html";
 import { buildInlineDiffHtml, computeTrackedChanges } from "@/lib/tracked-changes";
@@ -97,5 +97,28 @@ describe("tracked-changes XSS sanitization (boundary)", () => {
     expect(html).toContain('class="e-faq__list"');
     expect(html).toContain('class="e-faq__head"');
     expect(html).toContain('class="e-faq__body"');
+  });
+});
+
+describe("sanitizeArticleHtml — SSR fallback (no DOM / Workers runtime)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("strips script/on*/javascript: without a DOM and preserves legit markup", () => {
+    vi.stubGlobal("window", undefined);
+    const out = sanitizeArticleHtml(
+      '<p class="a" data-comment-id="c1">hi</p>' +
+        "<script>alert(1)</script>" +
+        "<img src=x onerror=alert(1)>" +
+        '<a href="javascript:alert(1)">x</a>',
+    );
+    expect(out).not.toContain("<script");
+    expect(out.toLowerCase()).not.toContain("onerror");
+    expect(out).not.toMatch(/\son[a-z]+\s*=/i);
+    expect(out.toLowerCase()).not.toContain("javascript:");
+    // legit markup (class + comment-anchor data-*) preserved verbatim
+    expect(out).toContain('class="a"');
+    expect(out).toContain('data-comment-id="c1"');
   });
 });
