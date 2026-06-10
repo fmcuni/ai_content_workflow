@@ -173,7 +173,19 @@ function createInstances(runId: string, user: { name: string; email: string }): 
 
 export function useCollabDoc(runId: string | null, opts: UseCollabDocOptions): CollabDocHandle {
   const { enabled, user, readOnly = false } = opts;
-  const active = enabled && runId !== null;
+  // Identity gate: defer creating the doc until we know WHO the user is. The
+  // PermanentUserData blame mapping that drives DELETE attribution is written
+  // exactly once, in createInstances → setUserMapping, and Yjs has no clean
+  // re-mapping (a second setUserMapping registers a duplicate afterTransaction
+  // handler and double-attributes). useSession() resolves async, so at first
+  // render the email is "" and the caller's display name falls back to "Editor";
+  // baking that placeholder into the PUD would label every deletion "Removed by
+  // Editor" forever. Inserts dodge this because they resolve through live
+  // awareness (which updates once identity arrives) — only deletes read the
+  // static PUD mapping. Waiting for the email means the mapping is written with
+  // the real identity from the start, so adds and deletes attribute alike.
+  const identityReady = user.email !== "";
+  const active = enabled && runId !== null && identityReady;
 
   const [status, setStatus] = useState<CollabStatus>(active ? "connecting" : "disabled");
   const [color, setColor] = useState<string | null>(null);
