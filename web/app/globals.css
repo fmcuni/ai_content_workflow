@@ -243,6 +243,50 @@
     border-bottom: 0;
     cursor: inherit;
   }
+
+  /* Bowtie FAQ accordion (div.editor__faq) in the review/diff surface. The live
+     theme's accordion CSS/JS is absent here, so render the widget as a plain,
+     legible Q/A list. The decorative toggle icon is theme-only — hide it. */
+  .editorial-prose .editor__faq {
+    margin: 1.25em 0;
+  }
+  .editorial-prose .e-faq__list {
+    margin: 0.5rem 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-rule);
+    border-radius: 0.375rem;
+  }
+  .editorial-prose .e-faq__head {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .editorial-prose .e-faq__icon {
+    display: none;
+  }
+  .editorial-prose .e-faq__body {
+    margin-top: 0.35rem;
+  }
+  .editorial-prose .e-faq__body > p {
+    margin: 0;
+  }
+
+  /* A whole FAQ item added/removed as one hunk is wrapped by <ins>/<del>. Strike-
+     through across a multi-line block reads badly, so tint the contained card
+     instead and drop the line-through. The per-token text colours still come
+     from the inline diff styling in InlineTrackedChanges. */
+  .editorial-prose.tracked-diff del[data-tc] > .e-faq__list,
+  .editorial-prose.tracked-diff ins[data-tc] > .e-faq__list {
+    display: block;
+    text-decoration: none;
+  }
+  .editorial-prose.tracked-diff del[data-tc] > .e-faq__list {
+    border-color: var(--color-rose-300, #fda4af);
+    background: var(--color-rose-50, #fff1f2);
+  }
+  .editorial-prose.tracked-diff ins[data-tc] > .e-faq__list {
+    border-color: var(--color-emerald-300, #6ee7b7);
+    background: var(--color-emerald-50, #ecfdf5);
+  }
 }
 
 /* Realtime-collaboration peer carets (@tiptap/extension-collaboration-caret).

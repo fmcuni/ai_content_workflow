@@ -1,5 +1,7 @@
 import { diffArrays } from "diff";
 
+import { matchDivClose, pushFaqRegionTokens, refineFaqItemEdits } from "@/lib/faq-diff";
+
 /**
  * In-house tracked-changes engine for HUMAN edits (no paid Pro extension).
  *
@@ -109,16 +111,16 @@ function tokenizeText(text: string): string[] {
 }
 
 /**
- * Tokenize an HTML string into an atomic-tag / word / single-CJK-char stream.
- * `tokenizeHtml(s).join("")` reproduces `s` EXCEPT for insignificant formatting
- * whitespace between tags (a whitespace run containing a newline/tab, flanked by
- * tags), which is intentionally dropped so server-render indentation does not
- * read as a pending change against TipTap's normalized output. Significant inline
- * whitespace (a plain space between inline tags) is preserved.
+ * Tokenize plain (non-FAQ) HTML into an atomic-tag / word / single-CJK-char
+ * stream, appending to `tokens`. `tokens.join("")` reproduces the input EXCEPT
+ * for insignificant formatting whitespace between tags (a whitespace run
+ * containing a newline/tab, flanked by tags), which is intentionally dropped so
+ * server-render indentation does not read as a pending change against TipTap's
+ * normalized output. Significant inline whitespace (a plain space between inline
+ * tags) is preserved.
  */
-function tokenizeHtml(html: string): string[] {
+function tokenizePlain(html: string, tokens: string[]): void {
   const segments = html.split(/(<[^>]*>)/);
-  const tokens: string[] = [];
   segments.forEach((segment, i) => {
     if (!segment) return;
     if (isTag(segment)) {
@@ -132,16 +134,62 @@ function tokenizeHtml(html: string): string[] {
     }
     tokens.push(...tokenizeText(segment));
   });
+}
+
+const FAQ_REGION_OPEN_RE = /<div\b[^>]*>/gi;
+
+/**
+ * Tokenize an HTML string, treating each Bowtie FAQ widget (`div.editor__faq`)
+ * region specially: its wrapper tags stay atomic tag tokens (so the collab-blame
+ * atom-depth walk stays balanced) and each `e-faq__list` item becomes ONE
+ * chrome-free atom token. Everything else is tokenized plainly. See
+ * `lib/faq-diff.ts` for why item-level atoms are required (a flat token diff
+ * garbles item removals and surfaces positional chrome as spurious changes).
+ */
+function tokenizeHtml(html: string): string[] {
+  const tokens: string[] = [];
+  let last = 0;
+  FAQ_REGION_OPEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = FAQ_REGION_OPEN_RE.exec(html)) !== null) {
+    if (!/\beditor__faq\b/.test(m[0])) continue;
+    tokenizePlain(html.slice(last, m.index), tokens);
+    const end = matchDivClose(html, m.index);
+    pushFaqRegionTokens(html.slice(m.index, end), tokens);
+    last = end;
+    FAQ_REGION_OPEN_RE.lastIndex = end;
+  }
+  tokenizePlain(html.slice(last), tokens);
   return tokens;
+}
+
+/** Plain-tokenize a single FAQ item's HTML for the inline refinement sub-diff —
+ *  the SAME tokenizer as prose, so an edited Q/A diffs at word/CJK granularity. */
+function tokenizeItemForSubDiff(html: string): string[] {
+  const tokens: string[] = [];
+  tokenizePlain(html, tokens);
+  return tokens;
+}
+
+/** Inline sub-diff of one FAQ item's committed vs working HTML (reused by
+ *  `refineFaqItemEdits` to expand an edited item into word-level changes). */
+function faqItemSubDiff(committedItem: string, workingItem: string): DiffPart[] {
+  return diffArrays(tokenizeItemForSubDiff(committedItem), tokenizeItemForSubDiff(workingItem), {
+    comparator: (a, b) => a === b || (isWhitespace(a) && isWhitespace(b)),
+  }) as DiffPart[];
 }
 
 /** Diff the committed baseline against the working body into indexed hunks.
  * Tags are atomic and whitespace-only tokens compare equal to each other so a
  * reflow (`\n` ⇄ spaces) is never a change. */
 export function computeTrackedChanges(committed: string, working: string): TrackedChanges {
-  const parts = diffArrays(tokenizeHtml(committed), tokenizeHtml(working), {
+  const raw = diffArrays(tokenizeHtml(committed), tokenizeHtml(working), {
     comparator: (a, b) => a === b || (isWhitespace(a) && isWhitespace(b)),
   }) as DiffPart[];
+  // An EDITED FAQ item surfaces as a removed-item-atom run beside an added one;
+  // re-expand those into inline word-level changes (whole-item add/remove of an
+  // item stays a single clean hunk). Pure transform over the diff parts.
+  const parts = refineFaqItemEdits(raw, faqItemSubDiff);
   const hunks: Hunk[] = [];
   parts.forEach((p, index) => {
     // Annotation-anchor-only additions (highlighting text for AI edit / Review)
