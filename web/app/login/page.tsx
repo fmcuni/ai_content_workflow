@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSessionEmail, signIn, signInWithGoogle, signOut } from "@/lib/auth-client";
+import { safeRedirect } from "@/lib/safe-redirect";
 import { isSupabaseAuth } from "@/lib/supabase-client";
 
 // ---- Supabase Google OAuth ------------------------------------------------
@@ -15,7 +16,7 @@ import { isSupabaseAuth } from "@/lib/supabase-client";
 function GoogleSignInForm() {
   const params = useSearchParams();
   const reason = params.get("reason");
-  const redirectTo = params.get("redirect") || "/";
+  const redirectTo = safeRedirect(params.get("redirect"));
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +147,7 @@ function GoogleSignInForm() {
 function PasswordForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirectTo = params.get("redirect") || "/";
+  const redirectTo = safeRedirect(params.get("redirect"));
   const justVerified = params.get("verified") === "1";
 
   const [email, setEmail] = useState("");

@@ -2,6 +2,8 @@ import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { applySecurityHeaders } from "./lib/security-headers";
+
 // NOTE: Next 16 renamed Middleware → Proxy, BUT `proxy.ts` runs on the Node.js
 // runtime only (not configurable), which the OpenNext Cloudflare adapter does
 // not support. The upgrade guide says to KEEP using the `middleware` convention
@@ -41,22 +43,32 @@ function hasSessionCookie(request: NextRequest): boolean {
   return Boolean(getSessionCookie(request));
 }
 
+// Stamp the shared security headers (CSP + hardening) onto every response the
+// middleware returns. next.config `headers()` is the primary mechanism (covers
+// pages + assets); this ensures the login-redirect responses — emitted here
+// before any route is reached — carry the same headers. Single source of truth:
+// lib/security-headers.ts.
+function withSecurityHeaders(response: NextResponse): NextResponse {
+  applySecurityHeaders(response.headers);
+  return response;
+}
+
 export function middleware(request: NextRequest): NextResponse {
   // Local dev points the web app at the Python backend (no auth routes).
-  if (process.env.AUTH_DISABLED === "true") return NextResponse.next();
+  if (process.env.AUTH_DISABLED === "true") return withSecurityHeaders(NextResponse.next());
 
   const { pathname } = request.nextUrl;
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   if (!hasSessionCookie(request)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(url);
+    return withSecurityHeaders(NextResponse.redirect(url));
   }
-  return NextResponse.next();
+  return withSecurityHeaders(NextResponse.next());
 }
 
 export const config = {
