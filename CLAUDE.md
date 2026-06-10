@@ -120,6 +120,29 @@ touching prod.**
 - Full runbook + dev↔prod workflow: `docs/dev-environment-runbook.md`. Dev creds
   live in gitignored `.env.dev.local`.
 
+### Claude debug login (dev-only) — self-verify UI changes
+
+`scripts/claude-debug/` gives Claude Code an authenticated headless browser on
+the **dev** stack — use it to verify UI changes yourself (screenshots via the
+`Read` tool) instead of asking the user to eyeball:
+
+```bash
+node scripts/claude-debug/provision.mjs   # once / after cred rotation (idempotent)
+node scripts/claude-debug/login.mjs       # mint session → .out/state.json (~30d)
+node scripts/claude-debug/browse.mjs '[{"goto":"/runs"},{"shotView":"runs.png"}]'
+```
+
+- Service user `content-tool-claude-debug@bowtie.com.hk` (GoTrue + `app_user`
+  role=admin on the dev Supabase project); creds auto-managed in gitignored
+  `.env.dev.local` (`CLAUDE_DEBUG_EMAIL`/`CLAUDE_DEBUG_PASSWORD`).
+- **DEV-ONLY by decision** — do NOT provision a prod variant. Guardrails are
+  client-side: navigation pinned to `*-dev.fmc.workers.dev`; all non-GET
+  requests to `resume|publish|republish` paths or non-dev hosts are aborted at
+  the network layer (HITL_2 approve/publish can never fire; WordPress is shared
+  with prod). Do not weaken these guards.
+- Full-page shots of long articles are unreadable — prefer `shotView` (2×
+  density) or `shotEl`. See `scripts/claude-debug/README.md` for all step ops.
+
 ## Architecture
 
 - Request enters via FastAPI route in `content_tool/api/routes/`.
