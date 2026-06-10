@@ -107,9 +107,14 @@ export function useSnapshotAutosave({
       // React html state (which can lag a remote edit or read blank mid-teardown).
       // Flatten once — each call mounts a throwaway headless editor.
       const collabBody = collabActive && flattenBody ? flattenBody() : null;
+      // Under collab take the WORKING body from the flattened Yjs doc, but keep
+      // `committed_html_body` (the tracked-changes baseline) from the React
+      // snapshot. The baseline is NOT mirrored into Yjs, so overwriting it with
+      // the working body would collapse every pending tracked change on save —
+      // they'd vanish on the next reload (committed == working → 0 hunks).
       const snapToSave =
         collabBody !== null
-          ? { ...snap, html_body: collabBody, committed_html_body: collabBody }
+          ? { ...snap, html_body: collabBody }
           : snap;
       // Never persist a blank body — TipTap reports empty mid-teardown, and a
       // blank save would overwrite good work and reload to an empty editor.
@@ -160,9 +165,12 @@ export function useSnapshotAutosave({
       if (submittedRef.current || lastSavedKeyRef.current == null) return;
       const snap = snapshotRef.current;
       const collabBody = collabActive && flattenBody ? flattenBody() : null;
+      // Keep the React `committed_html_body` baseline (see saveSnapshot) — only
+      // the working body comes from the flattened Yjs doc, else leaving the page
+      // would persist committed == working and drop all pending tracked changes.
       const snapToSave =
         collabBody !== null
-          ? { ...snap, html_body: collabBody, committed_html_body: collabBody }
+          ? { ...snap, html_body: collabBody }
           : snap;
       if (isBlankBody(snapToSave.html_body)) return;
       if (snapshotKey(snapToSave) === lastSavedKeyRef.current) return;

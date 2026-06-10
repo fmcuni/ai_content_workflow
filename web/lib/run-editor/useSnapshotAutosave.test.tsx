@@ -104,10 +104,17 @@ describe("useSnapshotAutosave — collab gating", () => {
     expect(mockSave).not.toHaveBeenCalled();
   });
 
-  it("persists the FLATTENED body when collabActive and flattenBody is provided", async () => {
-    // The live React `snapshotIn` is stale; the flatten source is the truth.
+  it("persists the FLATTENED working body but PRESERVES the committed baseline under collab", async () => {
+    // The live React `snapshotIn.html_body` is stale; the flatten source is the
+    // truth for the WORKING body. But `committed_html_body` (the tracked-changes
+    // baseline) is NOT in Yjs, so it must survive from the React snapshot —
+    // overwriting it with the flattened working body collapses every pending
+    // tracked change, so they vanish on the next reload (the bug this guards).
     const baseline = makeSnapshotIn("<p>seed</p>");
-    const stale = makeSnapshotIn("<p>stale react state</p>");
+    const stale: Hitl2SnapshotIn = {
+      ...makeSnapshotIn("<p>stale react state</p>"),
+      committed_html_body: "<p>committed baseline</p>",
+    };
     const { result } = renderAutosave({
       collabActive: true,
       flattenBody: () => "<p>flattened from doc</p>",
@@ -124,7 +131,7 @@ describe("useSnapshotAutosave — collab gating", () => {
     const [, body] = mockSave.mock.calls[0]!;
     expect(body).toMatchObject({
       html_body: "<p>flattened from doc</p>",
-      committed_html_body: "<p>flattened from doc</p>",
+      committed_html_body: "<p>committed baseline</p>",
       trigger: "manual",
     });
   });
