@@ -8,6 +8,9 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
+    # Evals run only from the canonical fmcuni fork — the bowtie-ins mirror has
+    # no POSTGRES_URL / GEMINI_API_KEY secrets, so its runs would always fail.
+    if: ${{ github.repository_owner == 'fmcuni' }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3

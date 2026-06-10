@@ -41,6 +41,9 @@ jobs:
   deploy-backend:
     name: Deploy backend Worker
     runs-on: ubuntu-latest
+    # Deploys run only from the canonical fmcuni fork — the bowtie-ins mirror
+    # has no CLOUDFLARE_* secrets, so its deploy runs would always fail red.
+    if: ${{ github.repository_owner == 'fmcuni' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     # Deploy the frontend after the backend so the API it points at is live.
     needs: deploy-backend
+    if: ${{ github.repository_owner == 'fmcuni' }}
     steps:
       - uses: actions/checkout@v4
 
