@@ -30,6 +30,22 @@ describe("computeTrackedChanges", () => {
     expect(hunks.some((h) => h.type === "remove")).toBe(true);
     expect(hunks.some((h) => h.type === "add")).toBe(true);
   });
+
+  it("a Latin/digit insertion before CJK text is a pure insertion (no phantom delete)", () => {
+    // Regression: the word-run token used to swallow the following CJK chars
+    // ("1234在討論區發問" as ONE token), so inserting "1234" surfaced as
+    // delete "在討論區發問" + insert "1234在討論區發問".
+    const { hunks } = computeTrackedChanges(
+      "<p>近年不少網民在討論區發問：</p>",
+      "<p>近年不少網民1234在討論區發問：</p>",
+    );
+    expect(hunks).toEqual([expect.objectContaining({ type: "add", value: "1234" })]);
+  });
+
+  it("a CJK insertion after Latin/digit text is a pure insertion (no phantom delete)", () => {
+    const { hunks } = computeTrackedChanges("<p>plan 2024</p>", "<p>plan 2024年</p>");
+    expect(hunks).toEqual([expect.objectContaining({ type: "add", value: "年" })]);
+  });
 });
 
 describe("commitHunk / dismissHunk", () => {

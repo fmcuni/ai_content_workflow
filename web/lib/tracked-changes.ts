@@ -102,9 +102,16 @@ const isAnchorNoise = (p: DiffPart): boolean =>
  * runs stay whole words, whitespace runs stay whole, and every other codepoint is
  * a single token. The `u` flag keeps astral codepoints (emoji) intact. The
  * concatenation of the tokens is exactly the input (lossless).
+ *
+ * The word-run alternative must EXCLUDE the CJK class (the `(?!…)` lookahead,
+ * same ranges as the first alternative): `\p{L}` covers CJK too, and the first
+ * alternative only wins when a match STARTS on a CJK char — a run starting with
+ * Latin/digits (e.g. `1234在討論區發問`) would otherwise swallow the following
+ * CJK text into ONE token, turning a pure insertion beside CJK text into a
+ * spurious delete + re-insert of the neighbouring text.
  */
 const TEXT_TOKEN_RE =
-  /[㐀-鿿豈-﫿぀-ヿ가-힯ｦ-ﾟ]|[\p{L}\p{M}\p{N}_]+|\s+|[^\p{L}\p{M}\p{N}_\s]/gu;
+  /[㐀-鿿豈-﫿぀-ヿ가-힯ｦ-ﾟ]|(?:(?![㐀-鿿豈-﫿぀-ヿ가-힯ｦ-ﾟ])[\p{L}\p{M}\p{N}_])+|\s+|[^\p{L}\p{M}\p{N}_\s]/gu;
 
 function tokenizeText(text: string): string[] {
   return text.match(TEXT_TOKEN_RE) ?? [];
