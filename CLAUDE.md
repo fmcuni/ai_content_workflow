@@ -98,6 +98,28 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 - Parity gate: `node deploy/cloudflare-workers/parity/check-parity.mjs` diffs the TS
   backend against the Python reference over read-only routes.
 
+### Dev environment (Workers) — develop here first
+
+A parallel, isolated dev stack mirrors prod via wrangler named environments
+(`env.dev` in both `wrangler.jsonc`). **Prefer building + verifying in dev before
+touching prod.**
+
+| Service | Dev Worker | Dev URL |
+|---|---|---|
+| Backend | `bowtie-content-tool-poc-dev` | `https://bowtie-content-tool-poc-dev.fmc.workers.dev` |
+| Frontend | `bowtie-content-tool-web-dev` | `https://bowtie-content-tool-web-dev.fmc.workers.dev` |
+
+- **Deploy dev (manual):** `npm run deploy:dev` (backend) / `npm run cf:deploy:dev`
+  (web, with `NEXT_PUBLIC_*` for dev). CI deploys **prod only**.
+- **Isolated** dev Supabase DB (`ovxvhxwmqeccjudhyfbh`) + Hyperdrive + Workflows
+  (`-dev`) + DO namespaces; refresh-scan cron disabled. **WordPress is shared with
+  prod** — a dev publish hits the live CMS.
+- **Keep in sync:** apply every new migration to both (dev
+  `supabase db push --db-url "$DEV_POSTGRES_URL"`, prod `supabase db push`) and
+  deploy the same commit to both. Runtime data (voices/prompts) is NOT auto-synced.
+- Full runbook + dev↔prod workflow: `docs/dev-environment-runbook.md`. Dev creds
+  live in gitignored `.env.dev.local`.
+
 ## Architecture
 
 - Request enters via FastAPI route in `content_tool/api/routes/`.

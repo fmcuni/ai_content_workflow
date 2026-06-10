@@ -62,6 +62,41 @@ is set to `franco.ma@bowtie.com.hk`, so signing in with that Google account gran
 
 ---
 
+## Dev ↔ prod workflow & interaction
+
+**Preferred flow: develop in dev first, then promote to prod, then sync.**
+
+1. **Build + test in dev.** Deploy changes to the dev Workers
+   (`npm run deploy:dev` / `npm run cf:deploy:dev`) and verify against the dev
+   URLs before touching prod. Prod publishes to live WordPress and serves real
+   editorial ops — keep iterative/risky work off the prod path.
+2. **Promote to prod.** Once verified in dev, deploy prod the normal way:
+   `cd deploy/cloudflare-workers && npm run deploy` + the prod `cf:deploy`, or
+   merge to `main` and let `.github/workflows/deploy-workers.yml` deploy both
+   prod Workers. (CI deploys **prod only** — dev is always manual.)
+3. **Sync both — don't let them drift.**
+
+| Concern | Dev | Prod | Keep in sync by |
+|---|---|---|---|
+| **Code** | manual `deploy:dev` / `cf:deploy:dev` | CI on push to `main` (or manual) | deploy the same commit to both |
+| **DB schema** | `supabase db push --db-url "$DEV_POSTGRES_URL"` | `supabase db push` (repo is linked to prod) | apply every new migration to **both** |
+| **Secrets / vars** | `--env dev` set (see Step 3) | top-level secrets / `vars` | mirror new keys into both |
+| **WordPress** | shared with prod | — | (already the same target ⚠️) |
+| **Runtime data** (voices, prompts, source policy edited in `/prompts`) | dev DB only | prod DB only | **NOT auto-synced** — re-apply manually if a dev-authored voice/prompt should exist in prod (or vice-versa) |
+
+**Interaction caveats:**
+- Dev and prod are **separate Supabase DBs** — a run, snapshot, or collab doc in
+  dev never appears in prod. Only the schema is kept identical (via the shared
+  `supabase/migrations/`); **data is independent**.
+- **WordPress is shared**, so a publish from *either* env mutates the same live
+  CMS. This is the one place dev and prod genuinely interact at the data level.
+- **Deploy ordering for migrations:** apply the DB migration to an environment
+  **before** deploying code that reads the new schema, in both dev and prod.
+- Dev's refresh-scan cron is disabled, so dev never auto-kicks scans; trigger one
+  manually if needed (`wrangler workflows trigger refresh-scan-dev --env dev`).
+
+---
+
 ## Step 0 — Provision the dev Supabase DB
 
 > ⚠️ **Free-tier limit:** Supabase allows **2 active projects per org** and the
