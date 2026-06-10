@@ -2,6 +2,7 @@ import type { Context, Next } from "hono";
 
 import type { Env } from "../index";
 import { getAuth } from "./auth";
+import { loadRole } from "./authz";
 import { verifySupabaseJwt } from "./jwt";
 import { verifyTicket } from "./ticket";
 
@@ -71,6 +72,26 @@ async function validateBetterAuthSession(c: AuthContext): Promise<Response | voi
 }
 
 /**
+ * Supabase-provider provisioning gate, applied AFTER session validation:
+ * resolve the effective role and deny when it is null (no `app_user` row, or
+ * `status='disabled'`). This is what makes admin delete/disable take effect on
+ * the target's NEXT request — the access token itself is stateless and stays
+ * cryptographically valid until expiry (~1h), so without this hop a deleted or
+ * disabled user would retain access to every non-role-gated route until their
+ * token expired or they logged out.
+ *
+ * Cost: one indexed `app_user` SELECT per request, cached on the request
+ * context — `requireRole`-gated routes reuse it instead of querying again. The
+ * legacy better-auth branch is intentionally NOT gated: its floor is `viewer`
+ * (never null), so the lookup would burn a DB hop with zero security effect.
+ */
+async function requireProvisioned(c: AuthContext): Promise<Response | void> {
+  if (c.env.AUTH_PROVIDER !== "supabase") return;
+  const role = await loadRole(c);
+  if (role === null) return c.json({ error: "unauthorized" }, 401);
+}
+
+/**
  * Backend auth gate. The backend Worker is publicly reachable on its
  * workers.dev URL, so it enforces sessions independently of the frontend.
  *
@@ -103,6 +124,10 @@ export async function requireAuth(c: AuthContext, next: Next): Promise<Response 
     const userId = ticket ? await verifyTicket(c.env, ticket) : null;
     if (!userId) return c.json({ error: "unauthorized" }, 401);
     c.set("userId", userId);
+    // Tickets are minted from an authenticated REST call, but the account can
+    // be deleted/disabled between mint and use — enforce provisioning here too.
+    const ticketDenied = await requireProvisioned(c);
+    if (ticketDenied !== undefined) return ticketDenied;
     return next();
   }
 
@@ -111,5 +136,7 @@ export async function requireAuth(c: AuthContext, next: Next): Promise<Response 
       ? await validateSupabaseSession(c)
       : await validateBetterAuthSession(c);
   if (denied !== undefined) return denied;
+  const unprovisioned = await requireProvisioned(c);
+  if (unprovisioned !== undefined) return unprovisioned;
   return next();
 }

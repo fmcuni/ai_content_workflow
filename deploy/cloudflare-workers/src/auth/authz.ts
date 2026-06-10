@@ -218,28 +218,29 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
 
   const useAppUser = c.env.AUTH_PROVIDER === "supabase";
 
-  const storedRole = await withDb(c.env, c.executionCtx, async (sql) => {
+  type StoredRow = { role: string | null; status?: string | null };
+  const stored = await withDb(c.env, c.executionCtx, async (sql): Promise<StoredRow | null> => {
     if (typeof userId === "string" && userId.length > 0) {
       const rows = useAppUser
-        ? await sql<{ role: string | null }[]>`
-            SELECT role FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
+        ? await sql<StoredRow[]>`
+            SELECT role, status FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
           `
-        : await sql<{ role: string | null }[]>`
+        : await sql<StoredRow[]>`
             SELECT role FROM content_tool."user" WHERE id = ${userId} LIMIT 1
           `;
       if (rows[0] !== undefined) {
-        return rows[0].role;
+        return rows[0];
       }
     }
     if (typeof userEmail === "string" && userEmail.length > 0) {
       const rows = useAppUser
-        ? await sql<{ role: string | null }[]>`
-            SELECT role FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
+        ? await sql<StoredRow[]>`
+            SELECT role, status FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
           `
-        : await sql<{ role: string | null }[]>`
+        : await sql<StoredRow[]>`
             SELECT role FROM content_tool."user" WHERE email = ${userEmail} LIMIT 1
           `;
-      return rows[0]?.role ?? null;
+      return rows[0] ?? null;
     }
     return null;
   });
@@ -247,7 +248,16 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
   // Supabase path: an authenticated user with no app_user row is DENIED (null),
   // not floored to "viewer" — Google OAuth auto-creates GoTrue users, so the
   // invite-only gate lives here. Legacy better-auth path keeps the viewer floor.
-  const resolved = effectiveRole(storedRole, userEmail, c.env, useAppUser ? null : "viewer");
+  //
+  // status='disabled' is likewise a DENIAL: the GoTrue ban only blocks new
+  // sign-ins/refreshes, so live access tokens must be cut off here, per request.
+  // A disabled row resolves exactly like a missing row — except the bootstrap
+  // break-glass (admin-eligible email in BOOTSTRAP_ADMIN_EMAILS) still wins
+  // inside `effectiveRole`, so lockout recovery survives a mass-disable.
+  const isDisabled = useAppUser && stored !== null && stored.status === "disabled";
+  const resolved = isDisabled
+    ? effectiveRole(null, userEmail, c.env, null)
+    : effectiveRole(stored?.role ?? null, userEmail, c.env, useAppUser ? null : "viewer");
   c.set(ROLE_CACHE_KEY, resolved);
   return resolved;
 }

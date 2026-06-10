@@ -42,12 +42,14 @@ import {
   ENABLE_BAN_DURATION,
   createUser,
   deleteUser,
+  findUserByEmail,
   generateLink,
   inviteUser,
   listUsers,
   signOutUser,
   updateUser,
 } from "../auth/gotrue-admin";
+import type { GoTrueUser } from "../auth/gotrue-admin";
 
 /** A row from the legacy better-auth `user` table. */
 interface UserRow {
@@ -124,6 +126,23 @@ function gotrueErrorResponse(e: GoTrueAdminError): { body: Record<string, string
       return { body: { error: "gotrue_error", message: e.message }, status };
     }
   }
+}
+
+/**
+ * GoTrue's "this email already has an identity" rejection (422 on current
+ * Supabase; the message is the stable signal across versions). The create
+ * route treats it as "adopt the existing identity", not an error.
+ */
+function isAlreadyRegistered(e: GoTrueAdminError): boolean {
+  return (
+    e.code === "gotrue_error" &&
+    (/already (been )?registered|email.{0,2}exists/i.test(e.message) || e.status === 422)
+  );
+}
+
+/** GoTrue marks confirmation on either field depending on version/flow. */
+function isConfirmed(u: GoTrueUser): boolean {
+  return Boolean(u.email_confirmed_at ?? u.confirmed_at);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,17 +246,41 @@ adminRouter.post("/users", async (c) => {
   }
 
   try {
-    // Invite sends the email AND creates the GoTrue user in one step.
-    const gotrueUser = await inviteUser(c.env, email);
+    // Invite sends the email AND creates the GoTrue user in one step. When the
+    // GoTrue identity already exists, ADOPT it instead of failing: Google OAuth
+    // auto-creates an identity for anyone who signs in, so a previously deleted
+    // (or never-provisioned) user who tried to log in would otherwise be
+    // impossible to (re-)add — GoTrue rejects the invite with
+    // "A user with this email address has already been registered".
+    let gotrueUser: GoTrueUser;
+    let adoptedExisting = false;
+    try {
+      gotrueUser = await inviteUser(c.env, email);
+    } catch (e: unknown) {
+      if (!(e instanceof GoTrueAdminError) || !isAlreadyRegistered(e)) throw e;
+      const existing = await findUserByEmail(c.env, email);
+      if (existing === null) throw e; // registered yet not findable — surface as-is
+      gotrueUser = existing;
+      adoptedExisting = true;
+    }
 
-    // Insert (or adopt) the app_user row with the chosen role. ON CONFLICT keeps
-    // the operation idempotent if the row already exists for this id/email.
+    // Insert (or adopt) the app_user row with the chosen role. The stale-email
+    // purge covers a row left behind under a DIFFERENT GoTrue id (delete +
+    // Google re-login mints a new id; email has a unique index, so the insert
+    // would otherwise conflict). ON CONFLICT keeps the id path idempotent and
+    // re-activates a previously disabled row — re-adding IS the operator's
+    // explicit intent to restore access.
     const inserted = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+      await sql`
+        DELETE FROM content_tool.app_user
+        WHERE lower(email) = lower(${gotrueUser.email ?? email}) AND id <> ${gotrueUser.id}
+      `;
       const rows = await sql<AppUserRow[]>`
         INSERT INTO content_tool.app_user (id, email, role, status)
         VALUES (${gotrueUser.id}, ${gotrueUser.email ?? email}, ${role}, 'active')
         ON CONFLICT (id) DO UPDATE
-          SET email = EXCLUDED.email, role = EXCLUDED.role, updated_at = now()
+          SET email = EXCLUDED.email, role = EXCLUDED.role, status = EXCLUDED.status,
+              updated_at = now()
         RETURNING id, email, display_name, role, status, last_sign_in_at
       `;
       return rows[0]!;
@@ -248,6 +291,7 @@ adminRouter.post("/users", async (c) => {
       target_id: inserted.id,
       target_email: inserted.email,
       new_role: role,
+      adopted_existing_identity: adoptedExisting,
     });
 
     const out: AdminUserResponse = {
@@ -256,7 +300,7 @@ adminRouter.post("/users", async (c) => {
       name: inserted.display_name,
       role: (inserted.role ?? role) as Role,
       status: inserted.status ?? "active",
-      confirmed: false,
+      confirmed: adoptedExisting ? isConfirmed(gotrueUser) : false,
     };
     return c.json(out, 201);
   } catch (e: unknown) {
@@ -422,6 +466,19 @@ function registerDisableEnable(action: "disable" | "enable"): void {
         return c.json(body, status);
       }
       throw e;
+    }
+
+    // Disabling also revokes refresh tokens (best-effort): the ban blocks NEW
+    // sign-ins, the middleware provisioning gate kills live access tokens on
+    // their next request, and this sign-out cuts the refresh path so the
+    // session can't silently mint a fresh access token in the meantime. A
+    // failure here is non-fatal — the other two layers already deny.
+    if (disabling) {
+      try {
+        await signOutUser(c.env, targetId);
+      } catch {
+        // non-fatal by design
+      }
     }
 
     const newStatus = disabling ? "disabled" : "active";

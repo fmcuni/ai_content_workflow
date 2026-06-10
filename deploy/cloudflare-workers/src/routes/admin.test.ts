@@ -37,11 +37,11 @@ function makeFakeSql(): unknown {
     // --- Supabase provider: content_tool.app_user ---
     if (text.includes("app_user")) {
       // loadRole (provider-aware, supabase path) reads the ACTING user's role via
-      // a bare `SELECT role FROM content_tool.app_user WHERE id/email = ...`. The
-      // admin routes always project multiple columns, so a role-only projection
-      // is unambiguously the auth gate — return the ACTOR's role, not the target.
-      if (text.startsWith("select role from")) {
-        return [{ role: state.actorRole }];
+      // `SELECT role, status FROM content_tool.app_user WHERE id/email = ...`. The
+      // admin routes always project more columns, so this narrow projection is
+      // unambiguously the auth gate — return the ACTOR's role, not the target.
+      if (text.startsWith("select role, status from") || text.startsWith("select role from")) {
+        return [{ role: state.actorRole, status: "active" }];
       }
       if (text.startsWith("insert")) {
         // POST /users create — bound order: id, email, role.
@@ -111,6 +111,7 @@ const gotrue = {
   updateUser: vi.fn(),
   signOutUser: vi.fn(),
   listUsers: vi.fn(),
+  findUserByEmail: vi.fn(),
 };
 vi.mock("../auth/gotrue-admin", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -123,6 +124,7 @@ vi.mock("../auth/gotrue-admin", async (importOriginal) => {
     updateUser: (...a: unknown[]) => gotrue.updateUser(...a),
     signOutUser: (...a: unknown[]) => gotrue.signOutUser(...a),
     listUsers: (...a: unknown[]) => gotrue.listUsers(...a),
+    findUserByEmail: (...a: unknown[]) => gotrue.findUserByEmail(...a),
   };
 });
 
@@ -138,6 +140,8 @@ vi.mock("../auth/audit", () => ({
 import { Hono } from "hono";
 import { adminRouter } from "./admin";
 import { requireRole } from "../auth/authz";
+// The vi.mock factory spreads `...actual`, so the real error class passes through.
+import { GoTrueAdminError } from "../auth/gotrue-admin";
 import type { AuthVars } from "../auth/middleware";
 
 type AuthApp = Hono<{ Bindings: Record<string, unknown>; Variables: AuthVars }>;
@@ -369,6 +373,59 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", { email: "x@b.com" });
     expect(res.status).toBe(501);
   });
+
+  it("adopts an existing GoTrue identity when the invite says already-registered", async () => {
+    // Google OAuth auto-creates identities, so a previously deleted user who
+    // signed in again must be re-addable: invite fails → adopt by email.
+    gotrue.inviteUser.mockRejectedValue(
+      new GoTrueAdminError(
+        "gotrue_error",
+        "A user with this email address has already been registered",
+        422,
+      ),
+    );
+    gotrue.findUserByEmail.mockResolvedValue({
+      id: "g-old",
+      email: "back@gmail.com",
+      email_confirmed_at: "2026-06-01T00:00:00Z",
+    });
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "POST", "/admin/users", {
+      email: "back@gmail.com",
+      role: "viewer",
+    }, supabaseEnv());
+    expect(res.status).toBe(201);
+    expect(gotrue.findUserByEmail).toHaveBeenCalledOnce();
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.id).toBe("g-old");
+    expect(json.confirmed).toBe(true); // existing identity, already confirmed
+    const audit = auditCalls.find((a) => a.event === "rbac.user_create");
+    expect(audit?.fields.adopted_existing_identity).toBe(true);
+  });
+
+  it("surfaces the GoTrue error when already-registered but the identity is unfindable", async () => {
+    gotrue.inviteUser.mockRejectedValue(
+      new GoTrueAdminError(
+        "gotrue_error",
+        "A user with this email address has already been registered",
+        422,
+      ),
+    );
+    gotrue.findUserByEmail.mockResolvedValue(null);
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", {
+      email: "ghost@b.com",
+    }, supabaseEnv());
+    expect(res.status).toBe(502);
+    expect(auditCalls.some((a) => a.event === "rbac.user_create")).toBe(false);
+  });
+
+  it("does NOT adopt on unrelated GoTrue errors (still surfaces them)", async () => {
+    gotrue.inviteUser.mockRejectedValue(new GoTrueAdminError("network_error", "down", 502));
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", {
+      email: "x@b.com",
+    }, supabaseEnv());
+    expect(res.status).toBe(502);
+    expect(gotrue.findUserByEmail).not.toHaveBeenCalled();
+  });
 });
 
 describe("Supabase provider: PUT role writes to app_user", () => {
@@ -409,6 +466,23 @@ describe("Supabase provider: disable / enable", () => {
     expect(auditCalls.some((a) => a.event === "rbac.user_disable")).toBe(true);
   });
 
+  it("disable also revokes the target's sessions (refresh-token kill)", async () => {
+    gotrue.updateUser.mockResolvedValue({ id: "u1" });
+    gotrue.signOutUser.mockResolvedValue(undefined);
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {}, supabaseEnv());
+    expect(res.status).toBe(200);
+    expect(gotrue.signOutUser).toHaveBeenCalledWith(expect.anything(), "u1");
+  });
+
+  it("a failed session revocation does not fail the disable (best-effort)", async () => {
+    gotrue.updateUser.mockResolvedValue({ id: "u1" });
+    gotrue.signOutUser.mockRejectedValue(new GoTrueAdminError("network_error", "down", 502));
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {}, supabaseEnv());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.status).toBe("disabled");
+  });
+
   it("enable unbans + sets status active", async () => {
     gotrue.updateUser.mockResolvedValue({ id: "u1" });
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/enable", {}, supabaseEnv());
@@ -416,6 +490,13 @@ describe("Supabase provider: disable / enable", () => {
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.status).toBe("active");
     expect(auditCalls.some((a) => a.event === "rbac.user_enable")).toBe(true);
+  });
+
+  it("enable does NOT revoke sessions", async () => {
+    gotrue.updateUser.mockResolvedValue({ id: "u1" });
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/enable", {}, supabaseEnv());
+    expect(res.status).toBe(200);
+    expect(gotrue.signOutUser).not.toHaveBeenCalled();
   });
 
   it("404 when the target app_user is absent", async () => {

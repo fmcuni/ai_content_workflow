@@ -23,6 +23,7 @@ const verifySupabaseJwt = vi.fn();
 const verifyTicket = vi.fn();
 const getSession = vi.fn();
 const sqlEnd = vi.fn(async () => undefined);
+const loadRole = vi.fn();
 
 vi.mock("./jwt", () => ({
   verifySupabaseJwt: (...args: unknown[]) => verifySupabaseJwt(...args),
@@ -35,6 +36,11 @@ vi.mock("./auth", () => ({
     auth: { api: { getSession: (...args: unknown[]) => getSession(...args) } },
     sql: { end: () => sqlEnd() },
   }),
+}));
+// The middleware's supabase-branch provisioning gate consults loadRole; mock it
+// so this stays a pure middleware unit test (no DB).
+vi.mock("./authz", () => ({
+  loadRole: (...args: unknown[]) => loadRole(...args),
 }));
 
 import { requireAuth } from "./middleware";
@@ -77,6 +83,10 @@ beforeEach(() => {
   verifyTicket.mockReset();
   getSession.mockReset();
   sqlEnd.mockClear();
+  // Default: the session user IS provisioned (app_user row, active). Tests for
+  // the deletion/disable gate override this with null.
+  loadRole.mockReset();
+  loadRole.mockResolvedValue("viewer");
 });
 
 // ---------------------------------------------------------------------------
@@ -232,5 +242,52 @@ describe("requireAuth — better-auth branch (default)", () => {
     expect(res.status).toBe(200);
     expect(getSession).toHaveBeenCalled();
     expect(verifySupabaseJwt).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Supabase provisioning gate: a cryptographically valid session whose app_user
+// row is gone (deleted) or disabled is denied AT THE AUTH GATE, on every
+// route — this is what makes admin delete/disable take effect on the target's
+// next request instead of "whenever their access token happens to expire".
+// ---------------------------------------------------------------------------
+describe("requireAuth — supabase provisioning gate (deleted/disabled users)", () => {
+  const env: Partial<Env> = { AUTH_PROVIDER: "supabase" };
+  const bearer = { method: "GET" as const, headers: { authorization: "Bearer tok" } };
+
+  it("401s a valid Bearer session whose role resolves to null (deleted/disabled)", async () => {
+    verifySupabaseJwt.mockResolvedValue({ sub: "deleted-1", email: "gone@gmail.com" });
+    loadRole.mockResolvedValue(null);
+    const res = await call(makeApp(), "/runs", bearer, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("admits a valid Bearer session with a provisioned role", async () => {
+    verifySupabaseJwt.mockResolvedValue({ sub: "u-1", email: "a@bowtie.com.hk" });
+    loadRole.mockResolvedValue("viewer");
+    const res = await call(makeApp(), "/runs", bearer, env);
+    expect(res.status).toBe(200);
+    expect(loadRole).toHaveBeenCalledOnce();
+  });
+
+  it("401s a valid SSE ticket whose user was deleted/disabled after mint", async () => {
+    verifyTicket.mockResolvedValue("deleted-1");
+    loadRole.mockResolvedValue(null);
+    const res = await call(makeApp(), "/runs/abc/events?ticket=t0", { method: "GET" }, env);
+    expect(res.status).toBe(401);
+  });
+
+  it("does NOT consult loadRole on the better-auth branch (no extra DB hop)", async () => {
+    getSession.mockResolvedValue({ user: { id: "ba-1", email: "b@bowtie.com.hk" } });
+    const res = await call(makeApp(), "/runs", { method: "GET" }, {});
+    expect(res.status).toBe(200);
+    expect(loadRole).not.toHaveBeenCalled();
+  });
+
+  it("does NOT consult loadRole when AUTH_DISABLED bypasses the gate", async () => {
+    const res = await call(makeApp(), "/runs", { method: "GET" }, { AUTH_DISABLED: "true" });
+    expect(res.status).toBe(200);
+    expect(loadRole).not.toHaveBeenCalled();
   });
 });

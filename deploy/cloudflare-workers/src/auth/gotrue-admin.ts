@@ -307,3 +307,31 @@ export async function listUsers(
   }
   return [];
 }
+
+/** Hard page cap for `findUserByEmail` (20 × 1000 users) — runaway-loop guard. */
+const FIND_USER_MAX_PAGES = 20;
+
+/**
+ * Find a GoTrue user by email (case-insensitive). GoTrue's admin list has no
+ * reliable server-side email filter across versions, so this pages through
+ * `/admin/users` and matches client-side. Returns null when not found.
+ *
+ * Needed because Google OAuth auto-creates a GoTrue identity for anyone who
+ * signs in — so "create" flows must be able to ADOPT an existing identity
+ * (e.g. a previously deleted user who signed in again) instead of failing on
+ * GoTrue's "already registered" rejection.
+ */
+export async function findUserByEmail(
+  env: GoTrueAdminEnv,
+  email: string,
+): Promise<GoTrueUser | null> {
+  const validEmail = requireEmail(email).toLowerCase();
+  const perPage = 1000;
+  for (let page = 1; page <= FIND_USER_MAX_PAGES; page++) {
+    const users = await listUsers(env, { page, perPage });
+    const hit = users.find((u) => (u.email ?? "").toLowerCase() === validEmail);
+    if (hit !== undefined) return hit;
+    if (users.length < perPage) break; // short page = last page
+  }
+  return null;
+}

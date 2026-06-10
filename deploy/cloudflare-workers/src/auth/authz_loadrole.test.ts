@@ -19,8 +19,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../index";
 
 // ---- Fake DB --------------------------------------------------------------
-const state: { role: string | null; matchById: boolean; queries: string[] } = {
+const state: {
+  role: string | null;
+  status: string | null;
+  matchById: boolean;
+  queries: string[];
+} = {
   role: "author",
+  status: "active",
   matchById: true,
   queries: [],
 };
@@ -36,7 +42,9 @@ function fakeSql(strings: TemplateStringsArray, ...values: unknown[]): unknown {
   // Return the scripted role only for the lookup we want to "hit"; the other
   // lookup returns no row so the fallback path is exercised when needed.
   if ((byId && state.matchById) || (!byId && !state.matchById)) {
-    return Promise.resolve([{ role: state.role }]);
+    // The app_user query projects role+status; the legacy query role only. The
+    // extra key is harmless for the legacy assertions.
+    return Promise.resolve([{ role: state.role, status: state.status }]);
   }
   return Promise.resolve([]);
 }
@@ -75,6 +83,7 @@ async function resolve(opts: {
 
 beforeEach(() => {
   state.role = "author";
+  state.status = "active";
   state.matchById = true;
   state.queries = [];
 });
@@ -127,6 +136,28 @@ describe("loadRole — app_user path (supabase)", () => {
     state.role = null;
     const role = await resolve({
       userId: "uuid-new",
+      userEmail: "boss@bowtie.com.hk",
+      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+    });
+    expect(role).toBe("admin");
+  });
+
+  it("DENIES (null) a disabled app_user regardless of stored role", async () => {
+    // The GoTrue ban only blocks NEW sign-ins; the live access token stays
+    // valid until expiry, so the per-request denial must happen here.
+    state.role = "admin";
+    state.status = "disabled";
+    const role = await resolve({ userId: "uuid-1", userEmail: "a@bowtie.com.hk", env });
+    expect(role).toBeNull();
+  });
+
+  it("the admin-eligible bootstrap break-glass survives a disabled row", async () => {
+    // Lockout recovery: BOOTSTRAP_ADMIN_EMAILS must keep working even if every
+    // admin row was mass-disabled. Eligible-domain emails only.
+    state.role = "admin";
+    state.status = "disabled";
+    const role = await resolve({
+      userId: "uuid-1",
       userEmail: "boss@bowtie.com.hk",
       env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
     });
