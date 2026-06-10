@@ -63,6 +63,9 @@ export interface Env {
   RESEND_FROM?: string;
   // Var — comma-separated email-domain allowlist for sign-up (default bowtie.com.hk).
   ALLOWED_EMAIL_DOMAINS?: string;
+  // Var — comma-separated domains eligible for the `admin` role (default
+  // bowtie.com.hk,bowtie.com.sg). Non-eligible emails can log in but never be admin.
+  ADMIN_EMAIL_DOMAINS?: string;
   // Var — set "off" to temporarily allow sign-in without email verification
   // (and skip the on-signup send). Anything else (or unset) = verification ON.
   EMAIL_VERIFICATION?: string;

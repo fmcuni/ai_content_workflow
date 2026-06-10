@@ -81,12 +81,22 @@ describe("GET /me", () => {
     expect(json).toEqual({ email: "user@b.com", role: "reviewer" });
   });
 
-  it("applies the bootstrap admin override", async () => {
+  it("applies the bootstrap admin override for an admin-eligible domain", async () => {
     state.storedRole = "viewer";
-    const res = await get(appWith("boss@b.com"), "boss@b.com");
+    const res = await get(appWith("boss@bowtie.com.hk"), "boss@bowtie.com.hk");
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.role).toBe("admin");
+  });
+
+  it("caps a bootstrap admin on a non-eligible domain to reviewer", async () => {
+    // Domain rule: only bowtie.com.hk / bowtie.com.sg may be admin. A bootstrap
+    // entry on a gmail address still logs in but is capped below admin.
+    state.storedRole = "viewer";
+    const res = await get(appWith("boss@gmail.com"), "boss@gmail.com");
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.role).toBe("reviewer");
   });
 
   it("returns 401 when there is no session identity", async () => {

@@ -33,7 +33,7 @@ import type { Sql } from "postgres";
 import type { Env } from "../index";
 import { withDb } from "../db/client";
 import type { AuthVars } from "../auth/middleware";
-import { isRole, type Role } from "../auth/authz";
+import { isRole, isAdminEligibleEmail, type Role } from "../auth/authz";
 import { resolveActorIdentity } from "./identity";
 import { auditLog } from "../auth/audit";
 import {
@@ -215,6 +215,16 @@ adminRouter.post("/users", async (c) => {
       400,
     );
   }
+  // Domain rule: only bowtie.com.hk / bowtie.com.sg emails may be admin.
+  if (role === "admin" && !isAdminEligibleEmail(email, c.env)) {
+    return c.json(
+      {
+        error: "admin_domain_forbidden",
+        message: "the admin role requires a bowtie.com.hk or bowtie.com.sg email",
+      },
+      422,
+    );
+  }
 
   try {
     // Invite sends the email AND creates the GoTrue user in one step.
@@ -301,6 +311,10 @@ adminRouter.put("/users/:id/role", async (c) => {
       `;
       const existing = before[0];
       if (existing === undefined) return { kind: "not_found" as const };
+      // Domain rule: only bowtie.com.hk / bowtie.com.sg emails may be admin.
+      if (newRole === "admin" && !isAdminEligibleEmail(existing.email, c.env)) {
+        return { kind: "admin_domain_forbidden" as const };
+      }
       const rows = await sql<AppUserRow[]>`
         UPDATE content_tool.app_user
         SET role = ${newRole}, updated_at = now()
@@ -341,6 +355,15 @@ adminRouter.put("/users/:id/role", async (c) => {
 
   if (outcome.kind === "not_found") {
     return c.json({ detail: "user not found" }, 404);
+  }
+  if (outcome.kind === "admin_domain_forbidden") {
+    return c.json(
+      {
+        error: "admin_domain_forbidden",
+        message: "the admin role requires a bowtie.com.hk or bowtie.com.sg email",
+      },
+      422,
+    );
   }
 
   auditLog("rbac.role_change", {

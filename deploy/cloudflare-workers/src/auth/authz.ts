@@ -90,6 +90,38 @@ function bootstrapAdminEmails(env: Env): Set<string> {
   );
 }
 
+/** Default domains whose users may hold the `admin` role. */
+const DEFAULT_ADMIN_EMAIL_DOMAINS = "bowtie.com.hk,bowtie.com.sg";
+
+/**
+ * Domains eligible for the `admin` role, from ADMIN_EMAIL_DOMAINS (comma-
+ * separated, lowercased) or the bowtie.com.hk/sg default. Configurable without a
+ * code deploy, mirroring ALLOWED_EMAIL_DOMAINS.
+ */
+function adminEmailDomains(env: Env): Set<string> {
+  const raw = env.ADMIN_EMAIL_DOMAINS ?? DEFAULT_ADMIN_EMAIL_DOMAINS;
+  return new Set(
+    raw
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d.length > 0),
+  );
+}
+
+/**
+ * Whether `email` may hold the `admin` role. Policy: only bowtie.com.hk /
+ * bowtie.com.sg staff may be admins — an invited external user (e.g. a gmail
+ * account) can log in and hold any lower role, but never `admin`. Enforced both
+ * here (resolution) and at assignment time in routes/admin.ts.
+ */
+export function isAdminEligibleEmail(email: string | null | undefined, env: Env): boolean {
+  if (email === null || email === undefined) return false;
+  const at = email.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = email.slice(at + 1).trim().toLowerCase();
+  return domain.length > 0 && adminEmailDomains(env).has(domain);
+}
+
 /**
  * The effective role for a session: `admin` when the email is a bootstrap admin
  * (case-insensitive), otherwise the stored role.
@@ -110,15 +142,28 @@ export function effectiveRole(
   env: Env,
   unprovisionedFloor: Role | null = "viewer",
 ): Role | null {
-  if (email !== null && email !== undefined && email.trim().length > 0) {
-    if (bootstrapAdminEmails(env).has(email.trim().toLowerCase())) {
-      return "admin";
-    }
+  let resolved: Role | null;
+  if (
+    email !== null &&
+    email !== undefined &&
+    email.trim().length > 0 &&
+    bootstrapAdminEmails(env).has(email.trim().toLowerCase())
+  ) {
+    resolved = "admin";
+  } else if (storedRole === null || storedRole === undefined) {
+    resolved = unprovisionedFloor;
+  } else {
+    resolved = coerceRole(storedRole);
   }
-  if (storedRole === null || storedRole === undefined) {
-    return unprovisionedFloor;
+
+  // Domain rule (hard ceiling): only bowtie.com.hk / bowtie.com.sg emails may be
+  // admin. A non-eligible email that would resolve to admin — whether via a
+  // stored role or a bootstrap entry — is capped to the highest non-admin role.
+  // Defense in depth alongside the assignment-time check in routes/admin.ts.
+  if (resolved === "admin" && !isAdminEligibleEmail(email, env)) {
+    resolved = "reviewer";
   }
-  return coerceRole(storedRole);
+  return resolved;
 }
 
 /** True iff `role` meets-or-exceeds the `required` role on the cumulative scale. */

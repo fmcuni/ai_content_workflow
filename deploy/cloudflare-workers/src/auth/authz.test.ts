@@ -55,7 +55,29 @@ describe("effectiveRole", () => {
   it("handles a comma-separated bootstrap list with whitespace", () => {
     const env = envWith(" a@b.com , boss@bowtie.com.hk ,c@d.com ");
     expect(effectiveRole(null, "boss@bowtie.com.hk", env)).toBe("admin");
-    expect(effectiveRole(null, "a@b.com", env)).toBe("admin");
+    // a@b.com is parsed + matched (else it would fall to the viewer floor), but
+    // capped to reviewer by the admin-domain rule — non-bowtie emails can't be admin.
+    expect(effectiveRole(null, "a@b.com", env)).toBe("reviewer");
+  });
+
+  it("caps a bootstrap/admin email outside the eligible domains to reviewer", () => {
+    // Only bowtie.com.hk / bowtie.com.sg may hold admin. A bootstrap entry or a
+    // stored "admin" on any other domain logs in but is capped below admin.
+    const env = envWith("ext@gmail.com");
+    expect(effectiveRole("viewer", "ext@gmail.com", env)).toBe("reviewer");
+    expect(effectiveRole("admin", "ext@gmail.com", envWith())).toBe("reviewer");
+  });
+
+  it("allows admin for bowtie.com.sg as well as bowtie.com.hk", () => {
+    expect(effectiveRole("admin", "ops@bowtie.com.sg", envWith())).toBe("admin");
+    expect(effectiveRole("admin", "ops@bowtie.com.hk", envWith())).toBe("admin");
+  });
+
+  it("honors a custom ADMIN_EMAIL_DOMAINS override", () => {
+    const env = { BOOTSTRAP_ADMIN_EMAILS: "", ADMIN_EMAIL_DOMAINS: "acme.io" } as Env;
+    expect(effectiveRole("admin", "boss@acme.io", env)).toBe("admin");
+    // The default bowtie domains are replaced, not merged.
+    expect(effectiveRole("admin", "boss@bowtie.com.hk", env)).toBe("reviewer");
   });
 
   it("does not promote a non-bootstrap email", () => {

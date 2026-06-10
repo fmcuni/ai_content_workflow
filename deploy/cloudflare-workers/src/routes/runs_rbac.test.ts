@@ -195,7 +195,7 @@ describe("requireRole gate (DELETE /runs/:id → admin)", () => {
   it("proceeds at/above the bar (admin) and performs the delete", async () => {
     state.userRole = "admin";
     state.run = { run_id: "r1", status: "published", hitl_2_iteration: 0, created_by: "x@b.com" };
-    const res = await req(appWith("admin@b.com"), "DELETE", "/r1", {});
+    const res = await req(appWith("admin@bowtie.com.hk"), "DELETE", "/r1", {});
     expect(res.status).toBe(200);
     expect(state.deleted).toBe(true);
   });

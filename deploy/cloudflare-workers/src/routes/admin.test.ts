@@ -215,7 +215,7 @@ describe("PUT /admin/users/:id/role", () => {
   });
 
   it("rejects an invalid role enum with 400", async () => {
-    const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u1/role", {
+    const res = await req(appWith("admin@bowtie.com.hk"), "PUT", "/admin/users/u1/role", {
       role: "superuser",
     });
     expect(res.status).toBe(400);
@@ -224,7 +224,7 @@ describe("PUT /admin/users/:id/role", () => {
   });
 
   it("rejects the legacy 'editor' token (not assignable in the 4-role model) with 400", async () => {
-    const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u1/role", {
+    const res = await req(appWith("admin@bowtie.com.hk"), "PUT", "/admin/users/u1/role", {
       role: "editor",
     });
     expect(res.status).toBe(400);
@@ -233,7 +233,7 @@ describe("PUT /admin/users/:id/role", () => {
   });
 
   it("updates the role for an admin actor and returns the user", async () => {
-    const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u1/role", {
+    const res = await req(appWith("admin@bowtie.com.hk"), "PUT", "/admin/users/u1/role", {
       role: "reviewer",
     });
     expect(res.status).toBe(200);
@@ -244,7 +244,7 @@ describe("PUT /admin/users/:id/role", () => {
 
   it("returns 404 when the target user does not exist", async () => {
     state.target = null;
-    const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u404/role", {
+    const res = await req(appWith("admin@bowtie.com.hk"), "PUT", "/admin/users/u404/role", {
       role: "reviewer",
     });
     expect(res.status).toBe(404);
@@ -252,9 +252,9 @@ describe("PUT /admin/users/:id/role", () => {
 
   it("rejects an admin demoting THEIR OWN role to a non-admin role with 409 (M2)", async () => {
     state.actorRole = "admin";
-    state.target = { id: "self1", email: "admin@b.com", name: "Me", role: "admin" };
+    state.target = { id: "self1", email: "admin@bowtie.com.hk", name: "Me", role: "admin" };
     const res = await req(
-      appWith("admin@b.com", "self1"),
+      appWith("admin@bowtie.com.hk", "self1"),
       "PUT",
       "/admin/users/self1/role",
       { role: "viewer" },
@@ -270,7 +270,7 @@ describe("PUT /admin/users/:id/role", () => {
     state.actorRole = "admin";
     state.target = { id: "u2", email: "other@b.com", name: "Other", role: "admin" };
     const res = await req(
-      appWith("admin@b.com", "self1"),
+      appWith("admin@bowtie.com.hk", "self1"),
       "PUT",
       "/admin/users/u2/role",
       { role: "viewer" },
@@ -282,9 +282,9 @@ describe("PUT /admin/users/:id/role", () => {
 
   it("allows an admin to keep their OWN role as admin (no-op self update)", async () => {
     state.actorRole = "admin";
-    state.target = { id: "self1", email: "admin@b.com", name: "Me", role: "admin" };
+    state.target = { id: "self1", email: "admin@bowtie.com.hk", name: "Me", role: "admin" };
     const res = await req(
-      appWith("admin@b.com", "self1"),
+      appWith("admin@bowtie.com.hk", "self1"),
       "PUT",
       "/admin/users/self1/role",
       { role: "admin" },
@@ -297,7 +297,7 @@ describe("PUT /admin/users/:id/role", () => {
 
 describe("GET /admin/users", () => {
   it("lists users for an admin", async () => {
-    const res = await req(appWith("admin@b.com"), "GET", "/admin/users", undefined);
+    const res = await req(appWith("admin@bowtie.com.hk"), "GET", "/admin/users", undefined);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Array<Record<string, unknown>>;
     expect(Array.isArray(json)).toBe(true);
@@ -319,7 +319,7 @@ describe("Supabase provider: GET /admin/users", () => {
     gotrue.listUsers.mockResolvedValue([
       { id: "u1", email: "target@b.com", last_sign_in_at: "2026-06-10T00:00:00Z", email_confirmed_at: "2026-06-09T00:00:00Z" },
     ]);
-    const res = await req(appWith("admin@b.com"), "GET", "/admin/users", undefined, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "GET", "/admin/users", undefined, supabaseEnv());
     expect(res.status).toBe(200);
     const json = (await res.json()) as Array<Record<string, unknown>>;
     expect(json[0]?.status).toBe("active");
@@ -330,7 +330,7 @@ describe("Supabase provider: GET /admin/users", () => {
   it("still returns app_user rows when GoTrue enrichment fails", async () => {
     const { GoTrueAdminError } = await import("../auth/gotrue-admin");
     gotrue.listUsers.mockRejectedValue(new GoTrueAdminError("network_error", "down", 502));
-    const res = await req(appWith("admin@b.com"), "GET", "/admin/users", undefined, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "GET", "/admin/users", undefined, supabaseEnv());
     expect(res.status).toBe(200);
     const json = (await res.json()) as Array<Record<string, unknown>>;
     expect(json[0]?.confirmed).toBe(false);
@@ -340,7 +340,7 @@ describe("Supabase provider: GET /admin/users", () => {
 describe("Supabase provider: POST /admin/users (create + invite)", () => {
   it("invites + inserts app_user, audits, returns 201", async () => {
     gotrue.inviteUser.mockResolvedValue({ id: "new1", email: "new@b.com" });
-    const res = await req(appWith("admin@b.com", "self1"), "POST", "/admin/users", {
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "POST", "/admin/users", {
       email: "new@b.com",
       role: "author",
     }, supabaseEnv());
@@ -352,7 +352,7 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
   });
 
   it("rejects an invalid role with 400 (no GoTrue call)", async () => {
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users", {
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", {
       email: "new@b.com",
       role: "superuser",
     }, supabaseEnv());
@@ -361,19 +361,19 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
   });
 
   it("rejects a missing email with 400", async () => {
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users", {}, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", {}, supabaseEnv());
     expect(res.status).toBe(400);
   });
 
   it("returns 501 on the better-auth provider", async () => {
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users", { email: "x@b.com" });
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", { email: "x@b.com" });
     expect(res.status).toBe(501);
   });
 });
 
 describe("Supabase provider: PUT role writes to app_user", () => {
   it("updates app_user role and audits", async () => {
-    const res = await req(appWith("admin@b.com"), "PUT", "/admin/users/u1/role", {
+    const res = await req(appWith("admin@bowtie.com.hk"), "PUT", "/admin/users/u1/role", {
       role: "reviewer",
     }, supabaseEnv());
     expect(res.status).toBe(200);
@@ -385,13 +385,13 @@ describe("Supabase provider: PUT role writes to app_user", () => {
   it("keeps the self-demotion guard (409) on the supabase path", async () => {
     state.appUser = {
       id: "self1",
-      email: "admin@b.com",
+      email: "admin@bowtie.com.hk",
       display_name: "Me",
       role: "admin",
       status: "active",
       last_sign_in_at: null,
     };
-    const res = await req(appWith("admin@b.com", "self1"), "PUT", "/admin/users/self1/role", {
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "PUT", "/admin/users/self1/role", {
       role: "viewer",
     }, supabaseEnv());
     expect(res.status).toBe(409);
@@ -401,7 +401,7 @@ describe("Supabase provider: PUT role writes to app_user", () => {
 describe("Supabase provider: disable / enable", () => {
   it("disable bans in GoTrue + sets status disabled + audits", async () => {
     gotrue.updateUser.mockResolvedValue({ id: "u1" });
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users/u1/disable", {}, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {}, supabaseEnv());
     expect(res.status).toBe(200);
     expect(gotrue.updateUser).toHaveBeenCalledOnce();
     const json = (await res.json()) as Record<string, unknown>;
@@ -411,7 +411,7 @@ describe("Supabase provider: disable / enable", () => {
 
   it("enable unbans + sets status active", async () => {
     gotrue.updateUser.mockResolvedValue({ id: "u1" });
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users/u1/enable", {}, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/enable", {}, supabaseEnv());
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.status).toBe("active");
@@ -420,13 +420,13 @@ describe("Supabase provider: disable / enable", () => {
 
   it("404 when the target app_user is absent", async () => {
     state.appUser = null;
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users/ghost/disable", {}, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/ghost/disable", {}, supabaseEnv());
     expect(res.status).toBe(404);
     expect(gotrue.updateUser).not.toHaveBeenCalled();
   });
 
   it("501 on the better-auth provider", async () => {
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users/u1/disable", {});
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {});
     expect(res.status).toBe(501);
   });
 });
@@ -434,7 +434,7 @@ describe("Supabase provider: disable / enable", () => {
 describe("Supabase provider: DELETE", () => {
   it("deletes GoTrue user + app_user row + audits, returns 204", async () => {
     gotrue.deleteUser.mockResolvedValue(undefined);
-    const res = await req(appWith("admin@b.com", "self1"), "DELETE", "/admin/users/u1", undefined, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "DELETE", "/admin/users/u1", undefined, supabaseEnv());
     expect(res.status).toBe(204);
     expect(gotrue.deleteUser).toHaveBeenCalledOnce();
     expect(auditCalls.some((a) => a.event === "rbac.user_delete")).toBe(true);
@@ -443,13 +443,13 @@ describe("Supabase provider: DELETE", () => {
   it("blocks self-delete with 409", async () => {
     state.appUser = {
       id: "self1",
-      email: "admin@b.com",
+      email: "admin@bowtie.com.hk",
       display_name: "Me",
       role: "admin",
       status: "active",
       last_sign_in_at: null,
     };
-    const res = await req(appWith("admin@b.com", "self1"), "DELETE", "/admin/users/self1", undefined, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "DELETE", "/admin/users/self1", undefined, supabaseEnv());
     expect(res.status).toBe(409);
     expect(gotrue.deleteUser).not.toHaveBeenCalled();
   });
@@ -458,7 +458,7 @@ describe("Supabase provider: DELETE", () => {
 describe("Supabase provider: resend-invite + revoke-sessions", () => {
   it("resend-invite calls generateLink + audits", async () => {
     gotrue.generateLink.mockResolvedValue({ action_link: "https://x", verification_type: "invite" });
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users/u1/resend-invite", {}, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/resend-invite", {}, supabaseEnv());
     expect(res.status).toBe(200);
     expect(gotrue.generateLink).toHaveBeenCalledOnce();
     expect(auditCalls.some((a) => a.event === "rbac.user_resend_invite")).toBe(true);
@@ -466,7 +466,7 @@ describe("Supabase provider: resend-invite + revoke-sessions", () => {
 
   it("revoke-sessions calls signOutUser + audits", async () => {
     gotrue.signOutUser.mockResolvedValue(undefined);
-    const res = await req(appWith("admin@b.com"), "POST", "/admin/users/u1/revoke-sessions", {}, supabaseEnv());
+    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/revoke-sessions", {}, supabaseEnv());
     expect(res.status).toBe(200);
     expect(gotrue.signOutUser).toHaveBeenCalledOnce();
     expect(auditCalls.some((a) => a.event === "rbac.user_revoke_sessions")).toBe(true);
@@ -477,5 +477,54 @@ describe("Supabase provider: resend-invite + revoke-sessions", () => {
     const res = await req(appWith("reviewer@b.com"), "POST", "/admin/users/u1/revoke-sessions", {}, supabaseEnv());
     expect(res.status).toBe(403);
     expect(gotrue.signOutUser).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Domain rule: only bowtie.com.hk / bowtie.com.sg emails may hold `admin`.
+// Enforced at assignment time (create + role-change), with 422
+// admin_domain_forbidden — defense in depth alongside effectiveRole's cap.
+// ---------------------------------------------------------------------------
+describe("Supabase provider: admin-domain rule", () => {
+  it("rejects creating an admin with a non-eligible email (422, no GoTrue call)", async () => {
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "POST", "/admin/users", {
+      email: "outsider@gmail.com",
+      role: "admin",
+    }, supabaseEnv());
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.error).toBe("admin_domain_forbidden");
+    expect(gotrue.inviteUser).not.toHaveBeenCalled();
+  });
+
+  it("allows creating an admin with an eligible bowtie email (201)", async () => {
+    gotrue.inviteUser.mockResolvedValue({ id: "new1", email: "boss@bowtie.com.sg" });
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "POST", "/admin/users", {
+      email: "boss@bowtie.com.sg",
+      role: "admin",
+    }, supabaseEnv());
+    expect(res.status).toBe(201);
+    expect(gotrue.inviteUser).toHaveBeenCalledOnce();
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.role).toBe("admin");
+  });
+
+  it("rejects promoting a non-eligible user to admin (422)", async () => {
+    state.appUser = {
+      id: "u9",
+      email: "outsider@gmail.com",
+      display_name: "Outsider",
+      role: "reviewer",
+      status: "active",
+      last_sign_in_at: null,
+    };
+    const res = await req(appWith("admin@bowtie.com.hk", "self1"), "PUT", "/admin/users/u9/role", {
+      role: "admin",
+    }, supabaseEnv());
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.error).toBe("admin_domain_forbidden");
+    // The stored role must be untouched.
+    expect(state.appUser?.role).toBe("reviewer");
   });
 });

@@ -132,7 +132,7 @@ import type { AuthVars } from "../auth/middleware";
 function buildApp(): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
   app.use("*", async (c, next) => {
-    c.set("userEmail", "admin@b.com");
+    c.set("userEmail", "admin@bowtie.com.hk");
     await next();
   });
   // Mirror index.ts gates.
