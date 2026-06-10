@@ -55,16 +55,30 @@ describe("effectiveRole", () => {
   it("handles a comma-separated bootstrap list with whitespace", () => {
     const env = envWith(" a@b.com , boss@bowtie.com.hk ,c@d.com ");
     expect(effectiveRole(null, "boss@bowtie.com.hk", env)).toBe("admin");
-    // a@b.com is parsed + matched (else it would fall to the viewer floor), but
-    // capped to reviewer by the admin-domain rule — non-bowtie emails can't be admin.
-    expect(effectiveRole(null, "a@b.com", env)).toBe("reviewer");
+    // a@b.com is parsed + matched, but it is NOT admin-eligible, so the bootstrap
+    // grant does not apply — it falls through to the stored role (null → viewer
+    // floor here). The break-glass list is an ADMIN list; a non-eligible entry
+    // grants nothing rather than silently conferring reviewer.
+    expect(effectiveRole(null, "a@b.com", env)).toBe("viewer");
   });
 
-  it("caps a bootstrap/admin email outside the eligible domains to reviewer", () => {
-    // Only bowtie.com.hk / bowtie.com.sg may hold admin. A bootstrap entry or a
-    // stored "admin" on any other domain logs in but is capped below admin.
+  it("does NOT grant a bootstrap email outside the eligible domains (ignored, not capped)", () => {
+    // SECURITY: BOOTSTRAP_ADMIN_EMAILS is a break-glass ADMIN escape hatch. A
+    // non-eligible email (e.g. a gmail) in the list must grant NOTHING — never a
+    // silent reviewer floor — or it becomes an invite-only bypass that survives
+    // account deletion (Google OAuth re-creates the GoTrue user on every login).
     const env = envWith("ext@gmail.com");
-    expect(effectiveRole("viewer", "ext@gmail.com", env)).toBe("reviewer");
+    // No stored row (deleted account) + supabase floor=null → denied.
+    expect(effectiveRole(null, "ext@gmail.com", env, null)).toBeNull();
+    // Legacy/default viewer floor → falls through to the floor, not reviewer.
+    expect(effectiveRole(null, "ext@gmail.com", env)).toBe("viewer");
+    // A stored role is honored as-is (bootstrap adds nothing for a gmail).
+    expect(effectiveRole("author", "ext@gmail.com", env)).toBe("author");
+  });
+
+  it("still caps a stored 'admin' on a non-eligible domain to reviewer", () => {
+    // The stored-role admin ceiling is unchanged: a provisioned non-bowtie user
+    // whose row says "admin" is capped to reviewer (defense in depth).
     expect(effectiveRole("admin", "ext@gmail.com", envWith())).toBe("reviewer");
   });
 

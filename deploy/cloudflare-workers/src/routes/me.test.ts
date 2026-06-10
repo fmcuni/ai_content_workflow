@@ -89,14 +89,17 @@ describe("GET /me", () => {
     expect(json.role).toBe("admin");
   });
 
-  it("caps a bootstrap admin on a non-eligible domain to reviewer", async () => {
-    // Domain rule: only bowtie.com.hk / bowtie.com.sg may be admin. A bootstrap
-    // entry on a gmail address still logs in but is capped below admin.
+  it("ignores a bootstrap entry on a non-eligible domain (stored role stands)", async () => {
+    // SECURITY: bootstrap is an ADMIN-only break-glass. A gmail in the list is
+    // never admin-eligible, so the bootstrap grant does not apply at all — the
+    // stored role stands rather than being elevated/capped to reviewer. This
+    // closes the invite-only bypass where a deleted external account could keep
+    // access just by being listed (Google OAuth re-creates the user on login).
     state.storedRole = "viewer";
     const res = await get(appWith("boss@gmail.com"), "boss@gmail.com");
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
-    expect(json.role).toBe("reviewer");
+    expect(json.role).toBe("viewer");
   });
 
   it("returns 401 when there is no session identity", async () => {

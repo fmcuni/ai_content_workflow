@@ -15,9 +15,12 @@
  * user-migration mapping (admin→admin, editor→reviewer, viewer→author).
  *
  * The *effective* role layers a break-glass bootstrap on top of the stored
- * role: an email listed in BOOTSTRAP_ADMIN_EMAILS is always `admin`, so a fresh
- * DB (every user defaulting to `viewer`) is never locked out of role
- * management. Everything below derives authorization from the effective role.
+ * role: an admin-eligible email listed in BOOTSTRAP_ADMIN_EMAILS is always
+ * `admin`, so a fresh DB (every user defaulting to `viewer`) is never locked out
+ * of role management. The bootstrap grant is ADMIN-only — a non-admin-eligible
+ * email in the list grants NOTHING (it does not silently confer reviewer), so
+ * the escape hatch can never become an invite-only bypass. Everything below
+ * derives authorization from the effective role.
  *
  * Identity comes from the session (set by src/auth/middleware.ts): `userEmail`
  * on the cookie/session path, `userId` on the SSE-ticket path. Role lookup
@@ -123,8 +126,10 @@ export function isAdminEligibleEmail(email: string | null | undefined, env: Env)
 }
 
 /**
- * The effective role for a session: `admin` when the email is a bootstrap admin
- * (case-insensitive), otherwise the stored role.
+ * The effective role for a session: `admin` when the email is an admin-eligible
+ * bootstrap admin (case-insensitive); otherwise the stored role. A bootstrap
+ * entry whose email is NOT admin-eligible is ignored (grants nothing) — see the
+ * file header for why this matters for invite-only enforcement.
  *
  * `unprovisionedFloor` is returned when there is NO stored role (null/undefined,
  * i.e. no `app_user` / legacy `user` row). It defaults to `"viewer"` to preserve
@@ -142,24 +147,33 @@ export function effectiveRole(
   env: Env,
   unprovisionedFloor: Role | null = "viewer",
 ): Role | null {
-  let resolved: Role | null;
-  if (
+  const isBootstrap =
     email !== null &&
     email !== undefined &&
     email.trim().length > 0 &&
-    bootstrapAdminEmails(env).has(email.trim().toLowerCase())
-  ) {
-    resolved = "admin";
-  } else if (storedRole === null || storedRole === undefined) {
-    resolved = unprovisionedFloor;
-  } else {
-    resolved = coerceRole(storedRole);
+    bootstrapAdminEmails(env).has(email.trim().toLowerCase());
+
+  // Break-glass bootstrap is an ADMIN grant and applies ONLY to admin-eligible
+  // emails. A non-eligible entry (e.g. a gmail account) grants NOTHING — it must
+  // NOT be silently downgraded to reviewer, or the admin escape hatch becomes an
+  // invite-only bypass: a deleted/unprovisioned external account would retain
+  // access just by being listed, surviving account deletion entirely (Google
+  // OAuth re-creates the GoTrue user on every login). When the bootstrap grant
+  // does not apply, resolution falls through to the stored role exactly as if the
+  // email were not listed at all.
+  if (isBootstrap && isAdminEligibleEmail(email, env)) {
+    return "admin";
   }
 
+  if (storedRole === null || storedRole === undefined) {
+    return unprovisionedFloor;
+  }
+
+  let resolved = coerceRole(storedRole);
   // Domain rule (hard ceiling): only bowtie.com.hk / bowtie.com.sg emails may be
-  // admin. A non-eligible email that would resolve to admin — whether via a
-  // stored role or a bootstrap entry — is capped to the highest non-admin role.
-  // Defense in depth alongside the assignment-time check in routes/admin.ts.
+  // admin. A non-eligible email with a stored "admin" role is capped to the
+  // highest non-admin role. Defense in depth alongside the assignment-time check
+  // in routes/admin.ts.
   if (resolved === "admin" && !isAdminEligibleEmail(email, env)) {
     resolved = "reviewer";
   }
