@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -661,17 +661,26 @@ async def _ensure_generated_baseline(session: AsyncSession, run_id: UUID) -> Non
     ).scalar_one_or_none()
     if render is None:
         return
-    session.add(
-        Hitl2Snapshot(
-            snapshot_id=uuid4(),
-            run_id=run_id,
-            created_by="system:generated",
-            trigger="generated",
-            html_body=render.html_body,
-            seo_title=render.seo_title,
-            meta_description=render.meta_description,
-        )
+    baseline = Hitl2Snapshot(
+        snapshot_id=uuid4(),
+        run_id=run_id,
+        created_by="system:generated",
+        trigger="generated",
+        html_body=render.html_body,
+        seo_title=render.seo_title,
+        meta_description=render.meta_description,
     )
+    # version_number is created_at-ordered (oldest = 1). When manual saves
+    # happened before this lazy seed ran, backdate the baseline so the AI's
+    # original draft still stamps as v1.
+    oldest = (
+        await session.execute(
+            select(func.min(Hitl2Snapshot.created_at)).where(Hitl2Snapshot.run_id == run_id)
+        )
+    ).scalar_one_or_none()
+    if oldest is not None:
+        baseline.created_at = oldest - timedelta(seconds=1)
+    session.add(baseline)
     await session.commit()
 
 

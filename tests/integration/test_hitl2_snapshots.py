@@ -192,13 +192,21 @@ async def test_list_stamps_version_number_and_is_current(postgres_url):
         rows = (await ac.get(f"/runs/{run_id}/hitl2-snapshots")).json()
 
     # Newest-first: a 'generated' baseline (from the render) plus the two saves.
-    by_body = {r["html_body"]: r for r in rows}
-    # Stable numbering, oldest = 1. The generated baseline is the oldest row.
+    # The baseline shares the render body "<p>v2</p>" with the manual save, so
+    # key the saves by body and pick the baseline out by trigger.
+    generated = [r for r in rows if r["trigger"] == "generated"]
+    by_body = {r["html_body"]: r for r in rows if r["trigger"] != "generated"}
+    # Stable numbering, oldest = 1. The generated baseline is the oldest row
+    # even though it was lazily seeded after the saves (backdated on insert).
+    assert len(generated) == 1
+    assert generated[0]["version_number"] == 1
     assert by_body["<p>v1</p>"]["version_number"] == 2
     assert by_body["<p>v2</p>"]["version_number"] == 3
-    # Only the snapshot whose body equals the live render is flagged current.
+    # Only the newest snapshot whose body equals the live render is flagged
+    # current.
     assert by_body["<p>v2</p>"]["is_current"] is True
     assert by_body["<p>v1</p>"]["is_current"] is False
+    assert generated[0]["is_current"] is False
     await engine.dispose()
 
 

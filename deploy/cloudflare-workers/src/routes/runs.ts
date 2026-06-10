@@ -1353,12 +1353,21 @@ async function ensureGeneratedBaseline(sql: Sql, runId: string): Promise<void> {
   `;
   const render = renderRows[0];
   if (render === undefined) return;
+  // version_number is created_at-ordered (oldest = 1). When manual saves
+  // happened before this lazy seed ran, backdate the baseline so the AI's
+  // original draft still stamps as v1. Mirrors the Python route.
   await sql`
     INSERT INTO content_tool.hitl2_snapshots
-      (snapshot_id, run_id, created_by, trigger, html_body, seo_title, meta_description)
+      (snapshot_id, run_id, created_by, trigger, html_body, seo_title, meta_description,
+       created_at)
     VALUES (
       ${crypto.randomUUID()}, ${runId}, 'system:generated', 'generated',
-      ${render.html_body}, ${render.seo_title}, ${render.meta_description}
+      ${render.html_body}, ${render.seo_title}, ${render.meta_description},
+      COALESCE(
+        (SELECT min(created_at) - interval '1 second'
+         FROM content_tool.hitl2_snapshots WHERE run_id = ${runId}),
+        now()
+      )
     )
   `;
 }
