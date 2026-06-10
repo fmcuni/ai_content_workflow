@@ -31,5 +31,17 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
+  },
+  // Dev environment — parallel frontend Worker `bowtie-content-tool-web-dev`,
+  // deployed with `npm run cf:deploy:dev`. `assets`, `main`, `compatibility_*`
+  // and `observability` are inherited from the top level; only the Worker name
+  // is overridden here. The NEXT_PUBLIC_* values (API base, Supabase URL/anon
+  // key, collab + auth flags) are BUILD-TIME and passed as env vars at deploy
+  // time (see docs/dev-environment-runbook.md), NOT set here.
+  "env": {
+    "dev": {
+      "name": "bowtie-content-tool-web-dev",
+      "workers_dev": true
+    }
   }
 }

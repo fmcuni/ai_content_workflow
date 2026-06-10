@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:dev": "wrangler deploy --env dev",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "typecheck:workers": "tsc --noEmit -p tsconfig.workers-test.json",

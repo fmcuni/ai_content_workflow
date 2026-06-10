@@ -136,5 +136,93 @@
 			"binding": "HYPERDRIVE",
 			"id": "58b74deb12184195a83526e6b7040a32"
 		}
-	]
+	],
+	// ─────────────────────────────────────────────────────────────────────────
+	// Dev environment — a parallel, fully isolated copy of this backend Worker,
+	// deployed as `bowtie-content-tool-poc-dev` via `wrangler deploy --env dev`
+	// (or `npm run deploy:dev`). It mirrors prod's bindings but points at a
+	// SEPARATE dev Supabase DB + Hyperdrive, and gets its OWN Durable Object
+	// namespaces + Workflows (names suffixed `-dev`) so dev run/collab/stream
+	// state never collides with prod.
+	//
+	// Non-inheritable keys (vars, durable_objects, workflows, hyperdrive) MUST be
+	// repeated here — they are NOT inherited from the top level. `migrations`
+	// (top-level only) and `compatibility_*` / `main` / `observability` ARE
+	// inherited, so they are intentionally omitted.
+	//
+	// BEFORE first deploy, replace the two placeholders below (SUPABASE_URL +
+	// hyperdrive id) and set the dev secrets — see docs/dev-environment-runbook.md.
+	"env": {
+		"dev": {
+			"name": "bowtie-content-tool-poc-dev",
+			// Disable the daily refresh-scan cron in dev. `crons: []` disables it;
+			// omitting the key would INHERIT the top-level "0 2 * * *" and run scans
+			// (Gemini spend + writes) against the dev DB on a schedule.
+			"triggers": {
+				"crons": []
+			},
+			// Distinct workflow `name`s (binding + class_name unchanged so the code
+			// in src/ is identical) to avoid any cross-Worker name ownership clash
+			// with the prod Worker's workflows.
+			"workflows": [
+				{
+					"name": "production-dev",
+					"binding": "PRODUCTION",
+					"class_name": "ProductionWorkflow"
+				},
+				{
+					"name": "topic-expansion-dev",
+					"binding": "TOPIC_EXPANSION",
+					"class_name": "TopicExpansionWorkflow"
+				},
+				{
+					"name": "refresh-scan-dev",
+					"binding": "REFRESH_SCAN",
+					"class_name": "RefreshScanWorkflow"
+				}
+			],
+			// Same DO classes; the dev Worker gets its own isolated DO namespaces.
+			// Top-level `migrations` (v1..v5) apply to this Worker on first deploy.
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "RUN_STREAM",
+						"class_name": "RunStream"
+					},
+					{
+						"name": "GEMINI_PROXY",
+						"class_name": "GeminiProxy"
+					},
+					{
+						"name": "RUN_DOC",
+						"class_name": "RunDoc"
+					}
+				]
+			},
+			"vars": {
+				"GEMINI_MODEL": "gemini-3.1-pro-preview",
+				// Browser-direct SSE allow-origin: the DEV frontend Worker.
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.fmc.workers.dev",
+				"RESEND_FROM": "Bowtie Content Desk <onboarding@resend.dev>",
+				"ALLOWED_EMAIL_DOMAINS": "bowtie.com.hk",
+				"EMAIL_VERIFICATION": "off",
+				"PERSIST_THINKING": "on",
+				"AUTH_PROVIDER": "supabase",
+				// REPLACE with the dev Supabase project URL (JWKS issuer for the dev
+				// GoTrue tokens). Must match NEXT_PUBLIC_SUPABASE_URL baked into the
+				// dev web build, or every dev request 401s.
+				"SUPABASE_URL": "https://ovxvhxwmqeccjudhyfbh.supabase.co"
+			},
+			// REPLACE id with the dev Hyperdrive config (points at the dev Supabase
+			// DB). Create it once the dev DB exists:
+			//   wrangler hyperdrive create bowtie-poc-db-dev \
+			//     --connection-string "$DEV_POSTGRES_URL"
+			"hyperdrive": [
+				{
+					"binding": "HYPERDRIVE",
+					"id": "98015877c2cc48f4b047f340129df945"
+				}
+			]
+		}
+	}
 }
