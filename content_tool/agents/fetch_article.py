@@ -8,11 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_tool.config import get_settings
 from content_tool.db.models import FetchedArticle, Run
+from content_tool.net.url_guard import UrlNotAllowedError, assert_url_is_safe
 from content_tool.publishers.wp_factory import resolve_wp_target
 from content_tool.wordpress.client import WordPressClient
 
 # Direct live-page fetch timeout (s) used when the URL isn't a WP post.
 _LIVE_FETCH_TIMEOUT = 20.0
+
+# Cap on redirect hops we will follow manually. Each hop is re-validated by the
+# SSRF guard before we fetch it; a malicious public page could otherwise 30x us
+# at an internal target. Mirrors httpx's default max_redirects (20).
+_MAX_REDIRECTS = 20
 
 # A browser User-Agent — Cloudflare-fronted sites (e.g. gobowtie.com/my) return
 # an Error 1010 challenge to non-browser agents.
@@ -26,24 +32,53 @@ async def _fetch_live_html(
     article_url: str, client: httpx.AsyncClient | None = None
 ) -> str:
     """Fetch the live page HTML directly. Degrade to "" on any failure (WAF
-    block, timeout, non-HTML) — gap_analysis reads the URL via Gemini
-    urlContext as a second source, so this must never raise."""
+    block, timeout, non-HTML, SSRF-blocked target) — gap_analysis reads the URL
+    via Gemini urlContext as a second source, so this must never raise.
+
+    SSRF guard: the target URL is operator-supplied and may 30x to an internal
+    host, so auto-redirects are DISABLED and every hop (initial + each redirect)
+    is revalidated with ``assert_url_is_safe`` before we fetch it. A scheme that
+    isn't http/https or a host that resolves to a private/internal/link-local IP
+    (incl. the 169.254.169.254 metadata endpoint) degrades to "" rather than
+    being fetched."""
     own_client = client is None
     http_client = client or httpx.AsyncClient(timeout=_LIVE_FETCH_TIMEOUT)
+    headers = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
     try:
-        resp = await http_client.get(
-            article_url,
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-            follow_redirects=True,
-        )
-        if resp.status_code != 200:
-            return ""
-        if "html" not in resp.headers.get("content-type", ""):
-            return ""
-        return resp.text
+        current_url = article_url
+        for _ in range(_MAX_REDIRECTS + 1):
+            # Re-validate BEFORE each fetch so a redirect can't slip past the
+            # gate (auto-redirects are off; we follow them by hand).
+            try:
+                assert_url_is_safe(current_url)
+            except UrlNotAllowedError:
+                return ""
+
+            resp = await http_client.get(
+                current_url,
+                headers=headers,
+                follow_redirects=False,
+            )
+
+            if resp.is_redirect:
+                location = resp.headers.get("location")
+                if not location:
+                    return ""
+                # Resolve relative redirects against the current URL.
+                current_url = str(resp.url.join(location))
+                continue
+
+            if resp.status_code != 200:
+                return ""
+            if "html" not in resp.headers.get("content-type", ""):
+                return ""
+            return resp.text
+
+        # Exceeded the redirect cap.
+        return ""
     except httpx.HTTPError:
         return ""
     finally:

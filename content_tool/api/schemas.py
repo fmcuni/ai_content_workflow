@@ -1,15 +1,20 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from content_tool.net.url_guard import UrlNotAllowedError, validate_url_scheme
+
+# Cap on operator-supplied keywords per run (WS5 input validation).
+_MAX_KEYWORDS = 20
 
 
 class CreateRunRequest(BaseModel):
     article_url: str | None = None
     topic: str
-    keywords: list[str]
+    keywords: Annotated[list[str], Field(max_length=_MAX_KEYWORDS)]
     mode: Literal["auto", "small_refresh", "full_rewrite"] = "auto"
     edit_note: str | None = None
     acf_adv_id: int
@@ -24,6 +29,22 @@ class CreateRunRequest(BaseModel):
     # Auto-approve the HITL_1 outline/gap-analysis gate and proceed straight to
     # drafting. HITL_2 (draft -> publish) still waits for a human.
     auto_accept_hitl1: bool = False
+
+    @field_validator("article_url")
+    @classmethod
+    def _check_article_url_scheme(cls, value: str | None) -> str | None:
+        """Reject non-http(s) article URLs at parse time (format-level only).
+
+        The DNS/IP SSRF gate lives in ``url_guard.assert_url_is_safe`` and runs
+        at fetch time; this only enforces the scheme so a malformed value never
+        enters the pipeline. ``None`` is allowed (create mode has no URL).
+        """
+        if value is None:
+            return None
+        try:
+            return validate_url_scheme(value)
+        except UrlNotAllowedError as exc:
+            raise ValueError(str(exc)) from exc
 
     @model_validator(mode="after")
     def _check_article_url_for_start_mode(self) -> Self:
