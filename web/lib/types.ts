@@ -798,6 +798,10 @@ export interface PromptTemplateSchema {
   found_placeholders: string[];
   found_includes: string[];
   unknown_includes: string[];
+  /** Reference shape of the user prompt sent alongside this system prompt (null for partials). */
+  user_prompt_template?: string | null;
+  /** The Gemini responseSchema this agent is called with (null when the agent returns plain text). */
+  response_json_schema?: Record<string, unknown> | null;
 }
 
 export interface PromptTemplateConsumers {

@@ -109,6 +109,12 @@ function PromptEditorContent({
 
   const isPartial = templateQ.data?.category === "partial";
 
+  // Read-only references served by /templates/:id/schema — the user-prompt
+  // shape the agent sends alongside this system prompt, and the Gemini
+  // responseSchema it must answer in. Both null for partials.
+  const userPromptTemplate = schemaQ.data?.user_prompt_template ?? null;
+  const responseSchema = schemaQ.data?.response_json_schema ?? null;
+
   const placeholderStatus = useMemo(() => {
     const required = schemaQ.data?.required_placeholders ?? [];
     return required.map((name) => ({
@@ -466,6 +472,43 @@ function PromptEditorContent({
             <pre className="font-mono text-[12px] leading-[1.55] text-ink-soft bg-paper-deep/30 border border-rule rounded-sm p-3 whitespace-pre-wrap max-h-[600px] overflow-auto">
               {previewText || (previewMut.isPending ? "Rendering…" : "")}
             </pre>
+          )}
+        </section>
+      )}
+
+      {(userPromptTemplate !== null || responseSchema !== null) && (
+        <section className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {userPromptTemplate !== null && (
+            <div>
+              <div className="flex items-baseline justify-between mb-3 gap-3">
+                <h3 className="kicker">Reference · user prompt</h3>
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint text-right">
+                  sent with this system prompt each run · read-only
+                </span>
+              </div>
+              <pre className="font-mono text-[11.5px] leading-[1.55] text-ink-soft bg-paper-deep/30 border border-rule rounded-sm p-3 whitespace-pre-wrap max-h-[420px] overflow-auto">
+                {userPromptTemplate}
+              </pre>
+              <p className="font-mono text-[10.5px] text-ink-faint mt-2">
+                {"{placeholders}"} are filled from the run; “← only when …” lines are conditional.
+              </p>
+            </div>
+          )}
+          {responseSchema !== null && (
+            <div>
+              <div className="flex items-baseline justify-between mb-3 gap-3">
+                <h3 className="kicker">Reference · output JSON schema</h3>
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint text-right">
+                  Gemini responseSchema · read-only
+                </span>
+              </div>
+              <pre className="font-mono text-[11.5px] leading-[1.55] text-ink-soft bg-paper-deep/30 border border-rule rounded-sm p-3 whitespace-pre max-h-[420px] overflow-auto">
+                {JSON.stringify(responseSchema, null, 2)}
+              </pre>
+              <p className="font-mono text-[10.5px] text-ink-faint mt-2">
+                The model is forced to answer in this structure — prompt edits cannot change it.
+              </p>
+            </div>
           )}
         </section>
       )}

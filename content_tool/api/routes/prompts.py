@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001  — the user-prompt reference strings mirror CJK prompts verbatim
 import hashlib
 import re
 from datetime import date
@@ -28,6 +29,11 @@ from content_tool.db.models import (
     Render,
     Run,
 )
+from content_tool.models.audit import AuditOutput
+from content_tool.models.gap_analysis import GapAnalysis
+from content_tool.models.outline import Outline
+from content_tool.models.topic_batch import TopicDedupOutput, TopicGenOutput, TopicHotOutput
+from content_tool.models.writer import WriterOutput
 from content_tool.policy.personas import load_persona_from_yaml
 from content_tool.prompts_store import SHARED_VOICE, TemplateRow
 
@@ -72,6 +78,150 @@ _REQUIRED_PLACEHOLDERS: dict[str, set[str]] = {
 _MAX_TEMPLATE_BYTES = 64 * 1024
 _INCLUDE_RE = re.compile(r"\{\{include:([A-Za-z0-9_./-]+)\}\}")
 _PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)\}")
+
+# Read-only editor references: the *shape* of the user prompt each agent sends
+# alongside its system prompt. Hand-maintained mirrors of the build_user_prompt
+# builders — `{placeholders}` mark run-derived values and `← only when …` lines
+# mark conditional sections. Keep each entry in sync with its builder, and keep
+# the strings byte-identical with the TS mirror in
+# deploy/cloudflare-workers/src/prompts/references.ts.
+
+# Shared by writer_create / writer_full_rewrite / writer_small_refresh —
+# mirrors content_tool/agents/writer.py build_user_prompt.
+_WRITER_USER_PROMPT = """topic: {topic}
+focus_keywords: {keywords, comma-separated}
+existing_article_URL: {article_url}
+acf_adv_id: {acf_adv_id}
+acf_widget_id: {acf_widget_id}
+topic_category: {topic_category, or "N/A"}
+
+# outline
+{outline payload, JSON}
+
+# gap_analysis
+{gap_analysis payload, JSON}
+
+# existing_article_markdown
+{fetched article markdown — empty in create mode}
+
+# editor_instruction（編輯指示 · 最優先）   ← only when an edit note is set
+{edit_note}
+
+# refine_notes（上一輪 audit 必修問題）   ← only on refine iterations
+{refine_notes, JSON}"""
+
+_USER_PROMPT_REFERENCES: dict[str, str] = {
+    # content_tool/agents/gap_analysis.py
+    "gap_analysis": """topic: {topic}
+focus_keywords: {keywords, comma-separated}
+existing_article: {article_url}
+acf_adv_id: {acf_adv_id}
+acf_widget_id: {acf_widget_id}
+route: {mode — "Auto (follow existing logic)" or "<mode> (override existing logic)"}
+article_edit_note: {edit_note, or "N/A"}""",
+    # content_tool/agents/outline.py build_user_prompt_create_mode
+    "outline_create_mode": """主題：{topic}
+關鍵字：{keywords, comma-separated, or "(無)"}
+目標讀者：{target_audience, or "(未指定)"}
+acf_adv_id: {acf_adv_id}
+acf_widget_id: {acf_widget_id}
+編輯指示（最優先）：{edit_note}   ← only when an edit note is set""",
+    # content_tool/agents/outline.py build_user_prompt
+    "outline_rewrite_mode": """chosen_route: {chosen_route}
+acf_adv_id: {acf_adv_id}
+acf_widget_id: {acf_widget_id}
+
+# gap_analysis
+{gap_analysis payload, JSON}
+
+# existing_article_markdown
+{fetched article markdown}""",
+    "writer_create": _WRITER_USER_PROMPT,
+    "writer_full_rewrite": _WRITER_USER_PROMPT,
+    "writer_small_refresh": _WRITER_USER_PROMPT,
+    # content_tool/agents/audit.py
+    "audit": """# final_html
+{rendered html_body}
+
+# gap_analysis.update_plan
+{gap_analysis.update_plan, JSON}
+
+# citation_intents
+{draft citation_intents, JSON}
+
+# citations (resolved)
+{resolved citations summary, JSON}
+
+# deterministic_findings
+{deterministic findings, JSON}
+
+# edit_note (operator brief)   ← only when an edit note is set
+{edit_note}""",
+    # content_tool/agents/topic_gen.py
+    "topic_gen": """請根據以下研究設定產出結果。
+
+研究主題：{research_theme}
+目標受眾：{target_audience}
+主題數量：{topic_count}
+每個主題關鍵字數量：{keywords_per_topic}
+
+必須涵蓋範疇：
+{must_cover, one per line}
+
+避免主題：
+{must_avoid, one per line}
+
+額外偏重方向：
+{priority_focus, or （無）}
+
+補充要求：
+{notes, or （無）}""",
+    # content_tool/agents/topic_dedup.py (stage 2 judge)
+    "topic_dedup": """請判斷以下單一 topic 在 site:bowtie.com.hk/blog 是否已有相同 topic 的文章。\
+只輸出符合 schema 的 JSON。
+
+topic:
+{topic}
+
+focus_keywords:
+{keywords, comma-separated, or （無）}
+
+{existing_articles — stage-1 grounded search results, title + URL per candidate}""",
+    # content_tool/agents/topic_hot.py
+    "topic_hot": """請分析以下單一 topic 在 Google 香港繁中 SERP 是否屬於熱門話題。\
+只輸出符合 schema 的 JSON。
+
+topic:
+{topic}
+
+focus_keywords:
+{keywords, comma-separated, or （無）}""",
+    # content_tool/agents/topic_existing_search.py (stage 1 — grounded search, plain-text reply)
+    "topic_existing_search": """請用 googleSearch 實際搜尋 site:bowtie.com.hk/blog，\
+找出與以下 topic 最相關的現有文章，列出標題與完整 URL。
+
+topic:
+{topic}
+
+focus_keywords:
+{keywords, comma-separated, or （無）}""",
+}
+
+# The Pydantic model whose JSON schema each agent passes to Gemini as
+# `response_schema`. `topic_existing_search` deliberately has none (plain text —
+# grounding chunks are harvested, not the prose).
+_RESPONSE_SCHEMA_MODELS: dict[str, type[BaseModel]] = {
+    "gap_analysis": GapAnalysis,
+    "outline_create_mode": Outline,
+    "outline_rewrite_mode": Outline,
+    "writer_create": WriterOutput,
+    "writer_full_rewrite": WriterOutput,
+    "writer_small_refresh": WriterOutput,
+    "audit": AuditOutput,
+    "topic_gen": TopicGenOutput,
+    "topic_dedup": TopicDedupOutput,
+    "topic_hot": TopicHotOutput,
+}
 
 
 def _sha256(text: str) -> str:
@@ -232,6 +382,7 @@ async def template_schema(
     found_includes = sorted({m.group(1) for m in _INCLUDE_RE.finditer(body)})
     partial_ids = _partial_ids(view)
     unknown_includes = sorted(name for name in found_includes if name not in partial_ids)
+    schema_model = _RESPONSE_SCHEMA_MODELS.get(template_id)
     return {
         "template_id": template_id,
         "voice": voice,
@@ -239,6 +390,10 @@ async def template_schema(
         "found_placeholders": found_placeholders,
         "found_includes": found_includes,
         "unknown_includes": unknown_includes,
+        "user_prompt_template": _USER_PROMPT_REFERENCES.get(template_id),
+        "response_json_schema": (
+            schema_model.model_json_schema() if schema_model is not None else None
+        ),
     }
 
 
@@ -698,7 +853,7 @@ def _default_persona_block(voice: str) -> str:
             return load_persona_from_yaml(slug).to_prompt_block(None)
         except FileNotFoundError:
             continue
-    return "（preview: persona block not configured）"  # noqa: RUF001
+    return "（preview: persona block not configured）"
 
 
 def _substitute_placeholders(

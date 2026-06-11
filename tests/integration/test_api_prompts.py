@@ -133,6 +133,15 @@ async def test_template_schema_writer_small_refresh(api_client: AsyncClient):
     }
     assert "_writer_brand_block" in body["found_includes"]
     assert body["unknown_includes"] == []
+    # Read-only editor references: the user-prompt shape + Gemini response schema.
+    assert body["user_prompt_template"].startswith("topic: {topic}")
+    assert body["response_json_schema"]["title"] == "WriterOutput"
+
+    r = await api_client.get("/prompts/templates/_writer_brand_block/schema")
+    assert r.status_code == 200
+    partial = r.json()
+    assert partial["user_prompt_template"] is None
+    assert partial["response_json_schema"] is None
 
 
 @pytest.mark.asyncio

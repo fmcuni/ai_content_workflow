@@ -52,6 +52,7 @@ import {
   USER_PROMPT_AGENTS,
   MissingInputs,
 } from "../prompts/user_example";
+import { referencesFor } from "../prompts/references";
 
 const DEFAULT_GRAPH_MODE = "refresh";
 
@@ -278,7 +279,9 @@ promptsRouter.get("/user-example", async (c) => {
 // GET /templates/:id/schema
 //
 // Required placeholders (validation chips) + the placeholders/includes the
-// current body references (preview tabs). 404 if the template is not editable.
+// current body references (preview tabs), plus read-only editor references:
+// the user-prompt shape sent alongside this system prompt and the Gemini
+// responseSchema (both null for partials). 404 if the template is not editable.
 // ---------------------------------------------------------------------------
 promptsRouter.get("/templates/:id/schema", async (c) => {
   const templateId = c.req.param("id");
@@ -293,6 +296,7 @@ promptsRouter.get("/templates/:id/schema", async (c) => {
     const foundIncludes = findIncludes(row.body);
     const partials = partialIds(view);
     const unknownIncludes = foundIncludes.filter((n) => !partials.has(n)).sort();
+    const references = referencesFor(templateId);
     return c.json({
       template_id: templateId,
       voice,
@@ -300,6 +304,8 @@ promptsRouter.get("/templates/:id/schema", async (c) => {
       found_placeholders: findPlaceholders(row.body),
       found_includes: foundIncludes,
       unknown_includes: unknownIncludes,
+      user_prompt_template: references.user_prompt_template,
+      response_json_schema: references.response_json_schema,
     });
   });
 });
