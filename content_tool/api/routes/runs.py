@@ -3,7 +3,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -157,6 +157,7 @@ async def _create_run_row(
 @limiter.limit(RUN_CREATE_LIMIT)
 async def create_run(
     request: Request,
+    response: Response,
     payload: CreateRunRequest,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
     runner=Depends(get_runner),  # noqa: ANN001, B008
@@ -369,6 +370,7 @@ async def run_logs(
 @limiter.limit(RUN_MUTATION_LIMIT)
 async def resume_run(
     request: Request,
+    response: Response,
     run_id: UUID,
     payload: ResumeRequest,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
@@ -1461,6 +1463,7 @@ async def apply_edits_run(
     run_id: UUID,
     payload: ApplyEditsRequest,
     request: Request,
+    response: Response,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
 ) -> ApplyEditsResponse:
     """Apply reviewer feedback to the supplied HTML in place and return it.
