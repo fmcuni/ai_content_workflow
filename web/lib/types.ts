@@ -18,7 +18,8 @@ export interface AdminUser {
 
 export type RunStatus =
   | "pending" | "fetching" | "strategy" | "hitl_1"
-  | "production" | "hitl_2" | "persisted" | "published" | "failed"
+  | "production" | "hitl_2" | "publishing" | "revising"
+  | "persisted" | "published" | "failed"
   | "cancelled" | "rejected" | "changes_requested";
 
 export type Mode = "auto" | "small_refresh" | "full_rewrite";

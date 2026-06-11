@@ -66,7 +66,9 @@ describe("runToItem gate derivation", () => {
     expect(item.gate).toBe("restart");
   });
 
-  it.each<[RunStatus]>([["pending"], ["fetching"], ["strategy"], ["production"]])(
+  it.each<[RunStatus]>([
+    ["pending"], ["fetching"], ["strategy"], ["production"], ["publishing"], ["revising"],
+  ])(
     "treats %s as an in-motion row with no inline gate",
     (status) => {
       const item = runToItem(run({ status }));

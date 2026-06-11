@@ -35,6 +35,8 @@ describe("runGroup", () => {
     ["fetching", "generating"],
     ["strategy", "generating"],
     ["production", "generating"],
+    ["publishing", "generating"],
+    ["revising", "generating"],
     ["persisted", "approved"],
     ["published", "approved"],
     ["failed", "failed"],

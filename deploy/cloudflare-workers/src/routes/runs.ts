@@ -198,6 +198,7 @@ interface RunListRow {
   chosen_route: string | null;
   iteration_count: number;
   start_mode: string;
+  topic_candidate_id: string | null;
   target_audience: string | null;
   keywords: unknown;
   persona: string;
@@ -228,7 +229,6 @@ interface RunDetailRow extends RunListRow {
   // wp_* destination fields are inherited from RunListRow; detail adds these:
   wp_pushed_at: string | null;
   wp_push_error: unknown;
-  topic_candidate_id: string | null;
   error: unknown;
 }
 
@@ -418,8 +418,9 @@ runsRouter.get("/", async (c) => {
     return sql<RunListRow[]>`
       SELECT
         run_id, status, topic, article_url, mode, created_at, chosen_route,
-        iteration_count, start_mode, target_audience, keywords, persona,
-        acf_adv_id, acf_widget_id, edit_note, auto_accept_hitl1,
+        iteration_count, start_mode, topic_candidate_id, target_audience,
+        keywords, persona, acf_adv_id, acf_widget_id, edit_note,
+        auto_accept_hitl1,
         wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
         wp_slug, wp_excerpt, wp_publish_status, wp_publish_at, wp_pushed_post_id
       FROM content_tool.runs
@@ -440,6 +441,7 @@ runsRouter.get("/", async (c) => {
       chosen_route: r.chosen_route,
       iteration_count: r.iteration_count,
       start_mode: r.start_mode,
+      topic_candidate_id: r.topic_candidate_id,
       target_audience: r.target_audience,
       keywords: pgJson(r.keywords),
       persona: r.persona,

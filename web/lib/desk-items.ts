@@ -52,7 +52,9 @@ export const TABS: { key: TabKey; label: string; glyph?: string }[] = [
 // Runs blocked on a human, vs. auto-running, vs. terminal. Anything not listed
 // in DESK/MOTION is treated as "filed".
 const RUN_DESK = new Set<RunStatus>(["hitl_1", "hitl_2", "changes_requested", "failed"]);
-const RUN_MOTION = new Set<RunStatus>(["pending", "fetching", "strategy", "production"]);
+const RUN_MOTION = new Set<RunStatus>([
+  "pending", "fetching", "strategy", "production", "publishing", "revising",
+]);
 const BATCH_DESK = new Set<BatchStatus>(["ready_for_review", "partially_promoted", "failed"]);
 const BATCH_MOTION = new Set<BatchStatus>(["pending", "generating", "analysing"]);
 

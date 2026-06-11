@@ -204,6 +204,9 @@ async def list_runs(
                 "chosen_route": r.chosen_route,
                 "iteration_count": r.iteration_count,
                 "start_mode": r.start_mode,
+                "topic_candidate_id": (
+                    str(r.topic_candidate_id) if r.topic_candidate_id else None
+                ),
                 "target_audience": r.target_audience,
                 "keywords": r.keywords,
                 "persona": r.persona,

@@ -43,6 +43,8 @@ const RUN_GROUP: Record<RunStatus, GroupKey> = {
   fetching: "generating",
   strategy: "generating",
   production: "generating",
+  publishing: "generating",
+  revising: "generating",
   persisted: "approved",
   published: "approved",
   failed: "failed",
