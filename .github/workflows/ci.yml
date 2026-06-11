@@ -1,9 +1,25 @@
 name: CI
 
+# Python-only suite (ruff + pyright + pytest): run only when Python-relevant
+# files change. Web/Workers pushes are covered by their own workflows.
 on:
   pull_request:
+    paths:
+      - '**/*.py'
+      - 'prompts/**'
+      - 'config/**'
+      - 'supabase/**'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
   push:
     branches: [main]
+    paths:
+      - '**/*.py'
+      - 'prompts/**'
+      - 'config/**'
+      - 'supabase/**'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
 
 jobs:
   test:
