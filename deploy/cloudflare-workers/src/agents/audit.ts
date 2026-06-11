@@ -41,6 +41,9 @@ export interface AuditInput {
   /** acf id of 0 = "no element"; skips the shortcode presence check. Default true. */
   advEnabled?: boolean;
   widgetEnabled?: boolean;
+  /** Operator brief (`runs.edit_note`) — surfaced to the audit as ground-truth
+   * facts so brief-requested products/claims aren't flagged as fabrications. */
+  editNote?: string | null;
   todayDate: string; // YYYY-MM-DD
   onThought?: ThoughtCallback;
 }
@@ -78,13 +81,20 @@ export function buildUserPrompt(opts: {
   citationIntents: object[];
   citationsSummary: object[];
   deterministicFindings: AuditFinding[];
+  editNote?: string | null;
 }): string {
+  // The edit_note section MUST stay byte-identical with the Python port
+  // (content_tool/agents/audit.py build_user_prompt) — prompt-sha parity.
+  const editNoteSection = opts.editNote
+    ? `\n\n# edit_note (operator brief)\n${opts.editNote}`
+    : "";
   return (
     `# final_html\n${opts.htmlBody}\n\n` +
     `# gap_analysis.update_plan\n${pyJsonDumps(opts.gapUpdatePlan)}\n\n` +
     `# citation_intents\n${pyJsonDumps(opts.citationIntents)}\n\n` +
     `# citations (resolved)\n${pyJsonDumps(opts.citationsSummary)}\n\n` +
-    `# deterministic_findings\n${pyJsonDumps(opts.deterministicFindings)}`
+    `# deterministic_findings\n${pyJsonDumps(opts.deterministicFindings)}` +
+    editNoteSection
   );
 }
 
@@ -143,6 +153,7 @@ export async function runAudit(
     citationIntents: input.citationIntents,
     citationsSummary: input.citationsSummary,
     deterministicFindings,
+    editNote: input.editNote ?? null,
   });
 
   const result = await gemini.generate({

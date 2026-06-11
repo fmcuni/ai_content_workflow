@@ -76,3 +76,76 @@ async def test_drops_denied_sources(db_session):
     assert "## 資訊來源" in result["final_markup"]
     assert "ia.org.hk" in result["final_markup"]
     assert "bowtie.com.hk" not in result["final_markup"]
+    assert result["carried_forward"] is False
+
+
+@pytest.mark.asyncio
+async def test_carries_grounding_forward_when_refine_draft_has_none(db_session):
+    """A refine iteration that didn't search must reuse the previous draft's
+    grounding chunks instead of silently dropping the sources section."""
+    run_id = uuid4()
+    db_session.add(
+        Run(
+            run_id=run_id,
+            created_by="x",
+            status="production",
+            article_url="https://e.com",
+            topic="x",
+            keywords=[],
+            mode="auto",
+            acf_adv_id=1,
+            acf_widget_id=2,
+            persona="bowtie-editor",
+            today_date=date(2026, 5, 21),
+            chosen_route="small_refresh",
+        )
+    )
+    await db_session.commit()
+    db_session.add(FetchedArticle(run_id=run_id, wp_post_id=1, wp_categories=[], markdown="x"))
+    db_session.add(GapAnalysisRow(run_id=run_id, model="x", thinking_level="high", payload={}))
+    db_session.add(OutlineRow(run_id=run_id, payload={}))
+    first_draft = Draft(
+        run_id=run_id,
+        iteration=0,
+        diagnose="d",
+        markup_raw="# H1\nfirst\n",
+        citation_intents=[],
+        grounding_chunks=[
+            {"web": {"uri": "https://vertexaisearch.cloud.google.com/c", "title": "IA"}},
+        ],
+    )
+    refine_draft = Draft(
+        run_id=run_id,
+        iteration=1,
+        diagnose="d2",
+        markup_raw="# H1\nrewritten without searching\n",
+        citation_intents=[],
+        grounding_chunks=[],
+    )
+    db_session.add(first_draft)
+    db_session.add(refine_draft)
+    await db_session.commit()
+
+    with respx.mock(assert_all_called=True) as router:
+        router.head("https://vertexaisearch.cloud.google.com/c").mock(
+            return_value=Response(302, headers={"Location": "https://www.ia.org.hk/z"})
+        )
+        router.head("https://www.ia.org.hk/z").mock(return_value=Response(200))
+
+        result = await run_resolve_citations(
+            session=db_session, draft_id=refine_draft.draft_id, topic_category=None
+        )
+
+    assert result["carried_forward"] is True
+    assert result["displayed_count"] == 1
+    assert "## 資訊來源" in result["final_markup"]
+    assert "ia.org.hk" in result["final_markup"]
+
+    # Citation rows attach to the refine draft (the one being resolved).
+    citations = (
+        await db_session.execute(
+            select(Citation).where(Citation.draft_id == refine_draft.draft_id)
+        )
+    ).scalars().all()
+    assert len(citations) == 1
+    assert citations[0].was_displayed is True

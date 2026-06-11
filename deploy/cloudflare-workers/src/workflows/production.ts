@@ -597,33 +597,79 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         {},
         iteration,
       );
-      await step.do(`resolve_citations-${round}-${iteration}`, CITATIONS_STEP_CONFIG, async () =>
-        this.withSql(async (sql) => {
-          const draft = await this.loadDraftMarkup(sql, draftId);
-          const groundingChunks = toGroundingChunks(draft.grounding_chunks);
-          const { finalMarkup } = await resolveCitations(sql, {
-            draftId,
-            markupRaw: draft.markup_raw,
-            groundingChunks,
-            topicCategory: run.topic_category,
-            voiceSlug: run.persona,
-          });
-          await sql`
-            UPDATE content_tool.drafts
-            SET final_markup = ${finalMarkup}
-            WHERE draft_id = ${draftId}::uuid
-          `;
-          return "ok";
-        }),
+      const citationsOutcome = await step.do(
+        `resolve_citations-${round}-${iteration}`,
+        CITATIONS_STEP_CONFIG,
+        async () =>
+          this.withSql<{
+            grounding_chunks: number;
+            displayed: number;
+            carried_forward: boolean;
+          }>(async (sql) => {
+            const draft = await this.loadDraftMarkup(sql, draftId);
+            let groundingChunks = toGroundingChunks(draft.grounding_chunks);
+            let carriedForward = false;
+            // A refine iteration that answers without invoking Google Search
+            // returns no grounding metadata, which would silently drop the
+            // whole sources section. Reuse the most recent earlier draft's
+            // chunks for this run so citations survive audit-driven rewrites.
+            if (groundingChunks.length === 0) {
+              const prevRows = await sql<{ grounding_chunks: unknown }[]>`
+                SELECT grounding_chunks
+                FROM content_tool.drafts
+                WHERE run_id = ${runId}::uuid
+                  AND draft_id <> ${draftId}::uuid
+                  AND jsonb_typeof(grounding_chunks) = 'array'
+                  AND jsonb_array_length(grounding_chunks) > 0
+                ORDER BY iteration DESC
+                LIMIT 1
+              `;
+              const fallback =
+                prevRows[0] === undefined ? [] : toGroundingChunks(prevRows[0].grounding_chunks);
+              if (fallback.length > 0) {
+                groundingChunks = fallback;
+                carriedForward = true;
+              }
+            }
+            const { finalMarkup, displayedCount } = await resolveCitations(sql, {
+              draftId,
+              markupRaw: draft.markup_raw,
+              groundingChunks,
+              topicCategory: run.topic_category,
+              voiceSlug: run.persona,
+            });
+            await sql`
+              UPDATE content_tool.drafts
+              SET final_markup = ${finalMarkup}
+              WHERE draft_id = ${draftId}::uuid
+            `;
+            return {
+              grounding_chunks: groundingChunks.length,
+              displayed: displayedCount,
+              carried_forward: carriedForward,
+            };
+          }),
       );
       await this.emitStep(
         step,
         `emit-citations-done-${round}-${iteration}`,
         runId,
         "production.resolve_citations.done",
-        {},
+        citationsOutcome,
         iteration,
       );
+      if (citationsOutcome.displayed === 0) {
+        // Surfaced in the debug log panel: the article will publish with NO
+        // sources section unless a later iteration recovers grounding.
+        await this.emitStep(
+          step,
+          `emit-citations-empty-${round}-${iteration}`,
+          runId,
+          "production.resolve_citations.no_citations",
+          citationsOutcome,
+          iteration,
+        );
+      }
 
       // --- render_html ---
       await this.emitStep(
@@ -697,6 +743,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
             citationsDeniedDisplayed,
             advEnabled: run.acf_adv_id !== 0,
             widgetEnabled: run.acf_widget_id !== 0,
+            editNote: run.edit_note,
             todayDate: run.today_date.slice(0, 10),
           });
           return audit.overall_pass;

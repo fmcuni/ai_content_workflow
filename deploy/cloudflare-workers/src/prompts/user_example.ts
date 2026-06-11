@@ -241,6 +241,7 @@ async function renderAudit(sql: Sql, run: RunRow): Promise<string> {
     citationIntents: (pgJson<object[]>(draft.citation_intents) ?? []) as object[],
     citationsSummary,
     deterministicFindings: detFindings as AuditFinding[],
+    editNote: run.edit_note,
   });
 }
 

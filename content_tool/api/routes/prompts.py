@@ -874,6 +874,7 @@ async def _render_user_prompt(*, session: AsyncSession, run: Run, agent: str) ->
         deterministic_findings=(
             (audit_row.deterministic_findings or {}).get("findings", []) if audit_row else []
         ),
+        edit_note=run.edit_note,
     )
 
 

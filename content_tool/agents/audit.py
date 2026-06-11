@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -58,18 +59,24 @@ async def build_system_prompt(
 def build_user_prompt(
     *,
     html_body: str,
-    gap_update_plan: dict,
-    citation_intents: list,
-    citations_summary: list,
-    deterministic_findings: list,
+    gap_update_plan: dict[str, Any],
+    citation_intents: list[Any],
+    citations_summary: list[Any],
+    deterministic_findings: list[Any],
+    edit_note: str | None = None,
 ) -> str:
-    return (
+    # The edit_note section MUST stay byte-identical with the Workers port
+    # (deploy/cloudflare-workers/src/agents/audit.ts buildUserPrompt).
+    prompt = (
         f"# final_html\n{html_body}\n\n"
         f"# gap_analysis.update_plan\n{json.dumps(gap_update_plan, ensure_ascii=False)}\n\n"
         f"# citation_intents\n{json.dumps(citation_intents, ensure_ascii=False)}\n\n"
         f"# citations (resolved)\n{json.dumps(citations_summary, ensure_ascii=False)}\n\n"
         f"# deterministic_findings\n{json.dumps(deterministic_findings, ensure_ascii=False)}"
     )
+    if edit_note:
+        prompt += f"\n\n# edit_note (operator brief)\n{edit_note}"
+    return prompt
 
 
 async def run_audit(
@@ -132,12 +139,14 @@ async def run_audit(
         session=session,
         context_text=render.html_body,
     )
+    citation_intents: list[Any] = list(draft.citation_intents or [])
     user_prompt = build_user_prompt(
         html_body=render.html_body,
         gap_update_plan=ga_payload.get("update_plan", {}),
-        citation_intents=draft.citation_intents,
+        citation_intents=citation_intents,
         citations_summary=citations_summary,
         deterministic_findings=det_findings,
+        edit_note=run.edit_note,
     )
 
     result = await gemini.generate(

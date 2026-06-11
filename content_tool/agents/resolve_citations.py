@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -55,9 +56,35 @@ async def run_resolve_citations(
     policy = await source_policy_store.get_policy(voice_slug=voice_slug, session=session)
     resolver = UrlResolver(session=session, client=client)
 
+    grounding_chunks: list[Any] = list(draft.grounding_chunks or [])
+    carried_forward = False
+    # A refine iteration that answers without invoking Google Search returns no
+    # grounding metadata, which would silently drop the whole sources section.
+    # Reuse the most recent earlier draft's chunks for this run so citations
+    # survive audit-driven rewrites. Mirrors the Workers port (production.ts
+    # resolve_citations step).
+    if not grounding_chunks:
+        prev_rows: Sequence[list[Any] | None] = (
+            (
+                await session.execute(
+                    select(Draft.grounding_chunks)
+                    .where(
+                        Draft.run_id == draft.run_id,
+                        Draft.draft_id != draft_id,
+                        Draft.grounding_chunks.is_not(None),
+                    )
+                    .order_by(Draft.iteration.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        grounding_chunks = next((list(c) for c in prev_rows if c), [])
+        carried_forward = bool(grounding_chunks)
+
     allowed_for_display: list[tuple[str, str]] = []
 
-    for idx, chunk in enumerate(draft.grounding_chunks or []):
+    for idx, chunk in enumerate(grounding_chunks):
         web = chunk.get("web") or {}
         vertex_uri = web.get("uri")
         title = web.get("title")
@@ -108,4 +135,8 @@ async def run_resolve_citations(
     )
     await session.commit()
 
-    return {"final_markup": final_markup, "displayed_count": len(allowed_for_display)}
+    return {
+        "final_markup": final_markup,
+        "displayed_count": len(allowed_for_display),
+        "carried_forward": carried_forward,
+    }
