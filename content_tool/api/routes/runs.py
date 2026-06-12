@@ -185,7 +185,11 @@ async def create_run(
 async def list_runs(
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
     status: str | None = None,
-    limit: int = 50,
+    # Ledger shows ALL runs — nothing is auto-removed by age. Sorted newest-first,
+    # so a low cap silently drops the OLDEST runs (looks like a time-based
+    # dismissal). Keep high enough to cover every run; runs leave the ledger only
+    # by an explicit human action, never by a timer. Overridable via `?limit=`.
+    limit: int = 2000,
 ) -> list[dict]:
     async with sf() as session:
         # §6.1: latest render per run (renders ⟕ drafts, newest iteration) —

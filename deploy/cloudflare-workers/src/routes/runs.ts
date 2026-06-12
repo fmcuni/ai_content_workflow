@@ -53,7 +53,12 @@ interface RunsEnv extends Env {
 const WP_DEFAULT_PAGE_TEMPLATE = "";
 
 // Statuses where the LangGraph is still actively driving the run.
-const DEFAULT_LIST_LIMIT = 50;
+// Ledger shows ALL runs — nothing is auto-removed by age. The list is sorted
+// newest-first, so a low cap silently drops the OLDEST runs, which reads like a
+// time-based dismissal. Keep this high enough to cover every run; runs only
+// leave the ledger by an explicit human action, never by a timer. Overridable
+// per-request via `?limit=`.
+const DEFAULT_LIST_LIMIT = 2000;
 
 // HITL_2 request_changes cap — must match the Python guard.
 const HITL_2_MAX_ITERATIONS = 3;
