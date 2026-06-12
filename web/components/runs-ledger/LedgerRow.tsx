@@ -20,6 +20,8 @@ interface LedgerRowProps {
   personaBySlug: Map<string, Persona>;
   targetById: Map<string, PublishTarget>;
   options: OptionMaps;
+  /** Rendered as a theme sub-task — indents + draws a connector spine. */
+  nested?: boolean;
 }
 
 const PUB_PILL: Record<string, string> = {
@@ -53,7 +55,14 @@ function Flag({ tone, children, title }: { tone: "blue" | "gray" | "amber"; chil
  * reflows into a card (the table cells become stacked blocks). Clicking the row
  * opens the drawer; the checkbox is isolated so selecting never opens it.
  */
-export function LedgerRow({ run, view, personaBySlug, targetById, options }: LedgerRowProps) {
+export function LedgerRow({
+  run,
+  view,
+  personaBySlug,
+  targetById,
+  options,
+  nested = false,
+}: LedgerRowProps) {
   const target = resolveTarget(run, personaBySlug, targetById);
   const voice = voiceName(run, personaBySlug);
   const slug = decodeSlug(run);
@@ -72,12 +81,17 @@ export function LedgerRow({ run, view, personaBySlug, targetById, options }: Led
       aria-selected={view.open}
       className={cn(
         "cursor-pointer align-top hover:bg-paper-deep/40 max-md:relative max-md:my-2.5 max-md:block max-md:rounded-[10px] max-md:border max-md:border-rule max-md:py-3 max-md:pl-10 max-md:pr-3",
+        nested && "bg-paper-deep/20 max-md:ml-4",
         view.selected && "bg-accent/[0.06]",
         view.open && "bg-accent/[0.06] shadow-[inset_3px_0_0_var(--color-accent)] max-md:shadow-[inset_0_0_0_1.5px_var(--color-accent)]",
       )}
     >
       <td
-        className="w-[34px] border-b border-rule/60 p-2.5 max-md:absolute max-md:left-3 max-md:top-3.5 max-md:border-0 max-md:p-0"
+        className={cn(
+          "w-[34px] border-b border-rule/60 p-2.5 max-md:absolute max-md:left-3 max-md:top-3.5 max-md:border-0 max-md:p-0",
+          // Connector spine continuing the parent theme's accent rail.
+          nested && "border-l-[3px] border-l-accent/25 pl-3.5 max-md:border-l-0",
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         <input

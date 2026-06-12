@@ -4,17 +4,14 @@ import { useMemo, useState } from "react";
 
 import { useRole } from "@/lib/use-role";
 
+import { buildBoard } from "./board";
 import { BulkBar } from "./BulkBar";
 import { BulkMetadataModal } from "./BulkMetadataModal";
 import { LedgerTable } from "./LedgerTable";
 import { RunDrawer, type DrawerPerms } from "./RunDrawer";
 import { Toolbar } from "./Toolbar";
-import {
-  filterAndSortRuns,
-  useLedgerData,
-  type LedgerTab,
-  type SortOrder,
-} from "./useLedgerData";
+import { useExpandedThemes } from "./useExpandedThemes";
+import { useLedgerData, type LedgerTab, type SortOrder } from "./useLedgerData";
 import { useWpOptionMaps } from "./useWpOptionMaps";
 
 /**
@@ -39,10 +36,16 @@ export function RunsLedger() {
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
 
-  const visible = useMemo(
-    () => filterAndSortRuns(data.runs, { tab, voice, creator, search, sort }),
-    [data.runs, tab, voice, creator, search, sort],
+  const { expanded, toggle: toggleTheme } = useExpandedThemes();
+
+  // Board model: themes (topic batches) as parent tasks, their promoted runs
+  // nested beneath, standalone runs flat below. `visible` is the flattened run
+  // order of everything currently rendered — drives select-all + drawer nav.
+  const board = useMemo(
+    () => buildBoard(data.runs, data.batches, { tab, voice, creator, search, sort }, expanded),
+    [data.runs, data.batches, tab, voice, creator, search, sort, expanded],
   );
+  const visible = board.visibleRuns;
 
   // One option-map pass over every voice present, so rows show destination names
   // without each firing its own wp-options fetch.
@@ -83,6 +86,16 @@ export function RunsLedger() {
     setSelected((prev) => {
       const allOn = visible.length > 0 && visible.every((r) => prev.has(r.run_id));
       return allOn ? new Set() : new Set(visible.map((r) => r.run_id));
+    });
+  // A theme row's checkbox selects / clears all of its child runs at once.
+  const toggleChildren = (childIds: string[], select: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of childIds) {
+        if (select) next.add(id);
+        else next.delete(id);
+      }
+      return next;
     });
 
   // Step the open drawer through the visible list (j/k / ↑↓), clamped to bounds.
@@ -125,11 +138,14 @@ export function RunsLedger() {
       />
 
       <LedgerTable
-        runs={visible}
+        board={board}
         selected={selected}
         openRun={openRun}
+        expanded={expanded}
         onToggleSelect={toggleSelect}
         onToggleAll={toggleAll}
+        onToggleTheme={toggleTheme}
+        onToggleChildren={toggleChildren}
         onOpen={setOpenRun}
         personaBySlug={data.personaBySlug}
         targetById={data.targetById}

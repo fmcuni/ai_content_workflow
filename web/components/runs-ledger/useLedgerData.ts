@@ -3,9 +3,9 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api, personasApi, publishTargetsApi } from "@/lib/api";
+import { api, personasApi, publishTargetsApi, topicBatchesApi } from "@/lib/api";
 import { statusTone } from "@/lib/run-status";
-import type { Persona, PublishTarget, RunSummary } from "@/lib/types";
+import type { Persona, PublishTarget, RunSummary, TopicBatch } from "@/lib/types";
 
 import { fmtCreator, voiceName } from "./fmt";
 
@@ -14,6 +14,10 @@ import { fmtCreator, voiceName } from "./fmt";
 export const RUNS_LIST_KEY = ["runs", "ledger"] as const;
 export const PERSONAS_KEY = ["personas"] as const;
 export const PUBLISH_TARGETS_KEY = ["publish-targets"] as const;
+// Themes (topic batches) headline the board as parent tasks; promoted runs nest
+// under them. Batches change less often than runs, so a short stale window cuts
+// refetch churn while still surfacing newly-created themes quickly.
+export const TOPIC_BATCHES_KEY = ["topic-batches", "ledger"] as const;
 
 // The ledger's status tabs. `pending` is the "in progress" bucket — it absorbs
 // EVERY transient/working status (spec §2) via the shared blue tone, so no run
@@ -79,6 +83,8 @@ export interface CreatorOption {
 
 export interface LedgerData {
   runs: RunSummary[];
+  /** Themes (topic batches) — board parent tasks; promoted runs nest beneath. */
+  batches: TopicBatch[];
   isLoading: boolean;
   isError: boolean;
   personaBySlug: Map<string, Persona>;
@@ -111,8 +117,14 @@ export function useLedgerData(): LedgerData {
     queryFn: () => publishTargetsApi.list(),
     staleTime: 10 * 60_000,
   });
+  const batchesQuery = useQuery({
+    queryKey: TOPIC_BATCHES_KEY,
+    queryFn: () => topicBatchesApi.list(),
+    staleTime: 60_000,
+  });
 
   const runs = useMemo(() => runsQuery.data ?? [], [runsQuery.data]);
+  const batches = useMemo(() => batchesQuery.data ?? [], [batchesQuery.data]);
 
   const personaBySlug = useMemo(() => {
     const m = new Map<string, Persona>();
@@ -169,6 +181,7 @@ export function useLedgerData(): LedgerData {
 
   return {
     runs,
+    batches,
     isLoading: runsQuery.isLoading,
     isError: runsQuery.isError,
     personaBySlug,
@@ -179,30 +192,47 @@ export function useLedgerData(): LedgerData {
   };
 }
 
+/** Tab + voice + creator + search filter inputs, shared by the flat ledger and
+ *  the theme board (see board.ts). */
+export interface RunFilterOpts {
+  tab: LedgerTab;
+  voice: string;
+  creator: string;
+  search: string;
+}
+
+/** Whether a run passes the active filters. Pure + exported so the board can
+ *  reuse the exact same predicate when partitioning runs under themes. */
+export function runMatches(run: RunSummary, opts: RunFilterOpts): boolean {
+  if (!tabMatches(opts.tab, run.status)) return false;
+  if (opts.voice && run.persona !== opts.voice) return false;
+  if (opts.creator && (run.created_by ?? "") !== opts.creator) return false;
+  const q = opts.search.trim().toLowerCase();
+  if (q) {
+    const haystack = [
+      run.topic,
+      run.seo_title ?? "",
+      run.meta_description ?? "",
+      run.wp_slug ?? "",
+      ...(run.keywords ?? []),
+    ]
+      .join(" ")
+      .toLowerCase();
+    if (!haystack.includes(q)) return false;
+  }
+  return true;
+}
+
+/** Stable created_at sort (newest/oldest), non-mutating. */
+export function sortRuns(runs: RunSummary[], sort: SortOrder): RunSummary[] {
+  const dir = sort === "newest" ? -1 : 1;
+  return [...runs].sort((a, b) => dir * a.created_at.localeCompare(b.created_at));
+}
+
 /** Apply tab + voice + search filters, then sort — pure for testability. */
 export function filterAndSortRuns(
   runs: RunSummary[],
-  opts: { tab: LedgerTab; voice: string; creator: string; search: string; sort: SortOrder },
+  opts: RunFilterOpts & { sort: SortOrder },
 ): RunSummary[] {
-  const q = opts.search.trim().toLowerCase();
-  const filtered = runs.filter((r) => {
-    if (!tabMatches(opts.tab, r.status)) return false;
-    if (opts.voice && r.persona !== opts.voice) return false;
-    if (opts.creator && (r.created_by ?? "") !== opts.creator) return false;
-    if (q) {
-      const haystack = [
-        r.topic,
-        r.seo_title ?? "",
-        r.meta_description ?? "",
-        r.wp_slug ?? "",
-        ...(r.keywords ?? []),
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    return true;
-  });
-  const dir = opts.sort === "newest" ? -1 : 1;
-  return filtered.sort((a, b) => dir * a.created_at.localeCompare(b.created_at));
+  return sortRuns(runs.filter((r) => runMatches(r, opts)), opts.sort);
 }

@@ -41,6 +41,11 @@ export interface RunSummary {
   hitl_2_iteration?: number;
   start_mode?: StartMode;
   topic_candidate_id?: string | null;
+  // Theme (topic_batch) this run was promoted from — topic_candidates.batch_id,
+  // surfaced on the /runs list payload (both backends). NULL for standalone
+  // (ad-hoc create / refresh) runs. Drives the runs board's theme→sub-task
+  // grouping (see components/runs-ledger/board.ts).
+  topic_batch_id?: string | null;
   target_audience?: string | null;
   keywords?: string[];
   persona?: string | null;

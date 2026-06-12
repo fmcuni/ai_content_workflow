@@ -202,10 +202,20 @@ async def list_runs(
             .limit(1)
             .lateral("lr")
         )
+        # Theme this run was promoted from: topic_candidates.batch_id keyed by
+        # runs.topic_candidate_id. Correlated scalar subquery (mirrors the Workers
+        # `LEFT JOIN topic_candidates`); NULL for standalone create/refresh runs.
+        # Drives the /runs board's theme→sub-task grouping.
+        topic_batch_id = (
+            select(TopicCandidate.batch_id)
+            .where(TopicCandidate.candidate_id == Run.topic_candidate_id)
+            .scalar_subquery()
+        )
         q = select(
             Run,
             latest_render.c.seo_title,
             latest_render.c.meta_description,
+            topic_batch_id.label("topic_batch_id"),
         ).outerjoin(latest_render, true())
         if status:
             q = q.where(Run.status == status)
@@ -226,6 +236,7 @@ async def list_runs(
                 "topic_candidate_id": (
                     str(r.topic_candidate_id) if r.topic_candidate_id else None
                 ),
+                "topic_batch_id": (str(r.topic_batch_id) if r.topic_batch_id else None),
                 "target_audience": r.target_audience,
                 "keywords": r.keywords,
                 "persona": r.persona,

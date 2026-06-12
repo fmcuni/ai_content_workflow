@@ -95,6 +95,7 @@ interface CreateRunBody {
   edit_note?: string | null;
   start_mode?: string;
   topic_candidate_id?: string | null;
+  topic_batch_id?: string | null;
   target_audience?: string | null;
   triggered_by_evaluation_id?: string | null;
   auto_accept_hitl1?: boolean;
@@ -205,6 +206,10 @@ interface RunListRow {
   iteration_count: number;
   start_mode: string;
   topic_candidate_id: string | null;
+  // Theme (topic_batch) this run was promoted from, surfaced via
+  // topic_candidates.batch_id. NULL for standalone (ad-hoc create / refresh)
+  // runs. Drives the /runs board's theme→sub-task grouping.
+  topic_batch_id: string | null;
   target_audience: string | null;
   keywords: unknown;
   persona: string;
@@ -424,19 +429,30 @@ runsRouter.get("/", async (c) => {
   const limit = Number.isFinite(limitRaw) ? Math.max(limitRaw, 1) : DEFAULT_LIST_LIMIT;
 
   const rows = await withDb(c.env, c.executionCtx, (sql: Sql) => {
+    // Columns are qualified with `runs.` because the topic_candidates join below
+    // shares names (status, topic, created_at, keywords, …) — bare refs would be
+    // ambiguous.
     const statusClause =
-      statusFilter !== null ? sql`WHERE status = ${statusFilter}` : sql``;
+      statusFilter !== null ? sql`WHERE runs.status = ${statusFilter}` : sql``;
     return sql<RunListRow[]>`
       SELECT
-        run_id, status, topic, article_url, mode, created_at, created_by,
-        chosen_route,
-        iteration_count, start_mode, topic_candidate_id, target_audience,
-        keywords, persona, acf_adv_id, acf_widget_id, edit_note,
-        auto_accept_hitl1,
-        wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
-        wp_slug, wp_excerpt, wp_publish_status, wp_publish_at, wp_pushed_post_id,
+        runs.run_id, runs.status, runs.topic, runs.article_url, runs.mode,
+        runs.created_at, runs.created_by,
+        runs.chosen_route,
+        runs.iteration_count, runs.start_mode, runs.topic_candidate_id,
+        tc.batch_id AS topic_batch_id,
+        runs.target_audience,
+        runs.keywords, runs.persona, runs.acf_adv_id, runs.acf_widget_id,
+        runs.edit_note,
+        runs.auto_accept_hitl1,
+        runs.wp_author_id, runs.wp_category_ids, runs.wp_tag_ids,
+        runs.wp_featured_media_id,
+        runs.wp_slug, runs.wp_excerpt, runs.wp_publish_status, runs.wp_publish_at,
+        runs.wp_pushed_post_id,
         lr.seo_title, lr.meta_description
       FROM content_tool.runs
+      LEFT JOIN content_tool.topic_candidates tc
+        ON tc.candidate_id = runs.topic_candidate_id
       LEFT JOIN LATERAL (
         SELECT r.seo_title, r.meta_description
         FROM content_tool.renders r
@@ -446,7 +462,7 @@ runsRouter.get("/", async (c) => {
         LIMIT 1
       ) lr ON TRUE
       ${statusClause}
-      ORDER BY created_at DESC
+      ORDER BY runs.created_at DESC
       LIMIT ${limit}
     `;
   });
@@ -464,6 +480,7 @@ runsRouter.get("/", async (c) => {
       iteration_count: r.iteration_count,
       start_mode: r.start_mode,
       topic_candidate_id: r.topic_candidate_id,
+      topic_batch_id: r.topic_batch_id,
       target_audience: r.target_audience,
       keywords: pgJson(r.keywords),
       persona: r.persona,
