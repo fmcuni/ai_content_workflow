@@ -71,18 +71,23 @@ function UserMenu({ email, role, onSignOut }: UserMenuProps) {
   );
 }
 
-// `exact` entries match only their own path (so the Desk's "/" and the Ledger's
-// "/runs" don't both light up, and deeper run pages like /runs/{id}/hitl2 don't
-// activate the Ledger tab); the rest match on prefix.
+// Nav entries match their own path or any sub-path (so /runs/{id}/hitl2 keeps the
+// Runs tab lit). `aliases` adds extra exact-match paths — the Runs ledger also
+// owns the legacy home "/".
 interface NavItem {
   href: string;
   label: string;
-  exact?: boolean;
+  aliases?: string[];
+}
+
+function navActive(item: NavItem, pathname: string): boolean {
+  if (pathname === item.href || pathname.startsWith(item.href + "/")) return true;
+  return (item.aliases ?? []).includes(pathname);
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Runs", exact: true },
-  { href: "/runs", label: "Ledger", exact: true },
+  { href: "/runs", label: "Runs", aliases: ["/"] },
+  { href: "/topic-batches", label: "Topics" },
   { href: "/voices", label: "Voices" },
   { href: "/prompts", label: "Prompts" },
 ];
@@ -105,10 +110,11 @@ function isoWeek(d: Date): number {
   return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
 }
 
-function dateline(d: Date): string {
-  const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  return `${days[d.getDay()]} ${String(d.getDate()).padStart(2, "0")} ${months[d.getMonth()]} ${d.getFullYear()}`;
+// Editorial dateline: `VOL. NN · YYYY-MM-DD` (matches the redesign demo's
+// masthead-date; ISO date also satisfies the house YYYY-MM-DD convention).
+function dateStamp(d: Date): string {
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `VOL. ${String(isoWeek(d)).padStart(2, "0")}  ·  ${iso}`;
 }
 
 export function Masthead() {
@@ -148,37 +154,34 @@ export function Masthead() {
 
   return (
     <header className="bg-paper/85 backdrop-blur-md">
-      <div className="mx-auto max-w-[1180px] px-5 md:px-10 pt-6 pb-3 flex items-center justify-between">
+      <div className="mx-auto max-w-[1400px] px-5 md:px-7 pt-2.5 pb-2 flex items-center justify-between">
         <Link
-          href="/"
-          className="font-display text-[15px] tracking-[0.16em] uppercase font-medium text-ink hover:text-accent transition-colors"
+          href="/runs"
+          className="font-display text-[13px] tracking-[0.18em] uppercase font-semibold text-ink hover:text-accent transition-colors"
           style={{ fontVariationSettings: '"opsz" 14, "SOFT" 60' }}
         >
           Bowtie AI Content Workflow
         </Link>
-        <div className="font-mono text-[11px] tracking-wider text-ink-faint uppercase">
-          {now ? `VOL. ${isoWeek(now)}  ·  ${dateline(now)}` : ""}
+        <div className="font-mono text-[11px] tracking-[0.08em] text-ink-faint uppercase">
+          {now ? dateStamp(now) : ""}
         </div>
       </div>
-      <div className="mx-auto max-w-[1180px] px-5 md:px-10 pb-3 flex items-center justify-between">
-        <nav className="flex items-center gap-6 text-[13px]">
+      <div className="mx-auto max-w-[1400px] px-5 md:px-7 flex items-center justify-between border-t border-rule/60">
+        <nav className="flex items-baseline gap-[22px] text-[12.5px]">
           {navItems.map((n) => {
-            const active = n.exact ? pathname === n.href : pathname.startsWith(n.href);
+            const active = navActive(n, pathname);
             return (
               <Link
                 key={n.href}
                 href={n.href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "transition-colors hover:text-ink inline-flex items-center gap-1.5",
-                  active ? "text-ink" : "text-ink-soft"
+                  "inline-block py-2.5 transition-colors",
+                  active
+                    ? "text-ink font-semibold shadow-[inset_0_-2px_0_var(--color-accent)]"
+                    : "text-ink-soft hover:text-ink"
                 )}
               >
-                <span
-                  aria-hidden
-                  className={cn("text-accent text-[10px]", active ? "opacity-100" : "opacity-0")}
-                >
-                  ▪
-                </span>
                 {n.label}
               </Link>
             );

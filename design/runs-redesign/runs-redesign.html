@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Runs — Bowtie AI Content Workflow (redesign demo)</title>
+<style>
+  :root {
+    --paper: #faf7f1;
+    --surface: #ffffff;
+    --ink: #1d1a16;
+    --muted: #6e685e;
+    --faint: #98927f;
+    --line: #e7e2d8;
+    --line-soft: #f0ece3;
+    --rust: #b4421f;
+    --rust-dark: #93351a;
+    --rust-tint: #fbf1ec;
+    --amber: #a16207;
+    --amber-bg: #fef6e7;
+    --blue: #1e5fa8;
+    --blue-bg: #eaf2fb;
+    --green: #1a7f43;
+    --green-bg: #eaf6ee;
+    --red: #b3261e;
+    --red-bg: #fdeeed;
+    --gray: #7a756b;
+    --gray-bg: #f2f0ea;
+    --serif: "Georgia", "Times New Roman", "Songti TC", "Songti SC", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", "PingFang TC", "PingFang SC", "Microsoft JhengHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--surface);
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font-family: inherit; font-size: inherit; cursor: pointer; }
+  input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+
+  /* ── Masthead (editorial accent zone) ─────────────────────────── */
+  .masthead {
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+  }
+  .masthead-top {
+    max-width: 1400px; margin: 0 auto; padding: 10px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .wordmark {
+    font-family: var(--serif); font-size: 13px; letter-spacing: 0.18em;
+    text-transform: uppercase; font-weight: 600; color: var(--ink);
+  }
+  .masthead-meta { font-size: 11px; color: var(--faint); letter-spacing: 0.08em; }
+  .masthead-nav {
+    max-width: 1400px; margin: 0 auto; padding: 0 28px 0;
+    display: flex; align-items: baseline; gap: 22px; border-top: 1px solid var(--line-soft);
+  }
+  .masthead-nav a {
+    display: inline-block; padding: 9px 0 11px; color: var(--muted);
+    text-decoration: none; font-size: 12.5px;
+  }
+  .masthead-nav a.active { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--rust); }
+  .masthead-nav .spacer { flex: 1; }
+  .btn-newrun {
+    margin: 6px 0; background: var(--ink); color: #fff; border: none;
+    padding: 7px 14px; border-radius: 6px; font-weight: 600; font-size: 12.5px;
+  }
+  .btn-newrun:hover { background: #000; }
+
+  /* ── Page head ────────────────────────────────────────────────── */
+  .page-head {
+    max-width: 1400px; margin: 0 auto; padding: 22px 28px 14px;
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  }
+  .page-head h1 {
+    font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .page-head .sub { color: var(--muted); margin-top: 4px; font-size: 12.5px; max-width: 640px; }
+  .demo-note {
+    font-size: 11px; color: var(--faint); border: 1px dashed var(--line);
+    border-radius: 6px; padding: 6px 10px; white-space: nowrap;
+  }
+
+  /* ── Toolbar ──────────────────────────────────────────────────── */
+  .toolbar {
+    max-width: 1400px; margin: 0 auto; padding: 0 28px 12px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    position: sticky; top: 0; z-index: 30; background: var(--surface);
+    padding-top: 8px;
+  }
+  .tabs { display: flex; gap: 2px; background: var(--gray-bg); border-radius: 8px; padding: 3px; }
+  .tab {
+    border: none; background: transparent; padding: 6px 12px; border-radius: 6px;
+    color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 6px;
+  }
+  .tab .n { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .tab.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .tab.active .n { color: var(--rust); font-weight: 700; }
+  .toolbar .grow { flex: 1; }
+  .search {
+    position: relative;
+  }
+  .search input {
+    width: 230px; padding: 7px 10px 7px 30px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--surface); font-size: 12.5px;
+  }
+  .search input:focus { outline: 2px solid rgba(180,66,31,.25); border-color: var(--rust); }
+  .search svg { position: absolute; left: 9px; top: 8px; width: 14px; height: 14px; stroke: var(--faint); }
+  .select-pill {
+    padding: 7px 28px 7px 10px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--surface) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="%2398927f" stroke-width="1.5"/></svg>') no-repeat right 9px center;
+    appearance: none; font-size: 12.5px; color: var(--ink);
+  }
+
+  /* ── Table ────────────────────────────────────────────────────── */
+  .table-wrap { max-width: 1400px; margin: 0 auto; padding: 0 28px 120px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--faint); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line);
+    background: var(--surface); position: sticky; top: 52px; z-index: 20;
+    white-space: nowrap;
+  }
+  tbody td { padding: 10px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #fbfaf7; }
+  tbody tr.selected { background: var(--rust-tint); }
+  tbody tr.open-row { background: var(--rust-tint); box-shadow: inset 3px 0 0 var(--rust); }
+  .col-check { width: 34px; }
+  .col-voice { width: 118px; }
+  .col-status { width: 138px; }
+  .col-wp { width: 270px; }
+  .col-date { width: 118px; }
+  input[type="checkbox"] {
+    width: 15px; height: 15px; accent-color: var(--rust); cursor: pointer; margin-top: 2px;
+  }
+  .topic-title { font-weight: 600; font-size: 13.5px; line-height: 1.35; }
+  .topic-sub {
+    color: var(--muted); font-size: 12px; margin-top: 3px; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .topic-ids {
+    font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .topic-ids .cms-id { color: var(--green); font-weight: 600; }
+  .topic-flags { display: inline-flex; gap: 5px; margin-left: 7px; vertical-align: 1px; }
+  .flag {
+    font-size: 10px; padding: 1.5px 6px; border-radius: 4px; font-weight: 600;
+    letter-spacing: 0.04em; white-space: nowrap;
+  }
+  .flag.refresh { background: var(--blue-bg); color: var(--blue); }
+  .flag.create { background: var(--gray-bg); color: var(--gray); }
+  .flag.note { background: var(--amber-bg); color: var(--amber); }
+  .flag.iter { background: var(--gray-bg); color: var(--gray); }
+  .voice-badge {
+    display: inline-block; font-size: 11px; font-weight: 600; color: var(--ink);
+    background: var(--gray-bg); border: 1px solid var(--line); border-radius: 5px;
+    padding: 3px 7px; white-space: nowrap;
+  }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600;
+    padding: 3.5px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .st-hitl_2 { background: var(--amber-bg); color: var(--amber); } .st-hitl_2 .dot { background: var(--amber); }
+  .st-hitl_1 { background: var(--amber-bg); color: var(--amber); } .st-hitl_1 .dot { background: var(--amber); box-shadow: 0 0 0 2px #fde8c0; }
+  .st-pending { background: var(--blue-bg); color: var(--blue); } .st-pending .dot { background: var(--blue); }
+  .st-published { background: var(--green-bg); color: var(--green); } .st-published .dot { background: var(--green); }
+  .st-failed { background: var(--red-bg); color: var(--red); } .st-failed .dot { background: var(--red); }
+  .st-rejected { background: var(--gray-bg); color: var(--gray); } .st-rejected .dot { background: var(--gray); }
+  .gate-hint { font-size: 10.5px; color: var(--faint); margin-top: 3px; }
+
+  .wp-cell { font-size: 12px; line-height: 1.55; color: var(--muted); }
+  .wp-cell .wp-line { display: flex; gap: 5px; align-items: baseline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wp-cell .k { color: var(--faint); font-size: 10.5px; width: 38px; flex: none; text-transform: uppercase; letter-spacing: .05em; }
+  .wp-cell .v { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+  .wp-cell .v.unset { color: var(--faint); font-style: italic; }
+  .pub-pill {
+    font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 4px;
+  }
+  .pub-publish { background: var(--green-bg); color: var(--green); }
+  .pub-draft { background: var(--gray-bg); color: var(--gray); }
+  .pub-future { background: var(--blue-bg); color: var(--blue); }
+  .wp-pushed { color: var(--green); font-weight: 600; }
+  .date-cell { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; }
+  .empty-state { padding: 60px 0; text-align: center; color: var(--faint); }
+
+  /* ── Bulk bar ─────────────────────────────────────────────────── */
+  .bulkbar {
+    position: fixed; left: 50%; transform: translateX(-50%) translateY(80px);
+    bottom: 18px; z-index: 60; display: flex; align-items: center; gap: 8px;
+    background: var(--ink); color: #fff; padding: 9px 10px 9px 16px; border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.25); transition: transform .18s ease; opacity: 0;
+    pointer-events: none;
+  }
+  .bulkbar.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
+  .bulkbar .count { font-weight: 700; font-size: 12.5px; margin-right: 6px; white-space: nowrap; }
+  .bulkbar button {
+    background: rgba(255,255,255,.12); color: #fff; border: none; border-radius: 7px;
+    padding: 7px 11px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .bulkbar button:hover { background: rgba(255,255,255,.22); }
+  .bulkbar button.primary { background: var(--rust); }
+  .bulkbar button.primary:hover { background: var(--rust-dark); }
+  .bulkbar button.ghost { background: transparent; color: rgba(255,255,255,.7); }
+  .bulkbar .divider { width: 1px; height: 18px; background: rgba(255,255,255,.2); margin: 0 2px; }
+
+  /* ── Drawer ───────────────────────────────────────────────────── */
+  .drawer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    background: var(--surface); border-top: 2px solid var(--rust);
+    box-shadow: 0 -10px 40px rgba(29,26,22,.14);
+    transform: translateY(105%); transition: transform .22s ease;
+    height: min(440px, 58vh); display: flex; flex-direction: column;
+  }
+  .drawer.open { transform: translateY(0); }
+  .drawer-head {
+    display: flex; align-items: center; gap: 12px; padding: 12px 28px;
+    border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .drawer-head .t { font-family: var(--serif); font-size: 17px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drawer-head .nav-btn, .drawer-head .close-btn {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+    width: 26px; height: 26px; display: grid; place-items: center; color: var(--muted); font-size: 13px;
+  }
+  .drawer-head .nav-btn:hover, .drawer-head .close-btn:hover { background: var(--gray-bg); }
+  .runid { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .drawer-body {
+    flex: 1; display: grid; grid-template-columns: 1fr 1.1fr 1.15fr; gap: 0;
+    overflow: hidden; max-width: 1400px; width: 100%; margin: 0 auto;
+  }
+  .drawer-col { padding: 14px 24px 18px; overflow-y: auto; }
+  .drawer-col + .drawer-col { border-left: 1px solid var(--line-soft); }
+  .sec-label {
+    font-family: var(--serif); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--rust); font-weight: 600; margin-bottom: 10px;
+  }
+  .dest-target { color: var(--faint); letter-spacing: 0.04em; font-family: var(--sans); text-transform: none; font-weight: 500; }
+  .kv { display: grid; grid-template-columns: 86px 1fr; gap: 4px 10px; font-size: 12.5px; }
+  .kv .k { color: var(--faint); padding-top: 1px; }
+  .kv .v { color: var(--ink); min-width: 0; word-break: break-word; }
+  .kv .v a { color: var(--blue); text-decoration: none; }
+  .kv .v a:hover { text-decoration: underline; }
+  .kw-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .kw-chip { background: var(--gray-bg); border-radius: 4px; padding: 1.5px 7px; font-size: 11px; color: var(--muted); }
+  .edit-note-box {
+    margin-top: 10px; background: var(--amber-bg); border-left: 3px solid var(--amber);
+    border-radius: 0 6px 6px 0; padding: 8px 10px; font-size: 12px; color: #7a5410; line-height: 1.5;
+    cursor: pointer;
+  }
+  .edit-note-box .note-text {
+    display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical;
+    overflow: hidden; white-space: pre-line;
+  }
+  .edit-note-box.expanded .note-text { display: block; -webkit-line-clamp: unset; }
+  .edit-note-box .note-more { font-weight: 600; font-size: 11px; margin-top: 4px; }
+  .preview-headline { font-family: var(--serif); font-size: 15.5px; font-weight: 600; line-height: 1.4; margin-bottom: 8px; }
+  .preview-meta { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+  .preview-empty { color: var(--faint); font-style: italic; font-size: 12.5px; padding: 14px 0; }
+  .preview-links { margin-top: 14px; display: flex; gap: 14px; }
+  .preview-links a { color: var(--rust); font-size: 12.5px; font-weight: 600; text-decoration: none; }
+  .preview-links a:hover { text-decoration: underline; }
+  .serp-frame {
+    border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: #fdfcfa;
+  }
+  .serp-url { font-size: 11px; color: var(--green); margin-bottom: 3px; word-break: break-all; }
+
+  .wp-form { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; }
+  .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .field.full { grid-column: 1 / -1; }
+  .field label { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .field select, .field input, .field textarea {
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px;
+    background: var(--surface); width: 100%;
+  }
+  .field select:focus, .field input:focus, .field textarea:focus { outline: 2px solid rgba(180,66,31,.22); border-color: var(--rust); }
+  .field .dirty { border-color: var(--amber); background: #fffdf5; }
+  .drawer-actions {
+    display: flex; gap: 8px; margin-top: 14px; align-items: center; flex-wrap: wrap;
+  }
+  /* search-and-select combobox */
+  .combo { position: relative; }
+  .combo-input {
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px;
+    width: 100%; background: var(--surface);
+  }
+  .combo-input:focus { outline: 2px solid rgba(180,66,31,.22); border-color: var(--rust); }
+  .combo-list {
+    position: absolute; top: calc(100% + 3px); left: 0; right: 0; max-height: 200px;
+    overflow-y: auto; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 7px; box-shadow: 0 8px 24px rgba(0,0,0,.12); z-index: 85;
+  }
+  .combo-group {
+    font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint);
+    padding: 6px 9px 3px; position: sticky; top: 0; background: var(--surface);
+  }
+  .combo-opt { padding: 6px 9px; cursor: pointer; font-size: 12.5px; }
+  .combo-opt:hover, .combo-opt.sel { background: var(--rust-tint); }
+  .combo-empty { padding: 8px 9px; color: var(--faint); font-style: italic; font-size: 12px; }
+  /* outline + gap panels (hitl_1 / outlined gate) */
+  .ol-h1 { font-family: var(--serif); font-weight: 600; font-size: 14.5px; margin-bottom: 10px; line-height: 1.4; }
+  .ol-sec { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin-bottom: 12px; }
+  .ol-head { font-weight: 600; font-size: 12.5px; line-height: 1.4; }
+  .ol-hlvl {
+    font-family: var(--mono); font-size: 9.5px; color: var(--faint); background: var(--gray-bg);
+    border-radius: 3px; padding: 1px 4px; margin-right: 5px; vertical-align: 1px;
+  }
+  .ol-intent { color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.45; }
+  .ol-points { margin: 5px 0 0 16px; font-size: 12px; color: var(--ink); line-height: 1.55; }
+  .ol-points li { margin-bottom: 2px; }
+  .gap-sec { margin-bottom: 12px; }
+  .gap-sec h4 {
+    font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint); margin-bottom: 4px; font-weight: 600;
+  }
+  .gap-text { font-size: 12.5px; line-height: 1.5; }
+  .gap-pages { margin: 4px 0 0 16px; font-size: 12px; line-height: 1.6; }
+  .gap-pages a { color: var(--blue); text-decoration: none; }
+  .gap-pages a:hover { text-decoration: underline; }
+  .btn {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 7px;
+    padding: 8px 13px; font-size: 12.5px; font-weight: 600; color: var(--ink);
+  }
+  .btn:hover { background: var(--gray-bg); }
+  .btn.primary { background: var(--rust); border-color: var(--rust); color: #fff; }
+  .btn.primary:hover { background: var(--rust-dark); }
+  .btn.danger { color: var(--red); border-color: #efd5d3; }
+  .btn.danger:hover { background: var(--red-bg); }
+  .save-hint { font-size: 11px; color: var(--faint); margin-left: auto; }
+
+  /* ── Modal (bulk metadata) ────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(29,26,22,.4); z-index: 70;
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--surface); border-radius: 12px; width: 460px; max-width: calc(100vw - 40px);
+    box-shadow: 0 20px 60px rgba(0,0,0,.3); padding: 20px 22px;
+  }
+  .modal h3 { font-family: var(--serif); font-size: 17px; margin-bottom: 4px; }
+  .modal .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .modal .wp-form { grid-template-columns: 1fr 1fr; }
+  .modal .hint { font-size: 11px; color: var(--faint); margin-top: 10px; line-height: 1.5; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  /* ── Toast ────────────────────────────────────────────────────── */
+  .toast-zone { position: fixed; right: 20px; bottom: 20px; z-index: 90; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 8px;
+    font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: 420px;
+    animation: toast-in .18s ease;
+  }
+  .toast .api { font-family: var(--mono); font-size: 10.5px; color: #d9b8a9; display: block; margin-top: 3px; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .footer-rule {
+    max-width: 1400px; margin: 0 auto; padding: 18px 28px 26px; color: var(--faint);
+    font-size: 11px; font-family: var(--serif); letter-spacing: .12em; text-transform: uppercase;
+    border-top: 1px solid var(--line-soft); text-align: center;
+  }
+  @media (max-width: 1080px) and (min-width: 761px) {
+    .drawer-body { grid-template-columns: 1fr 1fr; }
+    .drawer-col.col-context { display: none; }
+    .col-wp { display: none; }
+  }
+  /* ── Mobile: cards + stacked drawer for quick edits on the go ──── */
+  @media (max-width: 760px) {
+    .masthead-top, .masthead-nav, .page-head, .toolbar, .table-wrap, .footer-rule {
+      padding-left: 14px; padding-right: 14px;
+    }
+    .masthead-nav { overflow-x: auto; gap: 16px; scrollbar-width: none; }
+    .page-head { flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 14px; }
+    .toolbar { position: static; }
+    .tabs { overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+    .tab { padding: 6px 9px; white-space: nowrap; }
+    .search { flex: 1 1 100%; order: -1; }
+    .search input { width: 100%; }
+    .select-pill { flex: 1; }
+    .table-wrap { padding-bottom: 160px; }
+    thead { display: none; }
+    table, tbody { display: block; }
+    tbody tr {
+      display: block; position: relative; border: 1px solid var(--line);
+      border-radius: 10px; margin: 10px 0; padding: 12px 12px 10px 40px;
+    }
+    tbody tr.open-row { box-shadow: inset 0 0 0 1.5px var(--rust); }
+    tbody td { display: block; border: none; padding: 0; width: auto; }
+    td.col-check { position: absolute; left: 12px; top: 13px; }
+    td.col-voice, td.col-status, td.col-date {
+      display: inline-block; vertical-align: middle; margin: 8px 8px 0 0;
+    }
+    .date-cell { font-size: 11px; }
+    td.col-wp { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line-soft); }
+    .drawer { height: 92dvh; }
+    .drawer-head { padding: 10px 14px; gap: 8px; }
+    .drawer-head .t { font-size: 15px; }
+    .drawer-body { display: flex; flex-direction: column; overflow-y: auto; }
+    .drawer-col { overflow: visible; padding: 12px 16px; flex: none; }
+    .drawer-col.col-context { display: block; }
+    .drawer-col + .drawer-col { border-left: none; border-top: 1px solid var(--line-soft); }
+    .wp-form { grid-template-columns: 1fr; }
+    .drawer-actions { position: sticky; bottom: 0; background: var(--surface); padding: 10px 0; }
+    .bulkbar {
+      left: 8px; right: 8px; transform: translateY(100px);
+      flex-wrap: wrap; justify-content: center; padding: 8px 10px;
+    }
+    .bulkbar.show { transform: translateY(0); }
+    .modal { width: calc(100vw - 24px); }
+    .modal .wp-form { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <span class="wordmark">Bowtie AI Content Workflow</span>
+    <span class="masthead-meta" id="masthead-date"></span>
+  </div>
+  <nav class="masthead-nav">
+    <a class="active" href="#">Runs</a>
+    <a href="#">Topics</a>
+    <a href="#">Voices</a>
+    <a href="#">Prompts</a>
+    <a href="#">Targets</a>
+    <a href="#">Users</a>
+    <span class="spacer"></span>
+    <button class="btn-newrun">+ New run</button>
+  </nav>
+</header>
+
+<div class="page-head">
+  <div>
+    <h1>Runs</h1>
+    <div class="sub">Every rewrite and new article in one ledger. Click a row to review and set its CMS destination — select several to act in bulk.</div>
+  </div>
+  <div class="demo-note" id="demo-note">static demo · real production data sample</div>
+</div>
+
+<div class="toolbar">
+  <div class="tabs" id="tabs"></div>
+  <div class="grow"></div>
+  <div class="search">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input id="search" type="search" placeholder="Search topic, slug, keyword…">
+  </div>
+  <select class="select-pill" id="voice-filter"><option value="">Voice — all</option></select>
+  <select class="select-pill" id="sort">
+    <option value="newest">Newest first</option>
+    <option value="oldest">Oldest first — clear backlog</option>
+  </select>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th class="col-check"><input type="checkbox" id="check-all" title="Select all visible"></th>
+        <th>Topic &amp; draft</th>
+        <th class="col-voice">Voice</th>
+        <th class="col-status">Status</th>
+        <th class="col-wp">CMS destination</th>
+        <th class="col-date">Created</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty-state" id="empty" style="display:none">No runs match this filter.</div>
+</div>
+
+<div class="footer-rule">Bowtie Content Desk · runs ledger redesign demo</div>
+
+<!-- Bulk action bar -->
+<div class="bulkbar" id="bulkbar">
+  <span class="count" id="bulk-count">0 selected</span>
+  <button id="bulk-meta">Set CMS metadata…</button>
+  <button class="primary" id="bulk-publish">Approve &amp; publish</button>
+  <span class="divider"></span>
+  <button id="bulk-restart">Restart failed</button>
+  <button id="bulk-reject">Reject</button>
+  <span class="divider"></span>
+  <button class="ghost" id="bulk-clear">Clear</button>
+</div>
+
+<!-- Drawer -->
+<aside class="drawer" id="drawer" aria-label="Run detail">
+  <div class="drawer-head">
+    <button class="nav-btn" id="drawer-prev" title="Previous run (k)">↑</button>
+    <button class="nav-btn" id="drawer-next" title="Next run (j)">↓</button>
+    <span class="t" id="drawer-topic"></span>
+    <span id="drawer-status"></span>
+    <span class="runid" id="drawer-runid"></span>
+    <button class="close-btn" id="drawer-close" title="Close (Esc)">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="drawer-col col-context">
+      <div class="sec-label">Brief</div>
+      <div class="kv" id="ctx-kv"></div>
+      <div id="ctx-note"></div>
+    </div>
+    <div class="drawer-col">
+      <div class="sec-label" id="mid-label">Draft preview</div>
+      <div id="preview"></div>
+      <div id="gap-panel" style="display:none"></div>
+    </div>
+    <div class="drawer-col">
+      <div class="sec-label" id="right-label">CMS destination</div>
+      <div id="outline-panel" style="display:none"></div>
+      <div class="wp-form" id="wp-form">
+        <div class="field full"><label>SEO title</label><input id="f-seotitle" type="text" placeholder="from latest draft"></div>
+        <div class="field full"><label>Meta description</label><textarea id="f-metadesc" rows="2" placeholder="from latest draft"></textarea></div>
+        <div class="field"><label>Author</label><div class="combo" id="c-author"></div></div>
+        <div class="field"><label>Category</label><div class="combo" id="c-category"></div></div>
+        <div class="field full"><label>Slug</label><input id="f-slug" type="text" placeholder="auto from title"></div>
+        <div class="field"><label>Publish status</label>
+          <select id="f-pubstatus">
+            <option value="">— unset (defaults to draft)</option>
+            <option value="draft">draft</option>
+            <option value="publish">publish</option>
+            <option value="future">future (scheduled)</option>
+          </select>
+        </div>
+        <div class="field"><label>Publish date</label><input id="f-pubdate" type="date"></div>
+      </div>
+      <div class="drawer-actions" id="drawer-actions"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- Bulk metadata modal -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <h3>Set CMS metadata</h3>
+    <div class="modal-sub" id="modal-sub">Applies to selected runs. Blank fields are left untouched.</div>
+    <div class="wp-form">
+      <div class="field"><label>Author</label><div class="combo" id="c-m-author"></div></div>
+      <div class="field"><label>Category</label><div class="combo" id="c-m-category"></div></div>
+      <div class="field"><label>Publish status</label>
+        <select id="m-pubstatus">
+          <option value="">— leave as is</option>
+          <option value="draft">draft</option>
+          <option value="publish">publish</option>
+          <option value="future">future (scheduled)</option>
+        </select>
+      </div>
+      <div class="field"><label>Publish date</label><input id="m-pubdate" type="date"></div>
+    </div>
+    <div class="hint">Slug, SEO title and meta description stay per-run — edit those in the run drawer. Author/category options come from the voice's CMS target.</div>
+    <div class="modal-actions">
+      <button class="btn" id="modal-cancel">Cancel</button>
+      <button class="btn primary" id="modal-apply">Apply to selection</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-zone" id="toast-zone"></div>
+
+<script id="demo-data" type="application/json">{"extracted_at":"2026-06-12T02:26:39.159226+00:00","status_counts":{"failed":13,"hitl_1":38,"hitl_2":193,"pending":11,"published":66,"rejected":2},"runs":[{"run_id":"5421f63f-c2ae-45aa-8d15-d5597c90118f","status":"hitl_2","topic":"Bowtie 醫然保：公立醫院自費項目","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":"有關重點介紹 Bowtie 醫然保的產品頁面：https://www.bowtie.com.hk/zh/insurance/stillcover\n\n**Hook:** 辛苦做咗大半世，好不容易先儲到一筆退休金，最驚就係臨老先嚟大病一場，將啲積蓄雙手奉獻晒俾醫院。好多人以為「有事去公院睇病好平」，但其實裡面有大把無底深潭嘅「自費項目」同新藥，分分鐘一個月就燒你幾萬蚊退休金，真係會一鋪清袋！\n\n---\n\n以下是為您整理撰寫此文章的事實數據，只作數據及資料參考，寫作不須跟隨以下框架。\n\n### 一、 揭開公立醫院的「隱形醫療開支」真相\n*   **「免費」或「廉價」的迷思：** 雖然公立醫院基本住院和急症處理費用低廉，但面對中風、心臟病或癌症等大病，許多特效藥和醫療儀器（如心臟支架、人工關節等）其實都屬於「自費項目」。\n*   **自費項目開支驚人：**\n    *   **癌症標靶藥：** 每月藥費約為 $25,000 至 $80,000 不等。\n    *   **心臟病支架物料：** 約需自費 3萬 至 9萬元。\n    *   **人工膝關節：** 每側約需 $40,000 至 $65,000。\n    *   **中風微創取栓耗材及私家復康：** 約 5萬 至 15萬元。\n    *   **高階影像檢測（MRI/CT/PET）：** 每次約 $10,000 至 $22,000。\n    這些開支隨時高達幾十萬，足以令退休積蓄歸零。\n\n### 二、 公立醫院的另一痛點：「無了期」的排期時間\n*   **非緊急手術等到天荒地老：** 年紀漸長常遇機能退化問題，但在公立醫院排期做手術隨時要等數年，嚴重影響晚年生活質素。\n    *   **換關節手術：** 平均輪候 30 至 45 個月，最長可達 7 年（如新界東、九龍西聯網）。\n    *   **膽結石切除：** 輪候約 14 至 28 個月，最長可達 3.5 年。\n    *   **小腸氣及瘜肉切除：** 輪候期分別可達 2至4年 及 2年以上。\n\n### 三、 準退休人士 / 長期病患者的投保困境\n*   **買醫保成日被拒：** 踏入中年，不少人患有「三高」（高血壓、高血脂、高血糖）或糖尿病。傳統自願醫保（VHIS）對健康指標要求較高，這類人士或早期癌症康復者往往會面臨被拒保、加 Loading（附加保費）或設立不保事項的困境。\n*   **結果只能「醫療裸跑」：** 買不到保險，意味著只能無奈依賴公立醫院漫長的排期，大病時亦無力承擔自費新藥。\n\n### 四、 解決方案：Bowtie「醫然保」如何守住退休金\n文章的核心可以帶出 Bowtie 針對以上痛點推出的補充型醫保「醫然保」（StillCover），作為受眾的解決方案：\n*   **專為三高、糖尿病患者而設：** 只要是第二型糖尿病（無需注射胰島素）、三高指標穩定且無特定併發症，或早期癌症康復者，均有機會成功投保，無需驗身。\n*   **對沖公立醫院「自費黑洞」：** \n    *   計劃提供每年 50 萬保額。\n    *   **針對公立醫院自費藥物及醫療項目**（涵蓋醫管局藥物名冊、撒瑪利亞基金及關愛基金醫療援助項目內的藥物），提供 **80% 的賠償（即受保人只需自付 20% 共同保險）**，大幅減輕昂貴標靶藥或醫療儀器的負擔。\n*   **「私家快線」避開公院長龍（升級版適用）：** \n    *   涵蓋 **182 項**指定常見手術（針對機能退化及癌症相關手術，心血管疾病除外）。\n    *   可直通指定香港（如港怡醫院、中文大學醫院）及大灣區私家醫院接受治療。\n    *   **漸進式共同保險：** 首 2 個保單年度賠償 50%，**第 3 年起大幅提升至賠足 80%**。\n*   **長遠可負擔的保費設計：** 計劃並非「全包宴」，而是「應保則保」，透過共同保險機制平衡風險，確保保費長遠維持在退休人士能負擔的水平，並保證續保至 100 歲。","keywords":["Bowtie 醫然保","公立醫院自費藥物","公立醫院買藥好貴","通波仔費用公立醫院","全年收費上限","醫管局 豁免項目","公立醫院 1萬元上限 自費藥物","癌症復康用品開支"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T10:20:35.329041+00:00","updated_at":"2026-06-11T10:20:35.329041+00:00","seo_title":"公立醫院自費藥物與項目收費一覽：通波仔要幾錢？附 Bowtie 醫然保介紹","meta_description":"以為公立醫院睇病一定平？即看公立醫院自費項目及藥物收費一覽，了解通波仔費用、癌症標靶藥開支及醫管局豁免項目。為你介紹專為三高及糖尿病人士而設的 Bowtie 醫然保！"},{"run_id":"37b67687-2191-430c-baeb-f49523f3ec07","status":"hitl_2","topic":"雇员与公司医药卡","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["company panel clinic · 公司医药卡不够用 · employee benefits insurance · 离职后公司医药卡 · 团险 group insurance"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:44.932218+00:00","updated_at":"2026-06-11T09:49:44.932218+00:00","seo_title":"马来西亚雇员与公司医药卡指南：只靠团险够用吗？离职后怎么办？","meta_description":"了解马来西亚员工福利保险（Employee Benefits Insurance）与公司医药卡的使用方法、什么是 Company Panel Clinic。分析公司医药卡不够用的常见原因，探讨离职或退休后保障中断的风险，教你如何填补团险的保障缺口。"},{"run_id":"447139b1-c715-42d8-9f01-820f8064dc31","status":"hitl_2","topic":"M40中产阶级医药卡","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["M40 医药卡推荐 · m40 买什么保险 · 性价比高 medical card · 医药卡保费大概多少 · m40 医疗保障规划"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:43.753047+00:00","updated_at":"2026-06-11T09:49:43.753047+00:00","seo_title":"2026 马来西亚 M40 医药卡推荐：高性价比与医疗保障规划指南","meta_description":"专为马来西亚 M40 中产阶级整理的 2026 最新医药卡推荐与医疗保障规划。解析医药卡保费大概多少、如何挑选性价比高的 Medical Card，助你精明买保险。"},{"run_id":"fdbce7f1-3e1f-43c6-942d-148582456fa2","status":"hitl_2","topic":"医药卡投保前体检 (Medical Check-up Before Buying)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["买医药卡需要 body check up 吗","体检 report 影响医药卡","高血压可以买医药卡吗. 买 MHIT 隐瞒病史 会怎样","保险公司要求做体检"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:42.477946+00:00","updated_at":"2026-06-11T09:49:42.477946+00:00","seo_title":"买医药卡需要 Body Check Up 吗？带病投保与隐瞒病史后果全解析","meta_description":"买医药卡前必须做体检吗？高血压等已有疾病还能买保险吗？本文为您解析保险公司的体检要求、体检报告对医药卡审批的影响，以及隐瞒病史的严重后果。"},{"run_id":"20e6ed77-8ec7-428e-b79f-4275eed52ae6","status":"hitl_2","topic":"第二医疗意见保障 (Second Medical Opinion)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["second medical opinion 医药卡包吗","MHIT 第二医疗意见","去外国看病 医药卡 claim 吗","寻求专家意见 医药卡","癌症 second opinion claim"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:41.120662+00:00","updated_at":"2026-06-11T09:49:41.120662+00:00","seo_title":"2026马来西亚医药卡：Second Medical Opinion (第二医疗意见) 到底包不包？","meta_description":"想寻求第二医疗意见 (Second Medical Opinion) 却不知道医药卡包不包？本文为你解析马来西亚医药卡对本地与外国看病、癌症专家意见的理赔条件与申请流程。"},{"run_id":"2849968c-6d09-4d7b-88f3-e2565607cc60","status":"hitl_2","topic":"共同保险 (Co-insurance) 计算","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["co-insurance 是什么","医药卡 co insurance 怎样算","BNM co-insurance 规定","买 10% co-insurance 好吗","医药卡自付额 差别"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:39.620913+00:00","updated_at":"2026-06-11T09:49:39.620913+00:00","seo_title":"什么是共同保险 (Co-insurance)？2026 最新 BNM 规定与计算方法解析","meta_description":"了解马来西亚医药卡的共同保险 (Co-insurance) 是什么。本文深入解析 Co-insurance 计算方法、与自付额 (Deductible) 的差别，以及 2026 年最新 BNM 规定，帮你评估是否该买 10% Co-insurance 的医药卡。"},{"run_id":"75aa44bd-22fe-4320-8320-687d68b595ea","status":"hitl_2","topic":"家庭医药卡配套 (Family MHIT Plans)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["全家医药卡 配套","便宜 family medical card","一张卡保全家","夫妻医药卡","家庭 MHIT share limit"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:38.400136+00:00","updated_at":"2026-06-11T09:49:38.400136+00:00","seo_title":"2026马来西亚家庭医药卡配套指南：一张卡保全家真的划算吗？","meta_description":"寻找最适合的马来西亚全家医药卡？本文为您解析夫妻与家庭医药卡配套、共享限额(Share Limit)机制与优缺点，助您找到便宜且保障全面的Family Medical Card。"},{"run_id":"420912a9-9e3e-4d31-aead-c1bf38400a6b","status":"hitl_2","topic":"宽限期与保单失效 (Grace Period & Lapsed Policy)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["医药卡 grace period","保单 lapsed 怎么办","忘记还保费 医药卡","reinstate medical card 流程","MHIT 断保 还能 claim 吗"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:35.017179+00:00","updated_at":"2026-06-11T09:49:35.017179+00:00","seo_title":"忘记还医药卡保费？了解宽限期 (Grace Period) 与保单失效 (Lapsed) 补救指南","meta_description":"忘记还医药卡保费怎么办？本文为您详细解析马来西亚医药卡的宽限期 (Grace Period)、保单失效 (Lapsed) 后果，以及如何通过复效 (Reinstate) 流程恢复医疗保障。断保还能claim吗？即刻了解！"},{"run_id":"0b7eae87-9d68-47c0-84d1-031c610386f9","status":"hitl_2","topic":"外籍人士在马医疗保险 (Expat MHIT)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["外国人买马来西亚医药卡","expat medical insurance Malaysia","外劳 医药卡","工作准证 买 MHIT","非大马公民 医药卡"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:33.824184+00:00","updated_at":"2026-06-11T09:49:33.824184+00:00","seo_title":"2026马来西亚外国人医药卡指南：外籍人士与外劳医疗保险怎么买？","meta_description":"非大马公民能买本地医药卡吗？本文为你解析2026年马来西亚外籍人士医疗保险 (Expat MHIT) 政策，涵盖工作准证、MM2H、外劳等群体的投保条件与核心保障。"},{"run_id":"3cfb1ecb-ef1c-4ea7-b768-0fab0b0990c3","status":"hitl_2","topic":"医药卡与严重疾病险差异 (MHIT vs CI)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["medical card 和 critical illness 差别","有了医药卡还要买 CI 吗","医药卡只包医药费","CI policy 是什么","MHIT 和 疾病险"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:32.673473+00:00","updated_at":"2026-06-11T09:49:32.673473+00:00","seo_title":"医药卡与严重疾病险 (CI) 的核心差异：有了医药卡还需要买疾病险吗？","meta_description":"很多人分不清医药卡 (Medical Card) 和严重疾病险 (Critical Illness Policy) 的区别。本文为您详细解析两者的功能差异，以及为什么有了医药卡还是需要购买疾病险，助您做好完善的医疗财务规划。"},{"run_id":"0bc4e7c4-2794-498e-9722-92dba32ea236","status":"hitl_2","topic":"孕妇与生育保障迷思 (Maternity Coverage)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["怀孕可以买医药卡吗","生孩子 医药卡包吗","maternity insurance 马来西亚","孕妇并发症 医药卡 claim","MHIT 包生小孩吗"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:31.526055+00:00","updated_at":"2026-06-11T09:49:31.526055+00:00","seo_title":"【2026最新】马来西亚孕产保险迷思破解：怀孕可以买医药卡吗？生孩子包吗？","meta_description":"怀孕了还能买医药卡吗？普通医药卡（MHIT）包生孩子吗？本文为你破解马来西亚孕妇与生育保障迷思，详细讲解孕妇并发症索赔、Maternity Insurance等待期，以及如何为准妈妈与新生儿做好保险规划。"},{"run_id":"d38b5c23-688e-49a6-8a16-3ba9d098a04f","status":"hitl_2","topic":"无现金就医 (Cashless Admission)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["cashless 医药卡","怎样无现金进院","swipe 医药卡","cashless admission 流程","无现金 医药卡推荐"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:30.425463+00:00","updated_at":"2026-06-11T09:49:30.425463+00:00","seo_title":"2026马来西亚无现金就医 (Cashless Admission) 指南：流程、条件与医药卡推荐","meta_description":"全面解析马来西亚无现金就医 (Cashless Admission) 流程。了解怎样swipe医药卡进院、申请Guarantee Letter，以及挑选cashless医药卡的实用建议。"},{"run_id":"a920ab5b-b26c-4ea2-a4b3-24e7c236522a","status":"hitl_2","topic":"住院现金津贴 (Hospital Income Allowance)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["hospital income benefit 是什么","住院津贴 怎样 claim","医药卡 allowance","进院一天赔多少","拿 MC claim 医院津贴"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:49:28.469833+00:00","updated_at":"2026-06-11T09:49:28.469833+00:00","seo_title":"住院现金津贴（Hospital Income Benefit）是什么？一天能赔多少及怎样 Claim 全面指南","meta_description":"想要了解住院现金津贴（Hospital Income Benefit）是什么？医药卡 allowance 一天能赔多少钱？拿 MC 能 claim 医院津贴吗？本文为您详细解析住院津贴的好处与申请流程。"},{"run_id":"e0c25dd9-a263-4645-8a9a-7619824e58fb","status":"hitl_2","topic":"转换与升级医药卡 (Switching Policies)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["换医药卡 waiting period","upgrade medical card 流程","旧医药卡换新医药卡","医药卡 top up","换保险公司 MHIT"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-11T09:42:17.518809+00:00","updated_at":"2026-06-11T09:42:17.518809+00:00","seo_title":"2026马来西亚医药卡转换与升级指南：换保险公司流程、等待期与Top Up解析","meta_description":"想把旧医药卡换新？本文详解马来西亚升级医药卡(MHIT)与转换保险公司的完整流程，深入剖析等待期(Waiting Period)是否重算、原有疾病理赔风险，以及医药卡Top Up方案，助你做出最明智的决定。"},{"run_id":"58439946-dd87-402c-8d73-4dee60d313d6","status":"pending","topic":"医药卡投保前体检 (Medical Check-up Before Buying)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["买医药卡需要 body check up 吗","体检 report 影响医药卡","高血压可以买医药卡吗","买 MHIT 隐瞒病史 会怎样","保险公司要求做体检"],"target_audience":"需要買MHIT（Medical and Health Insurance/Takaful）的馬來西亞人","auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-10T07:44:26.903901+00:00","updated_at":"2026-06-10T07:44:26.903901+00:00","seo_title":null,"meta_description":null},{"run_id":"c072c4ca-6f96-4936-887a-878ae5c5a26d","status":"pending","topic":"第二医疗意见保障 (Second Medical Opinion)","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["second medical opinion 医药卡包吗","MHIT 第二医疗意见","去外国看病 医药卡 claim 吗","寻求专家意见 医药卡","癌症 second opinion claim"],"target_audience":"需要買MHIT（Medical and Health Insurance/Takaful）的馬來西亞人","auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-10T07:44:26.827344+00:00","updated_at":"2026-06-10T07:44:26.827344+00:00","seo_title":null,"meta_description":null},{"run_id":"999cc4f1-3aea-477b-8e47-284ce634dd01","status":"pending","topic":"共同保险 (Co-insurance) 计算","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["co-insurance 是什么","医药卡 co insurance 怎样算","BNM co-insurance 规定","买 10% co-insurance 好吗","医药卡自付额 差别"],"target_audience":"需要買MHIT（Medical and Health Insurance/Takaful）的馬來西亞人","auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-10T07:44:26.752481+00:00","updated_at":"2026-06-10T07:44:26.752481+00:00","seo_title":null,"meta_description":null},{"run_id":"b22dd53a-605d-419d-aeae-f84e6cbc5fb2","status":"published","topic":"小朋友醫療保險邊間好","article_url":"https://vhis101.com/%e5%85%92%e7%ab%a5-%e4%bf%9d%e9%9a%aa/","mode":"auto","start_mode":"refresh","persona":"test3","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["小朋友醫療保險邊間好"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":223685593,"wp_category_ids":[1982],"wp_slug":"%e5%85%92%e7%ab%a5-%e4%bf%9d%e9%9a%aa","wp_excerpt":null,"wp_publish_status":"publish","wp_publish_at":null,"wp_pushed_post_id":4175,"wp_pushed_at":"2026-06-08T14:07:10.105241+00:00","created_at":"2026-06-08T13:35:18.585165+00:00","updated_at":"2026-06-08T13:35:18.585165+00:00","seo_title":"【兒童保險】小朋友醫療保險邊間好？考慮因素及保障一覽","meta_description":"涵蓋香港兒童常見住院開支實例、陪床費保障、SEN發展障礙理賠限制，並比較2026年各大熱門自願醫保（VHIS）保障及學校團體醫保差異，助家長為子女揀選最合適的兒童保險。"},{"run_id":"09506bc7-44b0-455b-81a1-22882f99aa7d","status":"failed","topic":"吉隆坡私人医院","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["吉隆坡私人医院"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-08T09:00:36.666623+00:00","updated_at":"2026-06-08T09:00:36.666623+00:00","seo_title":null,"meta_description":null},{"run_id":"e509ceb3-d21a-4c56-a0e5-61618eede48b","status":"failed","topic":"吉隆坡中央医院","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["吉隆坡中央医院"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-08T07:10:18.999454+00:00","updated_at":"2026-06-08T07:10:18.999454+00:00","seo_title":"吉隆坡中央医院 (HKL) 完整指南：看诊时间、探病规定与交通方式 (2026年最新)","meta_description":"为您整理2026年吉隆坡中央医院 (HKL) 的最新资讯，包含各专科部门服务、门诊与探病时间、MySejahtera预约方式、收费标准以及MRT交通和停车指南。"},{"run_id":"7b743b00-0ded-4b5c-9543-4b589eb96bfd","status":"rejected","topic":"吉隆坡私人医院","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["吉隆坡私人医院"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":"draft","wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-08T07:10:17.760738+00:00","updated_at":"2026-06-08T07:10:17.760738+00:00","seo_title":"2026吉隆坡私人医院推荐：5大顶尖医疗机构、收费与服务指南","meta_description":"正在寻找吉隆坡口碑最好的私人医院？本文为您整理2026年最新吉隆坡顶尖私人医院名单，涵盖太子阁、鹰阁、班台等医疗机构的专科优势、体检配套与收费指南，帮助您做出明智的健康选择。"},{"run_id":"af158fe4-0e3b-40e1-a528-8538453335fa","status":"failed","topic":"马来西亚医疗保险","article_url":"https://gobowtie.com/my/cn/blog/%e4%bf%9d%e9%99%a9-%e5%8c%bb%e7%96%97%e4%bf%9d%e9%99%a9/","mode":"auto","start_mode":"refresh","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["马来西亚医疗保险"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-08T04:51:43.552269+00:00","updated_at":"2026-06-08T04:51:43.552269+00:00","seo_title":null,"meta_description":null},{"run_id":"3651c25d-c789-47c5-936b-dbc96774644d","status":"failed","topic":"医疗保险好处","article_url":"https://gobowtie.com/my/cn/blog/%e4%bf%9d%e9%99%a9-%e5%8c%bb%e7%96%97%e4%bf%9d%e9%99%a9-%e5%a5%bd%e5%a4%84/","mode":"auto","start_mode":"refresh","persona":"bowtie-zh-my","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["医疗保险好处"],"target_audience":null,"auto_accept_hitl1":true,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-08T04:51:40.334829+00:00","updated_at":"2026-06-08T04:51:40.334829+00:00","seo_title":null,"meta_description":null},{"run_id":"b1e2ff72-9091-4c9f-b974-f3efffbac1b8","status":"published","topic":"咳血-肺癌症狀","article_url":"https://www.bowtie.com.hk/blog/zh/%e4%ba%86%e8%a7%a3%e7%99%8c%e7%97%87/%e5%92%b3%e8%a1%80-%e8%82%ba%e7%99%8c%e7%97%87%e7%8b%80/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["咳血 肺癌"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":4,"wp_category_ids":[1418],"wp_slug":"%e5%92%b3%e8%a1%80-%e8%82%ba%e7%99%8c%e7%97%87%e7%8b%80","wp_excerpt":"當我們咳嗽時發現紙巾上帶有血絲，許多人第一時間都會感到驚慌，腦海中甚至浮現「我是不是患上肺癌了？」的恐懼。雖然咳血的確是呼吸道出現問題的警號，但它未必等於末期絕症。本文將為你拆解咳血的成因、肺癌的伴隨症狀，以及遇到大咳血時的緊急處理方法。","wp_publish_status":"publish","wp_publish_at":null,"wp_pushed_post_id":39868,"wp_pushed_at":"2026-06-08T03:17:22.945293+00:00","created_at":"2026-06-08T01:57:18.420512+00:00","updated_at":"2026-06-08T01:57:18.420512+00:00","seo_title":"咳血是肺癌先兆嗎？拆解咳血原因、伴隨症狀與緊急處理方法","meta_description":"咳血一定是肺癌嗎？了解咳血與吐血的分別，拆解5大常見咳血原因。掌握大咳血的急救指標，認識肺癌非典型症狀如骨痛，以及LDCT早期篩查的重要性。"},{"run_id":"2ef46aad-367b-47cb-a0bf-d8b6036eee87","status":"published","topic":"三酸甘油脂","article_url":"https://www.bowtie.com.hk/blog/zh/%e8%a1%80%e6%b6%b2%e5%81%a5%e5%ba%b7/%e4%b8%89%e9%85%b8%e7%94%98%e6%b2%b9%e8%84%82/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["三酸甘油脂"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":4,"wp_category_ids":[1750],"wp_slug":"%e4%b8%89%e9%85%b8%e7%94%98%e6%b2%b9%e8%84%82","wp_excerpt":"如果你最近在驗血報告上發現「三酸甘油脂」出現紅字，千萬不要掉以輕心。雖然初期往往沒有明顯症狀，但三酸甘油脂過高不僅會令血液變得濃稠，更會大幅增加患上心血管疾病、中風甚至是急性胰臟炎的風險。想知道自己的指數是否超標？在飲食上又有甚麼需要注意？本文為你詳細拆解三酸甘油脂與膽固醇的分別、香港正常值標準，並提供實用的降血脂飲食","wp_publish_status":"draft","wp_publish_at":null,"wp_pushed_post_id":45442,"wp_pushed_at":"2026-06-08T03:08:08.023429+00:00","created_at":"2026-06-08T01:57:15.487479+00:00","updated_at":"2026-06-08T01:57:15.487479+00:00","seo_title":"三酸甘油脂過高易中風？拆解正常值、併發症與8大降血脂飲食法","meta_description":"三酸甘油脂過高隨時引發心血管疾病及急性胰臟炎！本文為你拆解三酸甘油脂與膽固醇的分別，提供香港正常值對照表及空腹驗血須知，並分享8大降血脂飲食及香港常見飲食陷阱。"},{"run_id":"55ce0bcd-3f5f-4bfd-8896-32a7f7fef848","status":"hitl_1","topic":"大豆","article_url":"https://www.bowtie.com.hk/blog/zh/%e7%87%9f%e9%a4%8a%e8%b2%bc%e5%a3%ab/%e5%a4%a7%e8%b1%86/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["大豆"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-06T14:12:13.298333+00:00","updated_at":"2026-06-06T14:12:13.298333+00:00","seo_title":null,"meta_description":null},{"run_id":"dd5922b2-5c6f-47cd-8de5-e0c3267ff474","status":"hitl_1","topic":"汗水導致滑倒意外","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["汗水跣親","防滑工作鞋","地盤跣腳","高空工作滑倒","跌倒報工傷"],"target_audience":"需要夏天工作（尤其長時間戶外工作）的香港人","auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-05T09:17:06.649436+00:00","updated_at":"2026-06-05T09:17:06.649436+00:00","seo_title":null,"meta_description":null},{"run_id":"15213b42-8b3a-4a6c-8efd-e8d93e3e466d","status":"rejected","topic":"身體組成分析","article_url":"https://www.bowtie.com.hk/blog/zh/%e7%87%9f%e9%a4%8a%e8%b2%bc%e5%a3%ab/%e8%ba%ab%e9%ab%94%e7%b5%84%e6%88%90%e5%88%86%e6%9e%90/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["身體組成分析"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":4,"wp_category_ids":[1768],"wp_slug":"%e8%ba%ab%e9%ab%94%e7%b5%84%e6%88%90%e5%88%86%e6%9e%90","wp_excerpt":"想了解健康狀況，單看體重磅或者 BMI 數字其實並不足夠。近年越來越多人重視「身體組成分析」，透過精準測量體脂肪、肌肉與水份比例，及早發現隱性肥胖問題。到底 InBody 與 DXA 應該點揀好？本文為你詳細拆解身體組成分析的原理、報告解讀教學，以及香港最新測量地點與參考收費。","wp_publish_status":"draft","wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-05T08:44:39.836909+00:00","updated_at":"2026-06-05T08:44:39.836909+00:00","seo_title":"【身體組成分析】InBody vs DXA 點揀好？原理、報告解讀與香港推介","meta_description":"身體組成分析比單看體重更重要！本文詳解 BIA 與 DXA 原理，教你解讀 InBody 報告的隱性肥胖/泡芙人體態，拆解內臟脂肪與 BMR 數據，並附 2026 最新香港測量地點與參考收費。"},{"run_id":"dcc9a762-9ce2-4abd-9e72-1ba61fa3bcbb","status":"hitl_1","topic":"兒童夏日手足口病","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["手足口病病徵","夏天傳染病","小朋友手足口","波波池傳染","手足口病隔離"],"target_audience":"打算進行任何夏天活動（包括任何室內外活動）的香港人","auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-04T04:36:03.400165+00:00","updated_at":"2026-06-04T04:36:03.400165+00:00","seo_title":null,"meta_description":null},{"run_id":"838d23e0-81b7-4a21-a902-7f68b63f28f8","status":"hitl_1","topic":"夏日腸胃炎","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["食生蠔肚痛","凍飲腸胃炎","夏天食物中毒","屙嘔肚痛急救","腸胃炎食咩好"],"target_audience":"打算進行任何夏天活動（包括任何室內外活動）的香港人","auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-04T04:36:03.262431+00:00","updated_at":"2026-06-04T04:36:03.262431+00:00","seo_title":null,"meta_description":null},{"run_id":"ee50d19f-9172-47bc-8af0-74d1b46eca50","status":"published","topic":"汗皰疹","article_url":"https://www.bowtie.com.hk/blog/zh/%e7%9a%ae%e8%86%9a%e5%8f%8a%e6%80%a7%e7%97%85%e8%b3%87%e8%a8%8a/%e6%b1%97%e7%9a%b0%e7%96%b9/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["汗皰疹"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":4,"wp_category_ids":[1746],"wp_slug":"%e6%b1%97%e7%9a%b0%e7%96%b9","wp_excerpt":"天氣轉熱或轉季時，手指邊緣和腳底容易冒出一粒粒痕癢無比的「西米狀」小水泡？這極可能是患上了汗皰疹！不少人會將汗皰疹與香港腳混淆，甚至亂塗藥膏導致病情惡化。到底汗皰疹是甚麼？會自己痊癒嗎？本文為你詳細拆解汗皰疹的成因、症狀、治療及戒口預防方法，助你擺脫無盡的痕癢折磨。","wp_publish_status":"publish","wp_publish_at":null,"wp_pushed_post_id":56812,"wp_pushed_at":"2026-06-04T10:40:41.353637+00:00","created_at":"2026-06-04T04:25:46.303498+00:00","updated_at":"2026-06-04T04:25:46.303498+00:00","seo_title":"汗皰疹會自己好嗎？初期症狀、成因及治療方法（附香港腳比較）","meta_description":"汗皰疹會傳染嗎？手腳生滿西米狀水泡點算好？為你拆解汗皰疹初期至後期症狀，盤點香港濕熱天氣、壓力等成因，比較與主婦手、香港腳的分別，並提供類固醇、非類固醇免疫調節劑等最新治療方案及戒口指南。"},{"run_id":"a83fc884-8890-487e-b139-3daf20f4cd5d","status":"published","topic":"扁桃腺結石","article_url":"https://www.bowtie.com.hk/blog/zh/%e8%80%b3%e9%bc%bb%e5%96%89%e8%b3%87%e8%a8%8a/%e6%89%81%e6%a1%83%e8%85%ba%e7%b5%90%e7%9f%b3/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["扁桃腺結石"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":4,"wp_category_ids":[1724],"wp_slug":"%e6%89%81%e6%a1%83%e8%85%ba%e7%b5%90%e7%9f%b3","wp_excerpt":"扁桃腺結石會引致嚴重的口臭問題，更會帶來喉嚨卡卡、持續有異物感的困擾。究竟扁桃腺結石會自己消失嗎？自行用棉花棒挖出來安全嗎？本文將為你拆解扁桃腺結石的常見症狀與 4 大成因，並提供相對安全的自行清理方法、預防貼士以及相關的醫療治療選項，幫助你告別口臭與喉嚨不適。\n[adv_panel id=\"44663\"]","wp_publish_status":"publish","wp_publish_at":null,"wp_pushed_post_id":20347,"wp_pushed_at":"2026-06-04T04:48:36.029761+00:00","created_at":"2026-06-04T04:25:45.153935+00:00","updated_at":"2026-06-04T04:25:45.153935+00:00","seo_title":"扁桃腺結石會自己消失嗎？成因、症狀、自行清理方法及風險警告","meta_description":"扁桃腺結石會自己消失嗎？喉嚨卡卡、口臭可能是扁桃腺結石症狀。本文拆解扁桃腺結石4大成因，教你自我檢查步驟，並提供安全的自行清理方法、醫生警告及最新醫療選項。"},{"run_id":"28ee37f5-8de0-4486-975b-424dfa67fc53","status":"published","topic":"血小板","article_url":"https://www.bowtie.com.hk/blog/zh/%e8%a1%80%e6%b6%b2%e5%81%a5%e5%ba%b7/%e8%a1%80%e5%b0%8f%e6%9d%bf/","mode":"auto","start_mode":"refresh","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["血小板"],"target_audience":null,"auto_accept_hitl1":false,"wp_author_id":5,"wp_category_ids":[1750],"wp_slug":"%e8%a1%80%e5%b0%8f%e6%9d%bf","wp_excerpt":"血小板是我們血液中不可或缺的重要成分，負責守護血管健康，防止身體過度流血。一旦驗血報告指出血小板過高或過低，究竟代表甚麼？身體會出現哪些警號？本文為你詳細解答血小板的正常值範圍，並深入剖析血小板減少或增多的成因、症狀與日常護理禁忌，教你如何好好保護造血功能。","wp_publish_status":"publish","wp_publish_at":null,"wp_pushed_post_id":45470,"wp_pushed_at":"2026-06-04T10:43:36.711322+00:00","created_at":"2026-06-04T04:25:43.896318+00:00","updated_at":"2026-06-04T04:25:43.896318+00:00","seo_title":"【血小板】正常值是多少？過高過低原因、症狀及日常護理指南","meta_description":"全面了解血小板的正常值與功能！一文詳解血小板過高與過低的成因及症狀，提供針對血小板低下患者的日常護理指南。同時涵蓋香港最新PRP治療法規、抗血小板藥物分別及成分捐血資訊。"},{"run_id":"1792647f-4298-441a-ad0a-0a9b5fc75968","status":"hitl_1","topic":"夏日家電","article_url":null,"mode":"auto","start_mode":"create","persona":"bowtie-editor","iteration_count":0,"hitl_2_iteration":0,"edit_note":null,"keywords":["抽濕機夏天用法","循環扇推薦","雪糕機香港","製冰機好用","榨汁機比較"],"target_audience":"香港人","auto_accept_hitl1":false,"wp_author_id":null,"wp_category_ids":null,"wp_slug":null,"wp_excerpt":null,"wp_publish_status":null,"wp_publish_at":null,"wp_pushed_post_id":null,"wp_pushed_at":null,"created_at":"2026-06-03T10:17:44.757873+00:00","updated_at":"2026-06-03T10:17:44.757873+00:00","seo_title":null,"meta_description":null}],"personas":[{"slug":"bowtie-editor","name":"Bowtie HK ZH","publish_target_id":"00000000-0000-0000-0000-000000000001"},{"slug":"bowtie-en-my","name":"Bowtie MY EN","publish_target_id":null},{"slug":"bowtie-zh-my","name":"Bowtie MY ZH","publish_target_id":null},{"slug":"test3","name":"test3","publish_target_id":"00000000-0000-0000-0000-000000000002"}],"wp_users":[{"id":237,"name":"Evercare","auth_ref":"WP"},{"id":256,"name":"《Henry 財自了》Henry","auth_ref":"WP"},{"id":250,"name":"《寶藥黨》寶哥","auth_ref":"WP"},{"id":215,"name":"《智偉保險理財Talk》劉智偉","auth_ref":"WP"},{"id":246,"name":"10Life","auth_ref":"WP"},{"id":164,"name":"28 MORTGAGE","auth_ref":"WP"},{"id":248,"name":"ActProf","auth_ref":"WP"},{"id":261,"name":"adam.hung@bowtie.com.hk","auth_ref":"WP"},{"id":214,"name":"Agatha Wu","auth_ref":"WP"},{"id":173,"name":"agatha.wu@bowtie.com.hk","auth_ref":"WP"},{"id":286,"name":"Alex Chan","auth_ref":"WP"},{"id":275,"name":"alice.wut@bowtie.com.hk","auth_ref":"WP"},{"id":266,"name":"Alpha HR","auth_ref":"WP"},{"id":179,"name":"Alvin 註冊護士","auth_ref":"WP"},{"id":114,"name":"Andy Yang","auth_ref":"WP"},{"id":188,"name":"Angela Ko","auth_ref":"WP"},{"id":106,"name":"Anna Yeung","auth_ref":"WP"},{"id":280,"name":"anne.jiao@bowtie.com.hk","auth_ref":"WP"},{"id":149,"name":"AQUMON","auth_ref":"WP"},{"id":158,"name":"AutoMate","auth_ref":"WP"},{"id":169,"name":"ben.so@bowtie.com.hk","auth_ref":"WP"},{"id":276,"name":"blair.chau@bowtie.com.hk","auth_ref":"WP"},{"id":263,"name":"bobby.fan@bowtie.com.hk","auth_ref":"WP"},{"id":294,"name":"bonnie li","auth_ref":"WP"},{"id":122,"name":"BOOQED","auth_ref":"WP"},{"id":92,"name":"Bowtie","auth_ref":"WP"},{"id":119,"name":"Bowtie &amp; JP Health 健康中心","auth_ref":"WP"},{"id":200,"name":"Bowtie Medical Editors+AI","auth_ref":"WP"},{"id":17,"name":"Bowtie Team","auth_ref":"WP"},{"id":208,"name":"Bowtie Vietnam","auth_ref":"WP"},{"id":4,"name":"Bowtie 團隊","auth_ref":"WP"},{"id":29,"name":"Bowtie 瑜伽大使 Tina C","auth_ref":"WP"},{"id":5,"name":"Bowtie 醫療資訊團隊","auth_ref":"WP"},{"id":64,"name":"BowtieGo","auth_ref":"WP"},{"id":197,"name":"Bowtie醫療編輯+AI","auth_ref":"WP"},{"id":290,"name":"brian.tse@bowtie.com.hk","auth_ref":"WP"},{"id":136,"name":"calvin.chui@bowtie.com.hk","auth_ref":"WP"},{"id":213,"name":"Chan Elden","auth_ref":"WP"},{"id":210,"name":"Chan Justin","auth_ref":"WP"},{"id":258,"name":"Cheung Jamie","auth_ref":"WP"},{"id":284,"name":"christine.yeung@bowtie.com.hk","auth_ref":"WP"},{"id":39,"name":"Christopher Hugentobler","auth_ref":"WP"},{"id":221,"name":"christopher.hugentobler@bowtie.com.hk","auth_ref":"WP"},{"id":235,"name":"Chua Alex","auth_ref":"WP"},{"id":55,"name":"Codex Genetics","auth_ref":"WP"},{"id":175,"name":"conrad.yeung","auth_ref":"WP"},{"id":257,"name":"CTgoodjobs","auth_ref":"WP"},{"id":260,"name":"Czon Wong","auth_ref":"WP"},{"id":229,"name":"dave.lau@bowtie.com.hk","auth_ref":"WP"},{"id":277,"name":"David Lai","auth_ref":"WP"},{"id":22,"name":"Derek Yeung 物理治療師","auth_ref":"WP"},{"id":225,"name":"dr chan yu ming","auth_ref":"WP"},{"id":267,"name":"Echolade","auth_ref":"WP"},{"id":154,"name":"Edge Development Centre","auth_ref":"WP"},{"id":78,"name":"Edwin Ho","auth_ref":"WP"},{"id":245,"name":"Endowus 智安投","auth_ref":"WP"},{"id":193,"name":"eunice.cho@bowtie.com.hk","auth_ref":"WP"},{"id":283,"name":"Evelyn Li","auth_ref":"WP"},{"id":264,"name":"First Page","auth_ref":"WP"},{"id":190,"name":"Fitz","auth_ref":"WP"},{"id":189,"name":"FlyAsia","auth_ref":"WP"},{"id":47,"name":"Fred Ngan","auth_ref":"WP"},{"id":272,"name":"Freelancer Test","auth_ref":"WP"},{"id":28,"name":"Gabriel","auth_ref":"WP"},{"id":230,"name":"Gabriel Kung","auth_ref":"WP"},{"id":112,"name":"Gianna Burgos","auth_ref":"WP"},{"id":20,"name":"GoBear","auth_ref":"WP"},{"id":120,"name":"greenutss","auth_ref":"WP"},{"id":105,"name":"Happyer.io","auth_ref":"WP"},{"id":26,"name":"HelloToby","auth_ref":"WP"},{"id":43,"name":"hiu","auth_ref":"WP"},{"id":186,"name":"I am…青年職學平台","auth_ref":"WP"},{"id":254,"name":"Icy Hu","auth_ref":"WP"},{"id":13,"name":"imSure","auth_ref":"WP"},{"id":220,"name":"Isabella Leung","auth_ref":"WP"},{"id":265,"name":"Ivy.z","auth_ref":"WP"},{"id":218,"name":"jack.law@bowtie.com.hk","auth_ref":"WP"},{"id":134,"name":"jake.yu@bowtie.com.hk","auth_ref":"WP"},{"id":217,"name":"jason.wong@bowtie.com.hk","auth_ref":"WP"},{"id":259,"name":"Jobsdb by SEEK","auth_ref":"WP"},{"id":219,"name":"John Sze","auth_ref":"WP"},{"id":163,"name":"kamsing.lee@bowtie.com.hk","auth_ref":"WP"},{"id":249,"name":"karen.ho@bowtie.com.hk","auth_ref":"WP"},{"id":135,"name":"karen.tsang@bowtie.com.hk","auth_ref":"WP"},{"id":232,"name":"Karthik Raja","auth_ref":"WP"},{"id":281,"name":"kary.choi@bowtie.com.hk","auth_ref":"WP"},{"id":206,"name":"Kenneth Kenneth","auth_ref":"WP"},{"id":174,"name":"Kenneth.Tang","auth_ref":"WP"},{"id":143,"name":"king.lo@bowtie.com.hk","auth_ref":"WP"},{"id":115,"name":"Krystian Jozwik","auth_ref":"WP"},{"id":72,"name":"Lavigne Fong","auth_ref":"WP"},{"id":196,"name":"Lawrence Chau周俊佳","auth_ref":"WP"},{"id":262,"name":"Lee Martin","auth_ref":"WP"},{"id":212,"name":"Lee Sing","auth_ref":"WP"},{"id":165,"name":"Lendela借得la","auth_ref":"WP"},{"id":184,"name":"ling.ling@bowtie.com.hk","auth_ref":"WP"},{"id":292,"name":"Ma Franco","auth_ref":"WP"},{"id":274,"name":"mandy.yip@bowtie.com.hk","auth_ref":"WP"},{"id":11,"name":"Marco Lau","auth_ref":"WP"},{"id":203,"name":"Marco Lau","auth_ref":"WP"},{"id":255,"name":"Marco Lau","auth_ref":"WP"},{"id":296,"name":"mars.santoso@bowtie.com.hk","auth_ref":"WP"},{"id":192,"name":"martin.cheng@bowtie.com.hk","auth_ref":"WP"},{"id":12,"name":"MasterJack","auth_ref":"WP"},{"id":57,"name":"Mellow","auth_ref":"WP"},{"id":150,"name":"michael.leung@bowtie.com.hk","auth_ref":"WP"},{"id":21,"name":"MoneySmart","auth_ref":"WP"},{"id":279,"name":"MP HR Community","auth_ref":"WP"},{"id":116,"name":"MPS預健及運動治療中心 物理治療師","auth_ref":"WP"},{"id":295,"name":"naomi.chu@bowtie.com.hk","auth_ref":"WP"},{"id":161,"name":"New Beauty","auth_ref":"WP"},{"id":293,"name":"Ngai Macy","auth_ref":"WP"},{"id":137,"name":"nicole.lam@bowtie.com.hk","auth_ref":"WP"},{"id":166,"name":"noah","auth_ref":"WP"},{"id":273,"name":"NobleWills","auth_ref":"WP"},{"id":180,"name":"OT&amp;P領康醫療","auth_ref":"WP"},{"id":145,"name":"Parents Daily","auth_ref":"WP"},{"id":160,"name":"Perfect Men","auth_ref":"WP"},{"id":168,"name":"peter.leung@bowtie.com.hk","auth_ref":"WP"},{"id":151,"name":"Petit bazaar","auth_ref":"WP"},{"id":7,"name":"Planto","auth_ref":"WP"},{"id":128,"name":"Pui Tong","auth_ref":"WP"},{"id":48,"name":"Raffles Medical","auth_ref":"WP"},{"id":198,"name":"ray.leung@bowtie.com.hk","auth_ref":"WP"},{"id":93,"name":"Roche","auth_ref":"WP"},{"id":187,"name":"ROOTS上會","auth_ref":"WP"},{"id":172,"name":"Roy Lau","auth_ref":"WP"},{"id":2,"name":"Sammy Chan","auth_ref":"WP"},{"id":227,"name":"sammy.chan@bowtie.com.hk","auth_ref":"WP"},{"id":133,"name":"Sara Choi","auth_ref":"WP"},{"id":207,"name":"sean.zhou@bowtie.com.hk","auth_ref":"WP"},{"id":228,"name":"SHOPLINE","auth_ref":"WP"},{"id":247,"name":"simme.chen@bowtie.com.hk","auth_ref":"WP"},{"id":132,"name":"Simon Chung","auth_ref":"WP"},{"id":216,"name":"sindy.lok@bowtie.com.hk","auth_ref":"WP"},{"id":125,"name":"SleekFlow","auth_ref":"WP"},{"id":109,"name":"sofasoda","auth_ref":"WP"},{"id":127,"name":"StashAway","auth_ref":"WP"},{"id":253,"name":"stefanie.yung@bowtie.com.hk","auth_ref":"WP"},{"id":251,"name":"Steven","auth_ref":"WP"},{"id":270,"name":"sunny.mf.chan@bowtie.com.hk","auth_ref":"WP"},{"id":167,"name":"Syfe","auth_ref":"WP"},{"id":297,"name":"tibas.tester@bowtie.com.hk","auth_ref":"WP"},{"id":201,"name":"tim.yang@bowtie.com.hk","auth_ref":"WP"},{"id":291,"name":"toygar.onbay@bowtie.com.hk","auth_ref":"WP"},{"id":41,"name":"Trip.com","auth_ref":"WP"},{"id":144,"name":"truman.tang@bowtie.com.hk","auth_ref":"WP"},{"id":68,"name":"Tutor Circle 尋補","auth_ref":"WP"},{"id":56,"name":"UMH","auth_ref":"WP"},{"id":222,"name":"valerie.wan@bowtie.com.hk","auth_ref":"WP"},{"id":288,"name":"Veronica Li","auth_ref":"WP"},{"id":241,"name":"vicky.chan@bowtie.com.hk","auth_ref":"WP"},{"id":60,"name":"Vivian Wong","auth_ref":"WP"},{"id":52,"name":"Vivian Yung","auth_ref":"WP"},{"id":271,"name":"william.ho@bowtie.com.hk","auth_ref":"WP"},{"id":205,"name":"Wong Ming","auth_ref":"WP"},{"id":130,"name":"Workstem","auth_ref":"WP"},{"id":285,"name":"Wut Alice","auth_ref":"WP"},{"id":268,"name":"Yeung Vincent","auth_ref":"WP"},{"id":233,"name":"Yu Sunny","auth_ref":"WP"},{"id":242,"name":"Zero Tsoi","auth_ref":"WP"},{"id":287,"name":"Zita Lau","auth_ref":"WP"},{"id":178,"name":"Zoe 職業治療師","auth_ref":"WP"},{"id":162,"name":"中卓醫務","auth_ref":"WP"},{"id":96,"name":"余浩德醫生","auth_ref":"WP"},{"id":141,"name":"余碩衡博士 (Dr. Keith Yu)","auth_ref":"WP"},{"id":84,"name":"來源：《保險叢書︰醫療保險》","auth_ref":"WP"},{"id":30,"name":"劉詠恩 醫生","auth_ref":"WP"},{"id":70,"name":"匡喬醫療集團","auth_ref":"WP"},{"id":97,"name":"千泉醫館","auth_ref":"WP"},{"id":111,"name":"吳家健醫生","auth_ref":"WP"},{"id":243,"name":"唐碧茜醫生","auth_ref":"WP"},{"id":156,"name":"嘉仁專科醫療","auth_ref":"WP"},{"id":83,"name":"培子","auth_ref":"WP"},{"id":131,"name":"安怡居","auth_ref":"WP"},{"id":27,"name":"宋振基 中醫師","auth_ref":"WP"},{"id":89,"name":"小鳥醫生","auth_ref":"WP"},{"id":102,"name":"希瑪微笑矯視中心","auth_ref":"WP"},{"id":148,"name":"希瑪眼科中心","auth_ref":"WP"},{"id":58,"name":"康思源 Dave Hong","auth_ref":"WP"},{"id":76,"name":"廖思維醫生","auth_ref":"WP"},{"id":117,"name":"廖永熙 Jacky Lio","auth_ref":"WP"},{"id":50,"name":"張申錄醫生","auth_ref":"WP"},{"id":73,"name":"徐俊苗醫生","auth_ref":"WP"},{"id":62,"name":"心和醫療","auth_ref":"WP"},{"id":79,"name":"怡健堂中醫","auth_ref":"WP"},{"id":126,"name":"掌舖 Boutir","auth_ref":"WP"},{"id":252,"name":"數到三","auth_ref":"WP"},{"id":202,"name":"方婉琪醫生","auth_ref":"WP"},{"id":182,"name":"施蘊知醫生","auth_ref":"WP"},{"id":244,"name":"曹忠豪醫生 Raymond","auth_ref":"WP"},{"id":53,"name":"曾俊華 John Tsang","auth_ref":"WP"},{"id":234,"name":"曾梓銘 Mingo Tsang","auth_ref":"WP"},{"id":49,"name":"曾英賢博士 Dr. Vincent Tsang","auth_ref":"WP"},{"id":44,"name":"李嘉欣 中醫師","auth_ref":"WP"},{"id":181,"name":"李定一","auth_ref":"WP"},{"id":99,"name":"李楚山心臟科醫生","auth_ref":"WP"},{"id":100,"name":"李澄幸 Ray Lee","auth_ref":"WP"},{"id":204,"name":"李錦榮","auth_ref":"WP"},{"id":138,"name":"林思穎 物理治療師","auth_ref":"WP"},{"id":33,"name":"林正宏","auth_ref":"WP"},{"id":121,"name":"林頌雅 營養師","auth_ref":"WP"},{"id":42,"name":"梁永堃 醫生","auth_ref":"WP"},{"id":124,"name":"楊志勇 物理治療師","auth_ref":"WP"},{"id":75,"name":"楊旭楠醫生","auth_ref":"WP"},{"id":81,"name":"楊溢邦醫生","auth_ref":"WP"},{"id":157,"name":"楷和醫療集團","auth_ref":"WP"},{"id":191,"name":"毅思會計及秘書公司","auth_ref":"WP"},{"id":211,"name":"清晰眼科Clarity Eye Centres","auth_ref":"WP"},{"id":110,"name":"港怡醫院","auth_ref":"WP"},{"id":65,"name":"滙潼醫療","auth_ref":"WP"},{"id":101,"name":"王二木","auth_ref":"WP"},{"id":289,"name":"王德龍醫生","auth_ref":"WP"},{"id":98,"name":"甄振庭醫生","auth_ref":"WP"},{"id":71,"name":"盈健醫療","auth_ref":"WP"},{"id":91,"name":"盈健醫療 營養師","auth_ref":"WP"},{"id":118,"name":"盧景勳醫生","auth_ref":"WP"},{"id":226,"name":"眼視覺研究中心","auth_ref":"WP"},{"id":67,"name":"眼鏡88專業護眼中心","auth_ref":"WP"},{"id":236,"name":"精算師Mr. J","auth_ref":"WP"},{"id":195,"name":"經絡按揭 mReferral","auth_ref":"WP"},{"id":278,"name":"維特健靈 Vita Green","auth_ref":"WP"},{"id":40,"name":"胡.說樓市","auth_ref":"WP"},{"id":37,"name":"范鋒","auth_ref":"WP"},{"id":63,"name":"莊柏醫療","auth_ref":"WP"},{"id":238,"name":"萬賢","auth_ref":"WP"},{"id":95,"name":"葉沛霖醫生","auth_ref":"WP"},{"id":34,"name":"葉麗斌中醫師 醫結網絡診所","auth_ref":"WP"},{"id":129,"name":"蔡司視力保健","auth_ref":"WP"},{"id":108,"name":"蔡嘉麗 中醫師","auth_ref":"WP"},{"id":82,"name":"蔣將","auth_ref":"WP"},{"id":176,"name":"藥劑師 Victor","auth_ref":"WP"},{"id":239,"name":"蘇子謙醫生及中醫師","auth_ref":"WP"},{"id":90,"name":"蘇詠怡醫生","auth_ref":"WP"},{"id":104,"name":"蘊健醫務中心","auth_ref":"WP"},{"id":185,"name":"裝修佬","auth_ref":"WP"},{"id":155,"name":"謝穎君 言語治療師","auth_ref":"WP"},{"id":147,"name":"譚靜婷醫生","auth_ref":"WP"},{"id":80,"name":"豆仔生活百科G6PDia","auth_ref":"WP"},{"id":10,"name":"赤兔","auth_ref":"WP"},{"id":171,"name":"趙廷俊","auth_ref":"WP"},{"id":159,"name":"運動筆記 Running Biji","auth_ref":"WP"},{"id":140,"name":"郭浩邦 物理治療師","auth_ref":"WP"},{"id":123,"name":"鄭金坤博士","auth_ref":"WP"},{"id":183,"name":"鄺健鴻醫生 Dr. Kwong Kin Hung","auth_ref":"WP"},{"id":69,"name":"阮瑞芬 Candy Yuen","auth_ref":"WP"},{"id":240,"name":"陳信恩醫生 Dr. Chan Shun Yan, Bryant","auth_ref":"WP"},{"id":87,"name":"陳卓琪醫生","auth_ref":"WP"},{"id":45,"name":"陳宇傑 中醫師","auth_ref":"WP"},{"id":31,"name":"陳愷怡 醫生","auth_ref":"WP"},{"id":61,"name":"陳敬安 醫生","auth_ref":"WP"},{"id":77,"name":"陳旭智","auth_ref":"WP"},{"id":224,"name":"陳瑜明博士 註冊中醫師","auth_ref":"WP"},{"id":223,"name":"陳鯤宇 Michael Chan","auth_ref":"WP"},{"id":152,"name":"雅蘭高清腸胃內視鏡中心","auth_ref":"WP"},{"id":231,"name":"顏佩欣醫生","auth_ref":"WP"},{"id":38,"name":"顏耀輝","auth_ref":"WP"},{"id":194,"name":"香港置業 Hong Kong Property","auth_ref":"WP"},{"id":142,"name":"馮文基先生","auth_ref":"WP"},{"id":103,"name":"高燒 GoFever","auth_ref":"WP"},{"id":282,"name":"黃家星醫生","auth_ref":"WP"},{"id":35,"name":"黃山中醫師 醫結網絡診所","auth_ref":"WP"},{"id":139,"name":"黃惠儀小姐","auth_ref":"WP"},{"id":177,"name":"黃潔華醫生","auth_ref":"WP"},{"id":36,"name":"黃耀昌中醫師 醫結網絡診所","auth_ref":"WP"},{"id":209,"name":"黎智麟醫生","auth_ref":"WP"},{"id":107,"name":"龐寶林","auth_ref":"WP"},{"id":223685600,"name":"alexchua_bowtie","auth_ref":"VHIS101_WP"},{"id":223685605,"name":"franco.ma","auth_ref":"VHIS101_WP"},{"id":223685592,"name":"HKVHIS編輯團隊","auth_ref":"VHIS101_WP"},{"id":223685599,"name":"JS","auth_ref":"VHIS101_WP"},{"id":223685594,"name":"justinchw1160","auth_ref":"VHIS101_WP"},{"id":223685602,"name":"Marco Lau","auth_ref":"VHIS101_WP"},{"id":223685598,"name":"Peter","auth_ref":"VHIS101_WP"},{"id":223685597,"name":"promisingthemes","auth_ref":"VHIS101_WP"},{"id":223685603,"name":"Steven K","auth_ref":"VHIS101_WP"},{"id":223685596,"name":"sunnyyu1993","auth_ref":"VHIS101_WP"},{"id":223685595,"name":"uploader","auth_ref":"VHIS101_WP"},{"id":223685593,"name":"VHIS101","auth_ref":"VHIS101_WP"},{"id":223685601,"name":"vickychan644a18d0e5","auth_ref":"VHIS101_WP"},{"id":223685604,"name":"Zero Tsoi","auth_ref":"VHIS101_WP"}],"wp_categories":[{"id":4238,"name":"Blood Health","auth_ref":"WP"},{"id":1719,"name":"Bowtie Story","auth_ref":"WP"},{"id":4311,"name":"Bowtie Story","auth_ref":"WP"},{"id":1,"name":"Bowtie故事","auth_ref":"WP"},{"id":1680,"name":"Bowtie產品理念","auth_ref":"WP"},{"id":1548,"name":"Business","auth_ref":"WP"},{"id":4240,"name":"Cancer","auth_ref":"WP"},{"id":4242,"name":"Chinese Medicine","auth_ref":"WP"},{"id":4244,"name":"Covid","auth_ref":"WP"},{"id":4246,"name":"Customer Review","auth_ref":"WP"},{"id":4248,"name":"Deathcare","auth_ref":"WP"},{"id":4034,"name":"Dental Health","auth_ref":"WP"},{"id":4250,"name":"Digestive Health","auth_ref":"WP"},{"id":4252,"name":"Doctor Specialists","auth_ref":"WP"},{"id":4254,"name":"Drugs","auth_ref":"WP"},{"id":4553,"name":"Drugs","auth_ref":"WP"},{"id":4256,"name":"Ear, nose, and throat","auth_ref":"WP"},{"id":4258,"name":"Endocrinology &amp; Diabetes","auth_ref":"WP"},{"id":4260,"name":"Exercising","auth_ref":"WP"},{"id":4262,"name":"Eye Health","auth_ref":"WP"},{"id":1533,"name":"Finance","auth_ref":"WP"},{"id":4158,"name":"Food &amp; Nutrition","auth_ref":"WP"},{"id":1562,"name":"Group Medical Insurance","auth_ref":"WP"},{"id":1566,"name":"Health","auth_ref":"WP"},{"id":1531,"name":"Health Glossary","auth_ref":"WP"},{"id":4264,"name":"Heart Health","auth_ref":"WP"},{"id":1437,"name":"Hospitals","auth_ref":"WP"},{"id":4266,"name":"Hot Topics","auth_ref":"WP"},{"id":4483,"name":"HR專區","auth_ref":"WP"},{"id":4268,"name":"Immigration","auth_ref":"WP"},{"id":4027,"name":"Insurance","auth_ref":"WP"},{"id":4270,"name":"Kidney Health","auth_ref":"WP"},{"id":4272,"name":"Kids Health","auth_ref":"WP"},{"id":4129,"name":"learn","auth_ref":"WP"},{"id":4274,"name":"Liver Disease","auth_ref":"WP"},{"id":4276,"name":"Lung &amp; Respiratory","auth_ref":"WP"},{"id":4025,"name":"Medical Check Ups","auth_ref":"WP"},{"id":4278,"name":"Men’s Health","auth_ref":"WP"},{"id":4280,"name":"Mental Health","auth_ref":"WP"},{"id":4282,"name":"Nervous System","auth_ref":"WP"},{"id":4284,"name":"Orthopedics","auth_ref":"WP"},{"id":4286,"name":"Outpatient Services","auth_ref":"WP"},{"id":4136,"name":"Parenting","auth_ref":"WP"},{"id":4288,"name":"Physiotherapy","auth_ref":"WP"},{"id":611,"name":"Press Release","auth_ref":"WP"},{"id":4290,"name":"Prevention/Vaccination","auth_ref":"WP"},{"id":4292,"name":"Product Philosophy","auth_ref":"WP"},{"id":4294,"name":"Realty","auth_ref":"WP"},{"id":4296,"name":"Rheumatic Disease","auth_ref":"WP"},{"id":4298,"name":"Seniors Health","auth_ref":"WP"},{"id":4300,"name":"Skin Issue","auth_ref":"WP"},{"id":4302,"name":"Symptoms","auth_ref":"WP"},{"id":4304,"name":"Treatment Plan","auth_ref":"WP"},{"id":4072,"name":"Uncategorized","auth_ref":"WP"},{"id":4306,"name":"Urology","auth_ref":"WP"},{"id":4308,"name":"Women’s Health","auth_ref":"WP"},{"id":1539,"name":"中醫知識","auth_ref":"WP"},{"id":1418,"name":"了解癌症","auth_ref":"WP"},{"id":1119,"name":"保險知識","auth_ref":"WP"},{"id":1123,"name":"個人理財","auth_ref":"WP"},{"id":1742,"name":"內分泌及糖尿科","auth_ref":"WP"},{"id":1529,"name":"公司醫保","auth_ref":"WP"},{"id":1764,"name":"公立醫院百科","auth_ref":"WP"},{"id":1776,"name":"創業指南","auth_ref":"WP"},{"id":1730,"name":"呼吸道及肺部資訊","auth_ref":"WP"},{"id":1691,"name":"報稅攻略","auth_ref":"WP"},{"id":1661,"name":"女性健康","auth_ref":"WP"},{"id":4537,"name":"女性健康","auth_ref":"WP"},{"id":4127,"name":"學習","auth_ref":"WP"},{"id":4131,"name":"學習","auth_ref":"WP"},{"id":1709,"name":"專科醫生","auth_ref":"WP"},{"id":1762,"name":"小兒健康","auth_ref":"WP"},{"id":1732,"name":"心臟科資訊","auth_ref":"WP"},{"id":1420,"name":"新冠肺炎","auth_ref":"WP"},{"id":4044,"name":"殯葬資訊","auth_ref":"WP"},{"id":1426,"name":"治療方案","auth_ref":"WP"},{"id":1740,"name":"泌尿科資訊","auth_ref":"WP"},{"id":1432,"name":"熱門話題","auth_ref":"WP"},{"id":1768,"name":"營養貼士","auth_ref":"WP"},{"id":1728,"name":"牙科資訊","auth_ref":"WP"},{"id":1756,"name":"物理治療","auth_ref":"WP"},{"id":1758,"name":"男性健康","auth_ref":"WP"},{"id":1428,"name":"疾病症狀","auth_ref":"WP"},{"id":1746,"name":"皮膚及性病資訊","auth_ref":"WP"},{"id":4120,"name":"真實客戶分享","auth_ref":"WP"},{"id":1726,"name":"眼睛健康","auth_ref":"WP"},{"id":1430,"name":"私家醫院百科","auth_ref":"WP"},{"id":1774,"name":"租樓置業","auth_ref":"WP"},{"id":1772,"name":"移民須知","auth_ref":"WP"},{"id":1748,"name":"精神健康","auth_ref":"WP"},{"id":1760,"name":"老人健康","auth_ref":"WP"},{"id":1724,"name":"耳鼻喉資訊","auth_ref":"WP"},{"id":1778,"name":"職場資訊","auth_ref":"WP"},{"id":1736,"name":"肝臟健康","auth_ref":"WP"},{"id":1738,"name":"腎臟健康","auth_ref":"WP"},{"id":1752,"name":"腦神經及中風專科","auth_ref":"WP"},{"id":1734,"name":"腸胃健康","auth_ref":"WP"},{"id":1754,"name":"藥物簡介","auth_ref":"WP"},{"id":1750,"name":"血液健康","auth_ref":"WP"},{"id":1670,"name":"親子資訊","auth_ref":"WP"},{"id":4582,"name":"退休生活","auth_ref":"WP"},{"id":1766,"name":"運動貼士","auth_ref":"WP"},{"id":1770,"name":"醫療中心/診所指南","auth_ref":"WP"},{"id":1722,"name":"門診/普通科資訊","auth_ref":"WP"},{"id":1422,"name":"預防檢查/疫苗","auth_ref":"WP"},{"id":1780,"name":"風濕資訊","auth_ref":"WP"},{"id":1744,"name":"骨科資訊","auth_ref":"WP"},{"id":96987540,"name":"BB自願醫保","auth_ref":"VHIS101_WP"},{"id":1982,"name":"自願醫保","auth_ref":"VHIS101_WP"},{"id":96987557,"name":"優惠","auth_ref":"VHIS101_WP"},{"id":96987538,"name":"危疾保險","auth_ref":"VHIS101_WP"},{"id":96987541,"name":"人壽保險","auth_ref":"VHIS101_WP"},{"id":96987561,"name":"保險知識","auth_ref":"VHIS101_WP"}],"publish_targets":[{"publish_target_id":"00000000-0000-0000-0000-000000000001","name":"Bowtie WordPress","kind":"wordpress","auth_ref":"WP"},{"publish_target_id":"00000000-0000-0000-0000-000000000002","name":"VHIS101 WordPress","kind":"wordpress","auth_ref":"VHIS101_WP"}],"outlines":{"1792647f-4298-441a-ad0a-0a9b5fc75968":{"h1":"2026夏日家電推薦：抽濕機、循環扇、消暑廚電選購全攻略","sections":[{"action":"add","intent":"引導讀者進入主題，帶出挑選合適夏日家電能大大提升生活質素","key_points":["香港夏天潮濕悶熱，單靠冷氣未必能達到最佳舒適度","介紹本文涵蓋的5大夏日家電：抽濕機、循環扇、雪糕機、製冰機及榨汁機","說明選購時需考慮的香港居住環境因素（如慳位、多功能）"],"format_hint":"paragraph","source_note":null,"heading_text":"迎接2026炎夏：5大必備消暑家電指南","heading_level":2},{"action":"add","intent":"解答讀者對夏天使用抽濕機的迷思，提供實用技巧","key_points":["打破「抽濕機只在春天用」的迷思：降低室內濕度能有效降低體感溫度","最佳用法：開冷氣前先用抽濕機快速降濕，或將冷氣溫度調高配合抽濕機使用，達至慳電效果","夏天暴雨季節必備：防止家居角落及衣物發霉"],"format_hint":"bullet","source_note":null,"heading_text":"抽濕機夏天用法：配合冷氣更省電降溫","heading_level":2},{"action":"add","intent":"指導讀者如何選購及使用循環扇以加強室內空氣流通","key_points":["循環扇與一般風扇的分別：風柱設計能將冷氣吹送至全屋每個角落","選購要點一：DC直流摩打（慳電、寧靜）","選購要點二：3D上下左右擺頭功能","選購要點三：易拆洗設計，方便日常清潔"],"format_hint":"numbered","source_note":null,"heading_text":"2026循環扇推薦：提升冷氣效能的秘密武器","heading_level":2},{"action":"add","intent":"比較不同類型的雪糕機，幫助讀者挑選適合香港家庭的款式","key_points":["壓縮機款（內置製冷）：無需預先冷藏冰桶，可連續製作，但體積較大及較重","冰桶款（需預冷）：使用前需將冰桶放入雪櫃冷凍12至24小時，體積細小，適合香港蝸居","選購考量：容量大小、清洗便利度及製作時間"],"format_hint":"table","source_note":null,"heading_text":"雪糕機香港選購教學：在家自製健康甜品","heading_level":2},{"action":"add","intent":"分析製冰機的實用性，協助讀者決定是否值得入手","key_points":["優點：製冰速度極快（一般6至10分鐘出冰），隨時有冰塊沖調夏日特飲或招呼朋友","缺點：需佔用廚房枱面空間，且機器運作時會有一定散熱聲音","冰塊形狀比較：子彈冰（製作快，適合一般飲品）與方塊冰（融化較慢，適合威士忌或咖啡）"],"format_hint":"bullet","source_note":null,"heading_text":"製冰機好用嗎？家用製冰機優缺點與實用評價","heading_level":2},{"action":"add","intent":"比較不同榨汁設備的特點，方便讀者根據飲用習慣選擇","key_points":["慢磨機（冷壓榨汁機）：轉速低，能保留更多蔬果營養及酵素，果汁口感順滑無渣","傳統攪拌機/破壁機：連果肉及纖維一同打碎，適合製作沙冰（Smoothie）及飽足感強的飲品","離心式榨汁機：榨汁速度快，但容易氧化分層，清洗較麻煩"],"format_hint":"table","source_note":null,"heading_text":"榨汁機比較2026：慢磨機與傳統攪拌機點揀好？","heading_level":2}],"faq_section":[{"action":"add","question":"夏天已經開冷氣，還需要開抽濕機嗎？","answer_intent":"解釋冷氣機雖然有除濕功能，但降濕速度不及專用抽濕機。在極度潮濕的日子，兩者配合使用能更快達到舒適的體感溫度，並有效防止發霉。"},{"action":"add","question":"循環扇應該放在什麼位置最有效？","answer_intent":"提供擺放技巧，例如將循環扇背對冷氣機出風口，並朝向房間最遠的角落吹，利用空氣對流將冷風均勻散佈全屋。"},{"action":"add","question":"香港哪裡可以買到家用雪糕機和製冰機？","answer_intent":"列出香港常見的購買渠道，如大型電器連鎖店（豐澤、百老匯）、百貨公司專櫃以及網購平台（HKTVmall、品牌官網），並提醒留意保養期。"}],"shortcode_positions":{"page_widget_before":"faq","adv_panel_after_section_index":0},"meta_description_hint":"準備迎接2026年炎熱夏天？為你整理香港必備夏日家電推薦與實用貼士，涵蓋抽濕機夏天正確用法、循環扇推薦，以及雪糕機、製冰機與榨汁機比較，助你輕鬆消暑降溫！"},"55ce0bcd-3f5f-4bfd-8896-32a7f7fef848":{"h1":"大豆/黃豆營養價值與功效大解構！拆解大豆異黃酮副作用及乳癌迷思","sections":[{"action":"add","intent":"解釋大豆的基本定義，並釐清大豆與毛豆的關係與營養差異。","key_points":["大豆（Soybean）又稱黃豆，被譽為「植物肉」，是素食者重要的優質蛋白質來源。","毛豆其實是未完全成熟的大豆，兩者屬於同一物種，只是採收期不同。","營養差異：毛豆水分及維他命C較高，熱量較低；而成熟後的黃豆則含有更高的蛋白質及脂肪。"],"format_hint":"paragraph","source_note":null,"heading_text":"大豆（黃豆）是什麼？與毛豆有什麼分別？","heading_level":2},{"action":"update","intent":"根據香港食物安全中心數據更新大豆卡路里及營養素，並引入植物性蛋白質及功能性成分概念。","key_points":["更新大豆的卡路里與宏量營養素數據（引述香港食物安全中心最新資料）。","強調大豆含「完全蛋白質」，能提供人體必需的氨基酸，對長者維持肌肉量尤為重要。","介紹大豆異黃酮（植物雌激素）及卵磷脂等重要活性成分的作用。","釐清植物雌激素絕不等同於人體動物荷爾蒙的醫學觀念。"],"format_hint":"bullet","source_note":"香港食物安全中心","heading_text":"大豆的豐富營養成分（完全蛋白質、大豆異黃酮、卵磷脂）","heading_level":2},{"action":"update","intent":"將原有的 8 大功效精簡並深化為 5 大核心且具科學實證的健康好處。","key_points":["降低壞膽固醇與心血管疾病風險：低飽和脂肪及富含膳食纖維的雙重效應。","舒緩女性更年期不適：詳細解析大豆異黃酮的「雙向調節作用」及 ER-beta 受體機制。","預防骨質疏鬆：豐富的鈣質及大豆異黃酮協助骨骼健康。","協助控制血糖：低升糖指數（GI）且富含纖維，適合糖尿病患者適量進食。","抗氧化防護：富含多種維他命與抗氧化成分，有助抵抗自由基。"],"format_hint":"numbered","source_note":null,"heading_text":"大豆的 5 大健康功效","heading_level":2},{"action":"add","intent":"提供高結構化的數據比較，並針對香港人飲食習慣提出健康警告。","key_points":["列表比較豆漿、嫩豆腐、板豆腐、凍豆腐、豆卜、枝竹的蛋白質、脂肪與卡路里。","揭露香港人打邊爐及飲茶常吃的豆卜與枝竹為「高脂陷阱」。","建議日常應優先選擇低加工的豆腐與無糖豆漿。"],"format_hint":"table","source_note":"香港食物安全中心","heading_text":"比較 6 款常見大豆製品營養（豆漿、豆腐、豆卜、枝竹等）","heading_level":2},{"action":"add","intent":"補充原文章缺乏的中醫觀點與食療價值。","key_points":["中醫認為黃豆性平、味甘，歸脾、大腸經。","主要功效為健脾益氣、寬中導滯、利水消腫。","適合脾胃虛弱、容易水腫人士作日常食療調理。"],"format_hint":"paragraph","source_note":null,"heading_text":"中醫角度看大豆：健脾益氣功效與食療推介","heading_level":2},{"action":"keep","intent":"保留原有食譜並略作潤飾，提供讀者實際的烹調建議。","key_points":["所需材料：乾大豆、胡蘿蔔、洋蔥、西芹、番茄等。","烹調步驟：提前浸泡大豆，結合蔬菜燉煮，保留大豆豐富的水溶性維他命。"],"format_hint":"bullet","source_note":null,"heading_text":"大豆食譜：大豆蔬菜燉湯","heading_level":3},{"action":"update","intent":"修正過時的痛風醫學觀點，並合併原有的禁忌與不適合人士段落。","key_points":["修正痛風觀點：植物性嘌呤與動物性嘌呤不同，適量進食加工大豆製品（如豆腐、豆漿）是安全的，不會顯著增加痛風發作風險。","腎病患者需注意：大豆含有較高的磷與鉀，慢性腎病患者需控制攝取量。","甲狀腺功能異常者及消化系統敏感者（容易脹氣）的食用注意事項。","刪除過度誇大單一食物療效或禁忌的字眼。"],"format_hint":"bullet","source_note":null,"heading_text":"進食大豆的潛在副作用與食用禁忌（痛風與腎病患者注意）","heading_level":2},{"action":"keep","intent":"保留實用的選購及儲存建議。","key_points":["挑選技巧：表面光滑、無蟲蛀、包裝完整。","保存方法：存放於陰涼乾燥處，已開封須置於密封罐避免受潮。"],"format_hint":"bullet","source_note":null,"heading_text":"如何挑選及保存大豆？","heading_level":2}],"faq_section":[{"action":"add","question":"喝豆漿會增加患乳癌風險嗎？","answer_intent":"解除大豆異黃酮與乳癌風險的迷思。"},{"action":"add","question":"痛風患者可以吃大豆製品嗎？","answer_intent":"澄清植物性嘌呤的影響，強調適度進食加工大豆製品的安全性。"},{"action":"add","question":"毛豆、黃豆和黑豆有什麼分別？","answer_intent":"解釋三者為同一物種的不同生長階段或品種，並簡單帶出營養差異。"}],"shortcode_positions":{"page_widget_before":"faq","adv_panel_after_section_index":0},"meta_description_hint":"全面解析大豆（黃豆）的營養價值與功效，涵蓋大豆異黃酮、完全蛋白質的好處。為你比較豆漿、豆腐、豆卜等常見大豆製品營養，並由醫學及中醫角度拆解痛風與乳癌患者的飲食迷思。"},"838d23e0-81b7-4a21-a902-7f68b63f28f8":{"h1":"【夏日腸胃炎】食生蠔肚痛、凍飲惹禍？屙嘔急救與飲食指南","sections":[{"action":"add","intent":"解釋為何夏天是腸胃炎高峰期，帶出高溫與細菌繁殖的關係","key_points":["夏天氣溫高，食物容易變壞並滋生細菌如沙門氏菌及大腸桿菌","戶外活動增加，進食時若忽視手部衞生容易病從口入"],"format_hint":"paragraph","source_note":null,"heading_text":"夏天腸胃炎及食物中毒高發原因","heading_level":2},{"action":"add","intent":"點出最容易引起香港人共鳴的兩種高危飲食習慣","key_points":["生冷食物與未經高溫處理的飲品是兩大元兇"],"format_hint":"paragraph","source_note":null,"heading_text":"拆解夏日高危飲食陷阱","heading_level":2},{"action":"add","intent":"詳細說明食生蠔引發肚痛的原因及常見感染病毒","key_points":["生蠔生長於海水中，容易過濾並積聚海水中的弧菌及諾如病毒","進食受污染且未經煮熟的生蠔極易引發急性腸胃炎","常見症狀包括劇烈腹痛、頻繁腹瀉及嘔吐"],"format_hint":"bullet","source_note":null,"heading_text":"食生蠔肚痛：小心感染諾如病毒與弧菌","heading_level":3},{"action":"add","intent":"提醒讀者凍飲冰塊的潛在衞生風險","key_points":["食肆製冰機若缺乏定期清洗，冰塊含菌量可能嚴重超標","冷飲會刺激腸胃收縮，本身腸胃敏感者飲用後容易出現痙攣及肚痛","建議避免在衞生環境欠佳的地方飲用含冰飲品"],"format_hint":"bullet","source_note":null,"heading_text":"凍飲腸胃炎：冰塊含菌量或超標","heading_level":3},{"action":"add","intent":"提供實用的腸胃炎初步急救與舒緩方法","key_points":["切勿立即服用強效止瀉藥，以免將細菌或病毒留在體內","持續小口補充水分及電解質飲料，預防嚴重脫水","若出現大便有血、持續高燒或嚴重脫水症狀應立即求醫"],"format_hint":"bullet","source_note":null,"heading_text":"屙嘔肚痛急救法：正確補充水分與電解質","heading_level":2},{"action":"add","intent":"解答讀者最關心的腸胃炎飲食問題","key_points":["急性期：禁食數小時讓腸胃休息，隨後飲用米湯或清肉湯","好轉期：採用BRAT飲食法，即香蕉、米飯、蘋果蓉及多士","應避免的食物：奶類製品、高纖維蔬菜、辛辣及油膩食物"],"format_hint":"table","source_note":null,"heading_text":"腸胃炎食咩好？各階段飲食指南","heading_level":2},{"action":"add","intent":"總結預防方法，呼籲注意日常衞生","key_points":["嚴格遵守食物安全五要點","處理生熟食物必須分開","戶外野餐或燒烤時自備冰袋妥善保存食物"],"format_hint":"numbered","source_note":null,"heading_text":"預防夏日腸胃炎與食物中毒貼士","heading_level":2}],"faq_section":[{"action":"add","question":"腸胃炎可以飲運動飲品或寶礦力嗎？","answer_intent":"解釋運動飲品糖分較高，建議按比例稀釋後才飲用以免加重腹瀉。"},{"action":"add","question":"食生蠔肚痛通常幾耐會好？","answer_intent":"指出一般輕微腸胃炎只需一至三天便會自行痊癒，但若症狀持續則需盡快求診。"},{"action":"add","question":"腸胃炎可以食生果嗎？","answer_intent":"說明應避免酸性及高纖維水果，但可進食蘋果蓉或熟香蕉以補充鉀質。"}],"shortcode_positions":{"page_widget_before":"faq","adv_panel_after_section_index":0},"meta_description_hint":"夏天容易爆發腸胃炎及食物中毒？本文拆解食生蠔肚痛與凍飲引發腸胃炎的原因，並提供屙嘔肚痛急救方法及腸胃炎飲食建議，助你和家人安心度過炎夏。"},"dcc9a762-9ce2-4abd-9e72-1ba61fa3bcbb":{"h1":"2026夏季兒童手足口病指南：拆解病徵、波波池傳染風險與隔離指引","sections":[{"action":"add","intent":"介紹手足口病的基本資訊及為何夏天是爆發高峯期","key_points":["手足口病是由腸病毒引起的常見兒童傳染病","每年初夏至秋季為香港手足口病高峯期","五歲或以下幼童為最高危感染群組"],"format_hint":"paragraph","source_note":null,"heading_text":"甚麼是手足口病？夏天傳染病高峯期","heading_level":2},{"action":"add","intent":"羅列手足口病的主要及初期病徵，方便家長及早識別","key_points":["潛伏期一般為3至7天","初期病徵包括發燒、食慾不振、疲倦及喉嚨痛","發燒後1至2天，口腔、手掌、腳掌甚至臀部會出現帶有小水疱的紅疹","水疱破裂後會形成潰瘍，導致小朋友進食時感到痛楚"],"format_hint":"bullet","source_note":null,"heading_text":"小朋友手足口病徵一覽","heading_level":2},{"action":"add","intent":"針對波波池傳染的關鍵字，解釋傳播途徑及風險","key_points":["手足口病主要透過接觸患者的鼻咽分泌物、唾液、穿破的水疱或糞便傳播","波波池及室內遊樂場人流密集，且共用玩具容易沾染病毒","夏天在冷氣密閉空間內，若通風不良或消毒不足，傳染風險極高","家長應避免在傳染病高峯期帶幼童前往擠擁的遊樂設施"],"format_hint":"paragraph","source_note":null,"heading_text":"波波池與室內遊樂場：手足口病傳染陷阱？","heading_level":2},{"action":"add","intent":"指導家長如何處理小朋友感染後的隔離與照顧","key_points":["感染後必須遵守手足口病隔離指引，避免上學或參加集體活動","隔離期應直至所有水疱變乾及結痂為止，一般約需一星期或以上","提供充足水分，進食較軟身或流質食物以減輕口腔痛楚","密切留意有否出現持續高燒、嘔吐等嚴重併發症徵兆，如有應立即求醫"],"format_hint":"bullet","source_note":null,"heading_text":"手足口病隔離期及家居護理","heading_level":2},{"action":"add","intent":"提供具體的預防措施，保護小朋友免受感染","key_points":["保持良好的個人及環境衛生，尤其飯前及如廁後必須徹底洗手","定期使用1比99稀釋家用漂白水清潔家居及玩具","外出活動後立即更換衣物及洗手","避免與患者共用毛巾或餐具"],"format_hint":"numbered","source_note":null,"heading_text":"預防夏日傳染病實用貼士","heading_level":2}],"faq_section":[{"action":"add","question":"大人會感染手足口病嗎？","answer_intent":"解釋成人也有機會感染手足口病，雖然病徵通常較輕微或無病徵，但仍具傳染性，照顧患者時需佩戴口罩及勤洗手。"},{"action":"add","question":"手足口病需要隔離多少天？","answer_intent":"說明一般需隔離至所有水疱乾涸結痂，通常為7至10天，以保障其他學童免受感染。"},{"action":"add","question":"感染過手足口病後會有免疫力嗎？","answer_intent":"指出腸病毒有多種不同型號，感染過其中一種後只對該型號產生免疫力，日後仍有機會感染其他型號的手足口病病毒。"}],"shortcode_positions":{"page_widget_before":"faq","adv_panel_after_section_index":0},"meta_description_hint":"踏入2026年夏天，兒童手足口病進入高峯期。本文為家長詳細解析小朋友手足口病的常見病徵、波波池等室內遊樂場的高傳染風險，並提供正確的手足口病隔離與預防指引，助你安心與孩子度過暑假。"},"dd5922b2-5c6f-47cd-8de5-e0c3267ff474":{"h1":"夏天戶外工作必睇：預防汗水導致滑倒意外與跌倒報工傷指南","sections":[{"action":"add","intent":"解釋為何汗水會成為滑倒意外的元兇，提升工友安全意識","key_points":["夏天高溫引發大量排汗，汗水滴落光滑地面或金屬踏板易致地盤跣腳","手心出汗會嚴重影響攀爬棚架或直梯時的抓握力，增加失足風險","長時間穿著不透氣鞋履導致鞋內積汗，減低腳底摩擦力容易跣親"],"format_hint":"bullet","source_note":null,"heading_text":"夏天工作陷阱：汗水導致滑倒的隱藏風險","heading_level":2},{"action":"add","intent":"強調特定工作環境下汗水滑倒的嚴重性","key_points":["地盤滿佈雜物與不平坦地面，加上汗水及雨水交集，地盤跣腳是最常見工傷之一","高空工作滑倒往往瞬間發生，若防墮裝置未扣好，隨時造成致命意外","需定期檢查高空工作台及棚架表面的防滑情況，並清理積水或汗漬"],"format_hint":"paragraph","source_note":null,"heading_text":"高危環境警告：地盤跣腳與高空工作滑倒","heading_level":2},{"action":"add","intent":"帶出預防勝於治療的觀念，引伸至各類安全裝備","key_points":["裝備選擇直接影響防滑效果，工友必須配備適合夏天氣候的安全用品"],"format_hint":"paragraph","source_note":null,"heading_text":"預防「汗水跣親」的必備防滑裝備","heading_level":2},{"action":"add","intent":"提供選購防滑工作鞋的實用指標","key_points":["認明國際防滑標準（如 SRC 級別防滑認證）","鞋底需具備深坑紋設計以有效排走水份與汗水","鞋身物料需具備透氣功能，減少腳底大量出汗積聚於鞋內"],"format_hint":"bullet","source_note":null,"heading_text":"專業防滑工作鞋點樣揀？","heading_level":3},{"action":"add","intent":"介紹保護手部及身體的防滑與吸汗裝備","key_points":["佩戴掌心有防滑塗層的工作手套，防止手汗導致「跣手」","穿著排汗快乾的工作服，減少汗水流到地面的機會","善用頭帶或止汗巾，防止汗水入眼影響視線或滴落工作面"],"format_hint":"bullet","source_note":null,"heading_text":"吸汗防護服裝與防滑手套","heading_level":3},{"action":"add","intent":"指導工友萬一發生意外後的正確處理及索償步驟","key_points":["即使是因為自身汗水跣親，只要在工作期間及工作地點發生，均屬工傷保障範圍","意外後第一時間通知管工或僱主，並立即前往醫院或診所求醫","妥善保存醫療紀錄及病假紙，確保僱主在14天內向勞工處呈報工傷"],"format_hint":"numbered","source_note":null,"heading_text":"不慎跌倒報工傷：香港索償必知程序","heading_level":2}],"faq_section":[{"action":"add","question":"炎熱天氣下因自身汗水滑倒，算不算工傷？","answer_intent":"說明只要是在執行職務期間發生的意外，無論是否因個人汗水引起，一般都符合工傷定義。"},{"action":"add","question":"防滑工作鞋有甚麼安全標準需要注意？","answer_intent":"指出購買時應留意是否有歐盟 EN ISO 20345 標準，以及防滑級別如 SRA、SRB 或最高的 SRC。"},{"action":"add","question":"跌倒報工傷有甚麼時限？","answer_intent":"提醒工友應盡快通知僱主，而僱主必須在意外發生後14天內向勞工處呈報。"}],"shortcode_positions":{"page_widget_before":"faq","adv_panel_after_section_index":0},"meta_description_hint":"香港夏天炎熱，地盤及戶外工作容易因汗水跣親！本文為你拆解汗水導致滑倒的危機，教你挑選防滑工作鞋預防地盤跣腳及高空工作滑倒，並詳細講解跌倒報工傷的必知程序與勞工權益。"}},"gaps":{"55ce0bcd-3f5f-4bfd-8896-32a7f7fef848":{"top_pages":[{"url":"https://www.healthymatters.com.hk/zh/soybean-nutrition-health-benefits/","rank":1,"title":"黃豆（Soybean）營養成分與功效指南"},{"url":"https://embracehealth.org.hk/article/soy-and-soy-products","rank":2,"title":"可以吃豆類及豆製品嗎？ - 賽馬會「擁抱健康」中醫計劃"},{"url":"https://jpiman.com/soy-isoflavones","rank":3,"title":"大豆異黃酮功效| 營養師詳解女性的好處與副作用 - 日本命力"},{"url":"https://food.ulifestyle.com.hk/article/detail/3333333","rank":4,"title":"10種大豆製品營養價值懶人包豆漿／凍豆腐／嫩豆腐／味噌"},{"url":"https://gojistudios.com.hk/edamame-vs-soybean","rank":5,"title":"毛豆營養=黃豆？一文拆解「植物牛油果」9大驚人功效、成分與禁忌"}],"update_plan":{"must_add":["大豆製品營養比較表","毛豆與黃豆的關係與營養差異","中醫對黃豆的性味與功效分析","大豆異黃酮的雙向調節作用及雌激素受體機制解析"],"faq_to_add":["喝豆漿會增加患乳癌風險嗎？","痛風患者可以吃大豆製品嗎？","毛豆、黃豆和黑豆有什麼分別？"],"must_remove":["移除將植物雌激素等同於人體荷爾蒙的錯誤論述","刪除過度誇大單一食物療效的字眼"],"must_update":["更新大豆的卡路里及營養素數據","修正痛風患者與大豆關係的醫學觀點，強調適量進食加工大豆製品的安全性"],"must_reorder":["先介紹基本營養與功效，再加入加工產品比較，接著說明中醫觀點與副作用，最後以常見問題解除迷思"],"facts_to_verify":["大豆異黃酮對荷爾蒙受體的確切影響機制","各類大豆加工製品的真實脂肪及嘌呤含量"]},"chosen_route":"full_rewrite","content_gaps":{"faq_gaps":["喝豆漿會增加患乳癌風險嗎？","痛風患者可以吃大豆或豆腐嗎？","毛豆、黃豆和黑豆有什麼分別？"],"semantic_gaps":["完全蛋白質","大豆異黃酮","植物雌激素","植物性嘌呤","卵磷脂","雙向調節","ER-beta 受體"],"freshness_gaps":["引用香港食物安全中心最新的宏量營養素與卡路里數據","加入近年對於植物性蛋白質在長者膳食中重要性的新觀點"],"missing_topics":["常見大豆製品營養比較表","中醫角度黃豆健脾利水的食療功效","大豆異黃酮的雙向調節作用與 ER-beta 受體機制","毛豆與黃豆的品種與營養差異"],"missing_intents":["解答特定患者如痛風或乳癌患者能否進食的疑慮","提供實際日常飲食中的建議攝取量與食譜配搭"],"source_trust_gaps":["缺乏引述香港食物安全中心或註冊營養師的權威數據","缺乏腫瘤專科醫生或癌症防護機構對於大豆與癌症風險的官方聲明"],"hk_localization_gaps":["未有提及香港人常吃的大豆製品如豆卜與枝竹的卡路里與脂肪陷阱","缺乏針對香港人火鍋與飲茶飲食習慣的食用建議"],"ai_extractability_gaps":["缺乏高結構化的大豆製品營養比較表","缺乏簡潔的常見問題條列式問答結構"]},"route_reason":"現有文章結構較為單一，而搜尋結果前列競品均廣泛涵蓋了各類大豆加工製品的營養比較、毛豆與黃豆的關係、中醫觀點以及針對痛風和乳癌的醫學迷思解答。為確保文章具備更高的 AI 提取率及符合香港讀者的在地飲食習慣，需要大幅重寫段落結構並新增比較表格與常見問答，無法僅靠局部更新完成，因此建議全面重寫。","target_query":"大豆 功效 營養","recommended_outline":"H1: 大豆/黃豆營養價值與功效大解構！拆解大豆異黃酮副作用及乳癌迷思 H2: 大豆（黃豆）是什麼？與毛豆有什麼分別？ H2: 大豆的豐富營養成分（完全蛋白質、大豆異黃酮、卵磷脂） H2: 大豆的 5 大健康功效 (1) 降低壞膽固醇與心血管疾病風險 (2) 舒緩女性更年期不適 (3) 預防骨質疏鬆 (4) 協助控制血糖 (5) 抗氧化防護 H2: 比較 6 款常見大豆製品營養（豆漿、豆腐、豆卜、枝竹等） H2: 中醫角度看大豆：健脾益氣功效與食療推介 H2: 進食大豆的潛在副作用與食用禁忌（痛風與腎病患者注意） H2: 大豆常見迷思 FAQ (1) 喝豆漿/大豆異黃酮會增加患乳癌風險嗎？ (2) 痛風患者完全不能吃大豆製品嗎？","current_article_assessment":{"strengths":["提及大豆的基本營養成分","具有清晰的段落劃分"],"weak_sections":["缺少不同大豆加工製品的營養比較","缺少中醫角度對大豆的看法","缺乏針對乳癌迷思的科學原理解答","缺少毛豆與黃豆的關係解釋"],"outdated_points":["對痛風患者進食大豆的建議過於保守","未有釐清植物雌激素與動物雌激素的差別","未納入最新關於植物性蛋白質作為完全蛋白質的研究觀點"],"structure_status":"outdated"}}}}</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("demo-data").textContent);
+
+/* ── lookups ─────────────────────────────────────────────────────── */
+const personaName = Object.fromEntries((DATA.personas || []).map(p => [p.slug, p.name]));
+const userById = Object.fromEntries((DATA.wp_users || []).map(u => [u.id, u]));
+const catById = Object.fromEntries((DATA.wp_categories || []).map(c => [c.id, c]));
+
+/* Display names for pipeline states (hitl_2 → drafted, hitl_1 → outlined);
+   to be aligned across all pages. */
+const STATUS_META = {
+  hitl_2:    { label: "drafted",   cls: "st-hitl_2" },
+  hitl_1:    { label: "outlined",  cls: "st-hitl_1" },
+  pending:   { label: "pending",   cls: "st-pending" },
+  published: { label: "published", cls: "st-published" },
+  failed:    { label: "failed",    cls: "st-failed" },
+  rejected:  { label: "rejected",  cls: "st-rejected" },
+};
+const TABS = [
+  { key: "",          label: "All" },
+  { key: "hitl_2",    label: "drafted" },
+  { key: "hitl_1",    label: "outlined" },
+  { key: "pending",   label: "pending" },
+  { key: "failed",    label: "failed" },
+  { key: "published", label: "published" },
+  { key: "rejected",  label: "rejected" },
+];
+
+/* publish targets (multi-CMS: WordPress today, Ghost-ready) */
+const targetById = Object.fromEntries((DATA.publish_targets || []).map(t => [t.publish_target_id, t]));
+const targetByAuthRef = Object.fromEntries((DATA.publish_targets || []).map(t => [t.auth_ref, t]));
+const personaTargetId = Object.fromEntries((DATA.personas || []).map(p => [p.slug, p.publish_target_id]));
+const DEFAULT_TARGET = (DATA.publish_targets || [])[0] || { name: "Bowtie WordPress", kind: "wordpress", auth_ref: "WP" };
+const CMS_TAG = { wordpress: "WP", ghost: "GT" };
+const TARGET_HOST = { WP: "bowtie.com.hk", VHIS101_WP: "vhis101.com" };
+function targetForRun(r) { return targetById[personaTargetId[r.persona]] || DEFAULT_TARGET; }
+function cmsRef(r) {
+  if (!r.wp_pushed_post_id) return null;
+  return (CMS_TAG[targetForRun(r).kind] || "WP") + "#" + r.wp_pushed_post_id;
+}
+
+/* ── state ───────────────────────────────────────────────────────── */
+let state = {
+  tab: "hitl_2",          // land on the queue that needs the editor
+  search: "",
+  voice: "",
+  sort: "newest",
+  selected: new Set(),
+  openRun: null,
+};
+
+/* ── helpers ─────────────────────────────────────────────────────── */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmtDate = (iso) => (iso ? iso.slice(0, 10) : "—");
+const fmtDateTime = (iso) => (iso ? iso.slice(0, 16).replace("T", " ") : "—");
+const decodeSlug = (s) => { try { return decodeURIComponent(s || ""); } catch { return s || ""; } };
+function relAge(iso) {
+  if (!iso) return "";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day";
+  return days + " days";
+}
+function catNames(ids) {
+  if (!Array.isArray(ids) || !ids.length) return null;
+  return ids.map((i) => (catById[i] ? catById[i].name : "#" + i)).join(", ");
+}
+function toast(msg, api) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = esc(msg) + (api ? `<span class="api">${esc(api)}</span>` : "");
+  $("toast-zone").appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+/* ── filtering ───────────────────────────────────────────────────── */
+function visibleRuns() {
+  let rs = DATA.runs.slice();
+  if (state.tab) rs = rs.filter((r) => r.status === state.tab);
+  if (state.voice) rs = rs.filter((r) => r.persona === state.voice);
+  if (state.search) {
+    const q = state.search.toLowerCase();
+    rs = rs.filter((r) =>
+      (r.topic || "").toLowerCase().includes(q) ||
+      (r.seo_title || "").toLowerCase().includes(q) ||
+      decodeSlug(r.wp_slug).toLowerCase().includes(q) ||
+      JSON.stringify(r.keywords || []).toLowerCase().includes(q));
+  }
+  rs.sort((a, b) => state.sort === "oldest"
+    ? a.created_at.localeCompare(b.created_at)
+    : b.created_at.localeCompare(a.created_at));
+  return rs;
+}
+
+/* ── render: tabs ────────────────────────────────────────────────── */
+function renderTabs() {
+  const counts = DATA.status_counts || {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  $("tabs").innerHTML = TABS.map((t) => {
+    const n = t.key ? (counts[t.key] || 0) : total;
+    return `<button class="tab ${state.tab === t.key ? "active" : ""}" data-tab="${t.key}">${t.label} <span class="n">${n}</span></button>`;
+  }).join("");
+  $("tabs").querySelectorAll(".tab").forEach((b) =>
+    b.addEventListener("click", () => { state.tab = b.dataset.tab; state.selected.clear(); render(); }));
+}
+
+/* ── render: rows ────────────────────────────────────────────────── */
+function wpCell(r) {
+  const t = targetForRun(r);
+  const author = r.wp_author_id != null ? (userById[r.wp_author_id]?.name || "#" + r.wp_author_id) : null;
+  const cats = catNames(r.wp_category_ids);
+  const pub = r.wp_publish_status;
+  let lines = "";
+  lines += `<div class="wp-line"><span class="k">CMS</span><span class="v">${esc(t.name)}</span></div>`;
+  lines += `<div class="wp-line"><span class="k">Auth</span><span class="v ${author ? "" : "unset"}">${esc(author || "unset")}</span></div>`;
+  lines += `<div class="wp-line"><span class="k">Cat</span><span class="v ${cats ? "" : "unset"}">${esc(cats || "unset")}</span></div>`;
+  const pubBits = [];
+  if (pub) pubBits.push(`<span class="pub-pill pub-${esc(pub)}">${esc(pub)}</span>`);
+  else pubBits.push(`<span class="v unset">draft (default)</span>`);
+  if (r.wp_publish_at) pubBits.push(`<span style="color:var(--faint)">${fmtDateTime(r.wp_publish_at)}</span>`);
+  lines += `<div class="wp-line"><span class="k">Pub</span><span class="v" style="display:flex;gap:6px;align-items:baseline">${pubBits.join(" ")}</span></div>`;
+  return lines;
+}
+function renderRows() {
+  const rs = visibleRuns();
+  $("empty").style.display = rs.length ? "none" : "block";
+  $("rows").innerHTML = rs.map((r) => {
+    const sm = STATUS_META[r.status] || { label: r.status, cls: "st-rejected", hint: "" };
+    const sel = state.selected.has(r.run_id);
+    const open = state.openRun === r.run_id;
+    const flags = [];
+    flags.push(r.start_mode === "refresh"
+      ? `<span class="flag refresh">rewrite</span>`
+      : `<span class="flag create">new</span>`);
+    if (r.edit_note) flags.push(`<span class="flag note" title="${esc(r.edit_note)}">brief</span>`);
+    if ((r.hitl_2_iteration || 0) > 0) flags.push(`<span class="flag iter">rev ${r.hitl_2_iteration}</span>`);
+    const sub = r.seo_title || r.meta_description || "";
+    const idBits = [`<span title="${r.run_id}">${r.run_id.slice(0, 8)}</span>`];
+    if (r.wp_slug) idBits.push(`<span>/${esc(decodeSlug(r.wp_slug).slice(0, 30))}</span>`);
+    const ref = cmsRef(r);
+    if (ref) idBits.push(`<span class="cms-id">${ref}</span>`);
+    return `<tr data-id="${r.run_id}" class="${sel ? "selected" : ""} ${open ? "open-row" : ""}">
+      <td class="col-check"><input type="checkbox" data-check="${r.run_id}" ${sel ? "checked" : ""}></td>
+      <td>
+        <span class="topic-title">${esc(r.topic)}</span><span class="topic-flags">${flags.join("")}</span>
+        ${sub ? `<div class="topic-sub">${esc(sub)}</div>` : ""}
+        <div class="topic-ids">${idBits.join("")}</div>
+      </td>
+      <td class="col-voice"><span class="voice-badge">${esc(personaName[r.persona] || r.persona)}</span></td>
+      <td class="col-status"><span class="status-pill ${sm.cls}"><span class="dot"></span>${sm.label}</span></td>
+      <td class="col-wp"><div class="wp-cell">${wpCell(r)}</div></td>
+      <td class="col-date"><span class="date-cell">${fmtDateTime(r.created_at)}</span></td>
+    </tr>`;
+  }).join("");
+
+  $("rows").querySelectorAll("tr").forEach((tr) => {
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("input[type=checkbox]")) return;
+      openDrawer(tr.dataset.id);
+    });
+  });
+  $("rows").querySelectorAll("input[data-check]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      cb.checked ? state.selected.add(cb.dataset.check) : state.selected.delete(cb.dataset.check);
+      renderRows(); renderBulk();
+    });
+  });
+  const allVisible = rs.length > 0 && rs.every((r) => state.selected.has(r.run_id));
+  $("check-all").checked = allVisible;
+}
+
+/* ── bulk bar ────────────────────────────────────────────────────── */
+function renderBulk() {
+  const n = state.selected.size;
+  $("bulkbar").classList.toggle("show", n > 0);
+  $("bulk-count").textContent = n + " selected";
+  const sel = DATA.runs.filter((r) => state.selected.has(r.run_id));
+  $("bulk-publish").style.display = sel.some((r) => r.status === "hitl_2") ? "" : "none";
+  $("bulk-restart").style.display = sel.some((r) => r.status === "failed") ? "" : "none";
+}
+
+/* ── drawer ──────────────────────────────────────────────────────── */
+function runById(id) { return DATA.runs.find((r) => r.run_id === id); }
+function openDrawer(id) {
+  state.openRun = id;
+  const r = runById(id);
+  if (!r) return;
+  const sm = STATUS_META[r.status] || { label: r.status, cls: "st-rejected" };
+  $("drawer-topic").textContent = r.topic;
+  $("drawer-status").innerHTML = `<span class="status-pill ${sm.cls}"><span class="dot"></span>${sm.label}</span>`;
+  $("drawer-runid").textContent = r.run_id.slice(0, 8);
+
+  // context column
+  const kws = Array.isArray(r.keywords) ? r.keywords : [];
+  const kv = [];
+  kv.push(["Voice", esc(personaName[r.persona] || r.persona)]);
+  kv.push(["Kind", r.start_mode === "refresh" ? "Rewrite of existing article" : "New article"]);
+  if (r.article_url) kv.push(["Source", `<a href="${esc(r.article_url)}" target="_blank" rel="noopener">${esc(r.article_url.replace(/^https?:\/\//, "").slice(0, 48))}…</a>`]);
+  if (r.target_audience) kv.push(["Audience", esc(r.target_audience)]);
+  if (kws.length) kv.push(["Keywords", `<span class="kw-chips">${kws.slice(0, 6).map((k) => `<span class="kw-chip">${esc(k)}</span>`).join("")}${kws.length > 6 ? `<span class="kw-chip">+${kws.length - 6}</span>` : ""}</span>`]);
+  kv.push(["Created", fmtDateTime(r.created_at)]);
+  kv.push(["Last change", fmtDateTime(r.updated_at || r.created_at)]);
+  if ((r.hitl_2_iteration || 0) > 0) kv.push(["Revisions", String(r.hitl_2_iteration)]);
+  kv.push(["History", `<a href="#" id="kv-history">Version history →</a>`]);
+  $("ctx-kv").innerHTML = kv.map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join("");
+  $("ctx-kv").querySelector("#kv-history")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toast("Demo — opens version history", `GET /runs/${r.run_id}/hitl2-snapshots`);
+  });
+  $("ctx-note").innerHTML = r.edit_note
+    ? `<div class="edit-note-box"><div class="note-text"><strong>Operator brief —</strong> ${esc(r.edit_note)}</div><div class="note-more">Show more</div></div>`
+    : "";
+  $("ctx-note").querySelector(".edit-note-box")?.addEventListener("click", (e) => {
+    const box = e.currentTarget;
+    box.classList.toggle("expanded");
+    box.querySelector(".note-more").textContent = box.classList.contains("expanded") ? "Show less" : "Show more";
+  });
+
+  // preview column
+  if (r.seo_title || r.meta_description) {
+    const slug = decodeSlug(r.wp_slug) || "…";
+    const host = TARGET_HOST[targetForRun(r).auth_ref] || targetForRun(r).name;
+    $("preview").innerHTML = `
+      <div class="serp-frame">
+        <div class="serp-url">${esc(host)} › blog › ${esc(slug.slice(0, 40))}</div>
+        <div class="preview-headline">${esc(r.seo_title || r.topic)}</div>
+        <div class="preview-meta">${esc(r.meta_description || "")}</div>
+      </div>
+      <div class="preview-links">
+        <a href="#" data-api="GET /runs/${r.run_id} → /runs/${r.run_id}/hitl2">Open full editor →</a>
+        ${r.wp_pushed_post_id ? `<a href="#" data-api="wp_link">View live post ↗</a>` : ""}
+      </div>`;
+  } else {
+    $("preview").innerHTML = `<div class="preview-empty">No draft rendered yet — ${r.status === "hitl_1" ? "outline awaiting your review." : r.status === "failed" ? "run failed before drafting." : "agents still working."}</div>
+      <div class="preview-links"><a href="#" data-api="GET /runs/${r.run_id}">Open run detail →</a></div>`;
+  }
+  $("preview").querySelectorAll("a[data-api]").forEach((a) =>
+    a.addEventListener("click", (e) => { e.preventDefault(); toast("Demo — navigates to the run editor", a.dataset.api); }));
+
+  // middle + right columns flip layout at the outline gate (hitl_1 / "outlined"):
+  // Gap analysis replaces the draft preview; the outline replaces the CMS form.
+  const isOutlineGate = r.status === "hitl_1";
+  $("mid-label").textContent = isOutlineGate ? "Gap analysis" : "Draft preview";
+  $("preview").style.display = isOutlineGate ? "none" : "";
+  $("gap-panel").style.display = isOutlineGate ? "" : "none";
+  $("right-label").innerHTML = isOutlineGate
+    ? "Outline"
+    : `CMS destination <span class="dest-target">· ${esc(targetForRun(r).name)}</span>`;
+  $("wp-form").style.display = isOutlineGate ? "none" : "grid";
+  $("outline-panel").style.display = isOutlineGate ? "" : "none";
+  if (isOutlineGate) {
+    $("gap-panel").innerHTML = renderGap((DATA.gaps || {})[r.run_id]);
+    $("outline-panel").innerHTML = renderOutline((DATA.outlines || {})[r.run_id]);
+  }
+
+  // cms destination form
+  $("f-seotitle").value = r.seo_title || "";
+  $("f-metadesc").value = r.meta_description || "";
+  comboAuthor.set(r.wp_author_id);
+  comboCategory.set(Array.isArray(r.wp_category_ids) ? r.wp_category_ids[0] : null);
+  $("f-slug").value = decodeSlug(r.wp_slug);
+  $("f-pubstatus").value = r.wp_publish_status || "";
+  $("f-pubdate").value = r.wp_publish_at ? r.wp_publish_at.slice(0, 10) : "";
+
+  // actions by status
+  const A = [];
+  if (r.status === "hitl_2") {
+    A.push(`<button class="btn danger" data-act="reject">Reject</button>`);
+    A.push(`<button class="btn primary" data-act="publish">Approve &amp; publish</button>`);
+  } else if (r.status === "hitl_1") {
+    A.push(`<button class="btn danger" data-act="reject">Reject</button>`);
+    A.push(`<button class="btn primary" data-act="approve_outline">Approve outline</button>`);
+  } else if (r.status === "failed") {
+    A.push(`<button class="btn primary" data-act="restart">Restart run</button>`);
+  } else if (r.status === "published") {
+    A.push(`<button class="btn" data-act="republish">Republish with edits</button>`);
+  } else if (r.status === "rejected") {
+    A.push(`<button class="btn" data-act="restart">Restart run</button>`);
+  }
+  if (!isOutlineGate) A.push(`<span class="save-hint">metadata autosaves · PATCH /runs/:id</span>`);
+  $("drawer-actions").innerHTML = A.join("");
+  $("drawer-actions").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => act(b.dataset.act, [r])));
+
+  $("drawer").classList.add("open");
+  renderRows();
+}
+/* search-and-select combobox (single choice) */
+function makeCombo(el, items, opts) {
+  el.innerHTML = `<input type="text" class="combo-input" placeholder="${esc(opts.placeholder || "Search…")}" autocomplete="off"><div class="combo-list" hidden></div>`;
+  const input = el.querySelector("input");
+  const listEl = el.querySelector(".combo-list");
+  let value = null;
+  function renderList(q) {
+    const ql = (q || "").toLowerCase();
+    const groups = {};
+    (items || []).filter((it) => !ql || it.name.toLowerCase().includes(ql)).slice(0, 250)
+      .forEach((it) => { (groups[it.auth_ref || ""] ||= []).push(it); });
+    listEl.innerHTML = Object.entries(groups).map(([ref, list]) =>
+      `<div class="combo-group">${esc(targetByAuthRef[ref]?.name || ref)}</div>` +
+      list.map((it) => `<div class="combo-opt ${it.id === value ? "sel" : ""}" data-id="${it.id}">${esc(it.name)}</div>`).join("")
+    ).join("") || `<div class="combo-empty">No match</div>`;
+    listEl.querySelectorAll(".combo-opt").forEach((o) => o.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const it = items.find((i) => String(i.id) === o.dataset.id);
+      value = it ? it.id : null;
+      input.value = it ? it.name : "";
+      input.classList.add("dirty");
+      setTimeout(() => input.classList.remove("dirty"), 1500);
+      listEl.hidden = true;
+      if (opts.onChange) opts.onChange(value);
+    }));
+  }
+  input.addEventListener("focus", () => { renderList(""); listEl.hidden = false; input.select(); });
+  input.addEventListener("input", () => { renderList(input.value); listEl.hidden = false; });
+  input.addEventListener("blur", () => setTimeout(() => {
+    listEl.hidden = true;
+    const it = items.find((i) => i.id === value);
+    input.value = it ? it.name : "";
+  }, 120));
+  return {
+    set(id) { value = id ?? null; const it = items.find((i) => i.id === value); input.value = it ? it.name : ""; },
+    get() { return value; },
+  };
+}
+function destSaveToast(field) {
+  const r = runById(state.openRun);
+  toast(`Demo — saved ${field} for "${(r?.topic || "").slice(0, 24)}…"`, "PATCH /runs/:id (debounced autosave)");
+}
+const comboAuthor = makeCombo($("c-author"), DATA.wp_users, { placeholder: "Search author…", onChange: () => destSaveToast("author") });
+const comboCategory = makeCombo($("c-category"), DATA.wp_categories, { placeholder: "Search category…", onChange: () => destSaveToast("category") });
+const comboMAuthor = makeCombo($("c-m-author"), DATA.wp_users, { placeholder: "Search author…" });
+const comboMCategory = makeCombo($("c-m-category"), DATA.wp_categories, { placeholder: "Search category…" });
+
+/* gap analysis + outline renderers (HITL_1 / outlined gate) */
+function gapSec(title, inner) { return inner ? `<div class="gap-sec"><h4>${title}</h4>${inner}</div>` : ""; }
+function bulletList(arr) {
+  return Array.isArray(arr) && arr.length ? `<ul class="ol-points">${arr.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+}
+function chipList(arr) {
+  return Array.isArray(arr) && arr.length ? `<div class="kw-chips">${arr.map((x) => `<span class="kw-chip">${esc(x)}</span>`).join("")}</div>` : "";
+}
+function renderGap(g) {
+  if (!g) return `<div class="preview-empty">No gap analysis — this is a new article (create mode), so the pipeline skipped it.</div>`;
+  let h = "";
+  if (g.target_query) h += gapSec("Target query", `<div class="gap-text">${esc(g.target_query)}</div>`);
+  if (g.chosen_route || g.route_reason) h += gapSec("Route", `<div class="gap-text"><strong>${esc(g.chosen_route || "")}</strong> — ${esc(g.route_reason || "")}</div>`);
+  const a = g.current_article_assessment || {};
+  h += gapSec("Weak sections", bulletList(a.weak_sections));
+  h += gapSec("Outdated points", bulletList(a.outdated_points));
+  const c = g.content_gaps || {};
+  h += gapSec("Missing topics", bulletList(c.missing_topics));
+  h += gapSec("FAQ gaps", bulletList(c.faq_gaps));
+  h += gapSec("Semantic gaps", chipList(c.semantic_gaps));
+  h += gapSec("Freshness", bulletList(c.freshness_gaps));
+  const u = g.update_plan || {};
+  h += gapSec("Must add", bulletList(u.must_add));
+  h += gapSec("Must update", bulletList(u.must_update));
+  h += gapSec("Must remove", bulletList(u.must_remove));
+  if (Array.isArray(g.top_pages) && g.top_pages.length) {
+    h += gapSec("Top competing pages", `<ol class="gap-pages">${g.top_pages.slice(0, 5).map((p) =>
+      `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title || p.url)}</a></li>`).join("")}</ol>`);
+  }
+  return h;
+}
+function renderOutline(o) {
+  if (!o) return `<div class="preview-empty">No outline yet.</div>`;
+  let h = o.h1 ? `<div class="ol-h1">${esc(o.h1)}</div>` : "";
+  h += (o.sections || []).map((s) => `
+    <div class="ol-sec">
+      <div class="ol-head"><span class="ol-hlvl">H${s.heading_level || 2}</span>${esc(s.heading_text || "")}${s.action ? ` <span class="flag ${s.action === "add" ? "create" : "iter"}">${esc(s.action)}</span>` : ""}</div>
+      ${s.intent ? `<div class="ol-intent">${esc(s.intent)}</div>` : ""}
+      ${bulletList(s.key_points)}
+    </div>`).join("");
+  return h;
+}
+function closeDrawer() { state.openRun = null; $("drawer").classList.remove("open"); renderRows(); }
+function stepDrawer(delta) {
+  const rs = visibleRuns();
+  const i = rs.findIndex((r) => r.run_id === state.openRun);
+  const next = rs[i + delta];
+  if (next) openDrawer(next.run_id);
+}
+
+/* ── actions (demo stubs naming the real endpoints) ──────────────── */
+function act(kind, runs) {
+  const ids = runs.map((r) => r.run_id.slice(0, 8)).join(", ");
+  const api = {
+    publish: "POST /runs/:id/resume {decision:'approve'} — per selected run",
+    changes: "POST /runs/:id/resume {decision:'request_changes', notes}",
+    reject: "POST /runs/:id/resume {decision:'reject'}",
+    restart: "POST /runs/:id/restart",
+    approve_outline: "POST /runs/:id/resume {gate:'HITL_1', decision:'approve'}",
+    republish: "POST /runs/:id/republish",
+    bulkmeta: "PATCH /runs/:id {wp_author_id, wp_category_ids, wp_publish_status, wp_publish_at} — fan-out",
+  }[kind] || "";
+  const verb = {
+    publish: "Approve & publish", reject: "Reject", restart: "Restart",
+    approve_outline: "Approve outline", republish: "Republish", bulkmeta: "Set metadata",
+  }[kind] || kind;
+  toast(`Demo — ${verb}: ${runs.length} run${runs.length > 1 ? "s" : ""} (${ids})`, api);
+}
+
+/* ── bulk handlers ───────────────────────────────────────────────── */
+function selectedRuns() { return DATA.runs.filter((r) => state.selected.has(r.run_id)); }
+$("bulk-publish").addEventListener("click", () => act("publish", selectedRuns().filter((r) => r.status === "hitl_2")));
+$("bulk-restart").addEventListener("click", () => act("restart", selectedRuns().filter((r) => r.status === "failed")));
+$("bulk-reject").addEventListener("click", () => act("reject", selectedRuns()));
+$("bulk-clear").addEventListener("click", () => { state.selected.clear(); renderRows(); renderBulk(); });
+$("bulk-meta").addEventListener("click", () => {
+  $("modal-sub").textContent = `Applies to ${state.selected.size} selected runs. Blank fields are left untouched.`;
+  comboMAuthor.set(null);
+  comboMCategory.set(null);
+  $("modal-backdrop").classList.add("show");
+});
+$("modal-cancel").addEventListener("click", () => $("modal-backdrop").classList.remove("show"));
+$("modal-backdrop").addEventListener("click", (e) => { if (e.target === $("modal-backdrop")) $("modal-backdrop").classList.remove("show"); });
+$("modal-apply").addEventListener("click", () => {
+  $("modal-backdrop").classList.remove("show");
+  act("bulkmeta", selectedRuns());
+});
+
+/* ── form change = autosave stub ─────────────────────────────────── */
+["f-seotitle", "f-metadesc", "f-slug", "f-pubstatus", "f-pubdate"].forEach((id) => {
+  $(id).addEventListener("change", () => {
+    $(id).classList.add("dirty");
+    const r = runById(state.openRun);
+    const isContent = id === "f-seotitle" || id === "f-metadesc";
+    toast(`Demo — saved ${id.slice(2)} for "${(r?.topic || "").slice(0, 24)}…"`,
+      isContent ? "POST /runs/:id/hitl2-snapshots (autosave)" : "PATCH /runs/:id (debounced autosave)");
+    setTimeout(() => $(id).classList.remove("dirty"), 1500);
+  });
+});
+
+/* ── global controls ─────────────────────────────────────────────── */
+$("search").addEventListener("input", (e) => { state.search = e.target.value; renderRows(); });
+$("voice-filter").addEventListener("change", (e) => { state.voice = e.target.value; renderRows(); });
+$("sort").addEventListener("change", (e) => { state.sort = e.target.value; renderRows(); });
+$("check-all").addEventListener("change", (e) => {
+  const rs = visibleRuns();
+  e.target.checked ? rs.forEach((r) => state.selected.add(r.run_id)) : rs.forEach((r) => state.selected.delete(r.run_id));
+  renderRows(); renderBulk();
+});
+$("drawer-close").addEventListener("click", closeDrawer);
+$("drawer-prev").addEventListener("click", () => stepDrawer(-1));
+$("drawer-next").addEventListener("click", () => stepDrawer(1));
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, select, textarea")) return;
+  if (e.key === "Escape") { closeDrawer(); $("modal-backdrop").classList.remove("show"); }
+  if (e.key === "j") state.openRun ? stepDrawer(1) : openDrawer(visibleRuns()[0]?.run_id);
+  if (e.key === "k") state.openRun && stepDrawer(-1);
+});
+$("masthead-date").textContent = "VOL. 04 · " + new Date().toISOString().slice(0, 10);
+$("demo-note").textContent = `static demo · ${DATA.runs.length} runs sampled from production (${Object.values(DATA.status_counts).reduce((a, b) => a + b, 0)} total) · ${DATA.extracted_at?.slice(0, 10) || ""}`;
+
+/* voice filter options */
+const voices = [...new Set(DATA.runs.map((r) => r.persona))];
+$("voice-filter").innerHTML = `<option value="">Voice — all</option>` +
+  voices.map((v) => `<option value="${esc(v)}">${esc(personaName[v] || v)}</option>`).join("");
+
+function render() { renderTabs(); renderRows(); renderBulk(); }
+render();
+</script>
+</body>
+</html>

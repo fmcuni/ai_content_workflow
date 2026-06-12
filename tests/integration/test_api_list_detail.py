@@ -200,6 +200,73 @@ async def test_list_runs_empty_db(postgres_url):
     assert r.json() == []
 
 
+@pytest.mark.asyncio
+async def test_list_runs_includes_latest_render_seo_fields(postgres_url):
+    """§6.1: list rows carry seo_title/meta_description from the latest render.
+
+    A run with two draft iterations must surface the NEWEST iteration's render;
+    a run with no render must surface NULL (not 404/500, never absent).
+    """
+    app, sf, engine = await _setup_app(postgres_url)
+
+    run_rendered = uuid4()
+    run_unrendered = uuid4()
+
+    async with sf() as session:
+        session.add(_make_run(run_id=run_rendered, status="hitl_2", topic="rendered run"))
+        session.add(_make_run(run_id=run_unrendered, status="hitl_2", topic="unrendered run"))
+        await session.flush()
+
+        draft_v1 = _make_draft(run_id=run_rendered, iteration=1)
+        draft_v2 = _make_draft(run_id=run_rendered, iteration=2)
+        session.add_all([draft_v1, draft_v2])
+        await session.flush()
+
+        # Older iteration render (should be ignored) + newest iteration render.
+        session.add(
+            Render(
+                render_id=uuid4(),
+                draft_id=draft_v1.draft_id,
+                seo_title="STALE v1 title",
+                meta_description="stale v1 meta",
+                html_body="<article>v1</article>",
+                faq_schema_jsonld={"@type": "FAQPage"},
+                excerpt_suggestion="v1",
+                slug_suggestion="v1-slug",
+            )
+        )
+        session.add(
+            Render(
+                render_id=uuid4(),
+                draft_id=draft_v2.draft_id,
+                seo_title="大腸癌篩查完整指南",
+                meta_description="了解大腸癌篩查方法與建議",
+                html_body="<article>v2</article>",
+                faq_schema_jsonld={"@type": "FAQPage"},
+                excerpt_suggestion="v2",
+                slug_suggestion="v2-slug",
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=_BASE) as ac:
+        r = await ac.get("/runs?status=hitl_2")
+
+    await engine.dispose()
+
+    assert r.status_code == 200
+    body = {i["run_id"]: i for i in r.json()}
+
+    rendered = body[str(run_rendered)]
+    assert "seo_title" in rendered and "meta_description" in rendered
+    assert rendered["seo_title"] == "大腸癌篩查完整指南"
+    assert rendered["meta_description"] == "了解大腸癌篩查方法與建議"
+
+    unrendered = body[str(run_unrendered)]
+    assert unrendered["seo_title"] is None
+    assert unrendered["meta_description"] is None
+
+
 # ===========================================================================
 # GET /runs/{run_id}/gap-analysis
 # ===========================================================================

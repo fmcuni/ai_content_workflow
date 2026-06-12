@@ -1,9 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// Runs Ledger board (Phase 5) e2e. The board reads everything over `/api/*`, so
-// we mock that surface at the browser layer — no live backend needed (mirrors
-// the route-mocking approach in setup.spec.ts). A fake better-auth cookie keeps
-// the optimistic `middleware.ts` redirect from bouncing /runs → /login.
+// Runs Ledger (redesign) e2e. The ledger reads everything over `/api/*`, so a
+// fake better-auth cookie keeps `middleware.ts` from bouncing /runs → /login.
+// The board defaults to the "drafted" tab and opens a bottom-sheet drawer per
+// row; bulk actions fan out over the per-run endpoints.
 
 type Json = Record<string, unknown>;
 
@@ -20,8 +20,9 @@ const PERSONAS = [
   { slug: "amy", name: "Amy Lee" },
 ];
 
-// One run per status group, a rewrite + a create (for the source-link check),
-// a conflict row (for the 409 path), and a promoted child run for the batch.
+// One run per status bucket the ledger tabs read: a LIVE drafted (hitl_2,
+// wp_publish_status "publish"), a second drafted draft (the stale-version 409
+// path), an outlined (hitl_1), a generating (pending), a published and a failed.
 function makeRuns(): Record<string, unknown>[] {
   return [
     {
@@ -31,6 +32,7 @@ function makeRuns(): Record<string, unknown>[] {
       start_mode: "refresh", persona: "dr-wong", keywords: ["alpha", "guide"],
       wp_author_id: 1, wp_category_ids: [10], wp_slug: "alpha",
       wp_publish_status: "publish", wp_pushed_post_id: 555,
+      seo_title: "Alpha SEO title", meta_description: "Alpha meta",
     },
     {
       run_id: "r-create", status: "hitl_1", topic: "Create beta article",
@@ -59,52 +61,11 @@ function makeRuns(): Record<string, unknown>[] {
       run_id: "r-conflict", status: "hitl_2", topic: "Conflict zeta",
       article_url: "https://www.bowtie.com.hk/blog/zh/zeta", mode: "full",
       created_at: "2026-06-04T07:30:00Z", chosen_route: "full_rewrite", iteration_count: 1,
-      start_mode: "refresh", wp_author_id: 1, wp_publish_status: "draft",
-    },
-    {
-      run_id: "r-child", status: "pending", topic: "Promoted child article",
-      article_url: "", mode: "create", created_at: "2026-06-04T06:00:00Z",
-      chosen_route: null, iteration_count: 0, start_mode: "create",
-      topic_candidate_id: "c-1",
+      start_mode: "refresh", persona: "dr-wong", wp_author_id: 1, wp_publish_status: "draft",
+      wp_slug: "zeta",
     },
   ];
 }
-
-const BATCH = {
-  batch_id: "b-1", status: "ready_for_review", created_by: "editor@bowtie.com.hk",
-  created_at: "2026-06-04T09:30:00Z", updated_at: "2026-06-04T09:30:00Z",
-  research_theme: "Summer childhood illnesses", target_audience: "Parents",
-  topic_count: 3, keywords_per_topic: 4, must_cover: [], must_avoid: [],
-  priority_focus: "Prevention", notes: null, persona_default: null,
-  acf_adv_id_default: null, acf_widget_id_default: null,
-  auto_accept_hitl1_default: false, cost_cents: 1234, last_error: null,
-};
-
-const BATCH_DETAIL = {
-  ...BATCH,
-  candidates: [
-    {
-      candidate_id: "c-1", batch_id: "b-1", position: 0, status: "promoted",
-      topic: "Promoted child article", keywords: [], original_topic: "Promoted child article",
-      original_keywords: [], existing: null, existing_note: null, existing_url: null,
-      hot_topic: null, hot_topic_note: null, existing_search_debug: null,
-      persona_slug: null, acf_adv_id: null, acf_widget_id: null, operator_note: null,
-      promote_mode: "create", promoted_run_id: "r-child", last_error: null,
-      last_edited_by: null, last_edited_at: null,
-      created_at: "2026-06-04T09:30:00Z", updated_at: "2026-06-04T09:30:00Z",
-    },
-    {
-      candidate_id: "c-2", batch_id: "b-1", position: 1, status: "pending",
-      topic: "Unpromoted candidate", keywords: [], original_topic: "Unpromoted candidate",
-      original_keywords: [], existing: null, existing_note: null, existing_url: null,
-      hot_topic: null, hot_topic_note: null, existing_search_debug: null,
-      persona_slug: null, acf_adv_id: null, acf_widget_id: null, operator_note: null,
-      promote_mode: null, promoted_run_id: null, last_error: null,
-      last_edited_by: null, last_edited_at: null,
-      created_at: "2026-06-04T09:30:00Z", updated_at: "2026-06-04T09:30:00Z",
-    },
-  ],
-};
 
 interface MockState {
   hitl2Calls: string[];
@@ -137,35 +98,65 @@ async function mountBoard(page: Page): Promise<MockState> {
     }
     if (path === "/api/me") return json(route, { email: "e2e@bowtie.com.hk", role: "admin" });
     if (path === "/api/runs" && method === "GET") return json(route, runs);
-    if (path === "/api/topic-batches" && method === "GET") return json(route, [BATCH]);
-    if (path === "/api/topic-batches/b-1" && method === "GET") return json(route, BATCH_DETAIL);
-    if (path === "/api/wp-options/users") return json(route, WP_USERS);
-    if (path === "/api/wp-options/categories") return json(route, WP_CATEGORIES);
+    if (path === "/api/publish-targets" && method === "GET") return json(route, []);
     if (path === "/api/personas") return json(route, PERSONAS);
 
-    // Inline run PATCH — r-conflict simulates a stale-version 409.
-    const patchMatch = path.match(/^\/api\/runs\/([^/]+)$/);
-    if (patchMatch && method === "PATCH") {
-      const runId = patchMatch[1];
+    // wp-options carry an optional ?run_id / ?persona discriminator (ignored here).
+    if (path === "/api/wp-options/users") return json(route, WP_USERS);
+    if (path === "/api/wp-options/categories") return json(route, WP_CATEGORIES);
+
+    // ── Per-run endpoints the drawer + autosave reach ──────────────────────
+    // GET a single run → return the matching fixture (drawer authoritative load).
+    const runMatch = path.match(/^\/api\/runs\/([^/]+)$/);
+    if (runMatch && method === "GET") {
+      const target = runs.find((r) => r.run_id === runMatch[1]);
+      return target ? json(route, target) : json(route, { detail: "not_found" }, 404);
+    }
+
+    // Outlined-mode panels.
+    if (/\/gap-analysis$/.test(path) && method === "GET") return json(route, {});
+    if (/\/outline$/.test(path) && method === "GET") {
+      return json(route, { payload: { h1: "Outline H1", sections: [] } });
+    }
+
+    // Default-mode drawer data.
+    if (/\/hitl2-snapshots$/.test(path) && method === "GET") return json(route, []);
+    if (/\/existing-post$/.test(path) && method === "GET") {
+      return json(route, { link: "https://example.com/post" });
+    }
+
+    // Dry-publish precedes the per-run approve confirm in the drawer.
+    if (/\/dry-publish$/.test(path) && method === "POST") {
+      return json(route, {
+        target_label: "Bowtie WordPress (LIVE)",
+        target_base_url: "",
+        request_method: "PUT",
+        request_url: "",
+        request_headers: {},
+        request_body: {},
+      });
+    }
+
+    // Inline / drawer / bulk run PATCH — r-conflict simulates a stale-version 409.
+    if (runMatch && method === "PATCH") {
+      const runId = runMatch[1];
       const body = (req.postDataJSON() ?? {}) as Json;
       state.patchCalls.push({ runId, body });
       if (runId === "r-conflict") {
         return json(route, { detail: "stale_version" }, 409);
       }
-      const target = runs.find((r) => r.run_id === runId);
-      if (target && typeof body.wp_author_id === "number") target.wp_author_id = body.wp_author_id;
       return json(route, { ok: true, version: 2 });
     }
 
-    // Bulk publish reuses the single hitl-2 path — record it to prove the
-    // count-confirm dialog gates it.
+    // Bulk + drawer publish reuse the single hitl-2 path — record it to prove
+    // the count-confirm dialog gates it.
     const hitl2Match = path.match(/^\/api\/runs\/([^/]+)\/hitl-2$/);
     if (hitl2Match && method === "POST") {
       state.hitl2Calls.push(hitl2Match[1]);
       return json(route, { ok: true });
     }
 
-    // Render / audit / cost load lazily on expand — a 404 is a graceful empty.
+    // Render / audit / cost load lazily — a 404 is a graceful empty.
     if (/\/(render|audit)$/.test(path) || path.startsWith("/api/costs/")) {
       return json(route, { detail: "not_found" }, 404);
     }
@@ -177,78 +168,176 @@ async function mountBoard(page: Page): Promise<MockState> {
   return state;
 }
 
-/** The grid row (`<tr>`) whose identity cell links to the given run topic. */
+/** The ledger row (`<tr>`) showing the given topic. Topic is a plain span now. */
 function rowByTopic(page: Page, topic: string) {
-  return page.locator("tr", { has: page.getByRole("link", { name: topic, exact: true }) });
+  return page.locator("tr", { hasText: topic });
 }
 
-test("renders the four status groups", async ({ page }) => {
+test("defaults to the drafted tab and lists drafted runs", async ({ page }) => {
   await mountBoard(page);
-  for (const label of [
-    "Needs your review",
-    "Generating",
-    "Approved & published",
-    "Failed & closed",
-  ]) {
-    await expect(page.getByText(label, { exact: true })).toBeVisible();
-  }
+
+  const drafted = page.getByRole("tab", { name: /drafted/ });
+  await expect(drafted).toHaveAttribute("aria-selected", "true");
+  // A hitl_2 run belongs to the drafted bucket, so its topic is visible.
+  await expect(page.getByText("Rewrite alpha guide", { exact: true })).toBeVisible();
 });
 
-test("source link appears on rewrites only", async ({ page }) => {
+test("tab counts render and switching tabs filters", async ({ page }) => {
   await mountBoard(page);
-  // Rewrite row carries the ↗ source link to its origin article.
-  const rewriteRow = rowByTopic(page, "Rewrite alpha guide");
-  await expect(rewriteRow.getByRole("link", { name: /↗/ })).toBeVisible();
-  // The create row has no source article, so no source link.
-  const createRow = rowByTopic(page, "Create beta article");
-  await expect(createRow.getByRole("link", { name: /↗/ })).toHaveCount(0);
+
+  // Drafted (default) shows the hitl_2 rows but not the failed one.
+  await expect(page.getByText("Failed epsilon", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("tab", { name: /failed/ }).click();
+
+  await expect(page.getByText("Failed epsilon", { exact: true })).toBeVisible();
+  // The drafted-only run is filtered out on the failed tab.
+  await expect(page.getByText("Rewrite alpha guide", { exact: true })).toHaveCount(0);
 });
 
-test("expanding a batch reveals its nested promoted runs", async ({ page }) => {
+test("search filters rows", async ({ page }) => {
   await mountBoard(page);
-  await expect(page.getByText("Promoted child article")).toHaveCount(0);
-  await page.getByRole("button", { name: "Show promoted runs" }).click();
-  await expect(page.getByText(/└ Promoted runs/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Promoted child article", exact: true })).toBeVisible();
+
+  // Both drafted rows are visible to start.
+  await expect(page.getByText("Rewrite alpha guide", { exact: true })).toBeVisible();
+  await expect(page.getByText("Conflict zeta", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Search runs").fill("alpha");
+
+  await expect(page.getByText("Rewrite alpha guide", { exact: true })).toBeVisible();
+  await expect(page.getByText("Conflict zeta", { exact: true })).toHaveCount(0);
 });
 
-test("inline author edit persists via PATCH", async ({ page }) => {
+test("clicking a row opens the drawer and shows CMS destination", async ({ page }) => {
+  await mountBoard(page);
+
+  await rowByTopic(page, "Rewrite alpha guide").click();
+
+  const drawer = page.getByRole("complementary", { name: /Run detail/ });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText("CMS destination", { exact: false })).toBeVisible();
+  // Target the field by its label association — the fixture's run title
+  // ("Alpha SEO title") also contains "SEO title", so a loose getByText is
+  // ambiguous. getByLabel resolves to the single #f-seotitle input.
+  await expect(drawer.getByLabel("SEO title")).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Approve & publish" })).toBeVisible();
+});
+
+test("editing a drawer field fires a PATCH", async ({ page }) => {
   const state = await mountBoard(page);
-  const row = rowByTopic(page, "Rewrite alpha guide");
-  await row.getByLabel("WordPress author").selectOption("2");
 
-  await expect.poll(() => state.patchCalls.length).toBeGreaterThan(0);
-  const call = state.patchCalls.at(-1);
-  expect(call?.runId).toBe("r-rewrite");
-  expect(call?.body).toMatchObject({ wp_author_id: 2 });
-  // Persisted: after the optimistic update + refetch the new author sticks.
-  await expect(row.getByLabel("WordPress author")).toHaveValue("2");
+  await rowByTopic(page, "Rewrite alpha guide").click();
+  await expect(page.getByRole("complementary", { name: /Run detail/ })).toBeVisible();
+
+  // Slug rides the PATCH path; the autosave debounce is 600ms.
+  await page.locator("#f-slug").fill("alpha-revised");
+
+  await expect
+    .poll(() => state.patchCalls.map((c) => c.runId), { timeout: 4000 })
+    .toContain("r-rewrite");
 });
 
-test("a 409 on inline edit surfaces the stale-version toast", async ({ page }) => {
-  await mountBoard(page);
-  const row = rowByTopic(page, "Conflict zeta");
-  await row.getByLabel("WordPress author").selectOption("2");
-  await expect(
-    page.getByText("This run changed since you loaded it — reloading the latest."),
-  ).toBeVisible();
-});
-
-test("bulk publish raises the live count-confirm before any publish call", async ({ page }) => {
+test("bulk select → approve & publish raises a LIVE count-confirm before publishing", async ({
+  page,
+}) => {
   const state = await mountBoard(page);
-  // Select the live (publish-status) HITL_2 rewrite.
-  await rowByTopic(page, "Rewrite alpha guide").getByLabel(/^Select run/).check();
 
-  await page.getByRole("toolbar", { name: "Bulk actions" }).getByRole("button", { name: "Publish", exact: true }).click();
+  // r-rewrite is the LIVE drafted run (wp_publish_status "publish").
+  await rowByTopic(page, "Rewrite alpha guide")
+    .getByRole("checkbox", { name: /^Select run/ })
+    .check();
 
-  // The count-confirm dialog appears and flags the live target…
+  await page
+    .getByRole("toolbar", { name: "Bulk actions" })
+    .getByRole("button", { name: "Approve & publish" })
+    .click();
+
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/LIVE/)).toBeVisible();
-  // …and NOTHING was published before the operator confirms.
+  // Nothing published before the operator confirms.
   expect(state.hitl2Calls).toEqual([]);
 
-  // Confirming then fires exactly the one eligible publish.
-  await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect.poll(() => state.hitl2Calls).toEqual(["r-rewrite"]);
+  await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+
+  await expect.poll(() => state.hitl2Calls, { timeout: 4000 }).toContain("r-rewrite");
+});
+
+test("bulk set CMS metadata fans out PATCH", async ({ page }) => {
+  const state = await mountBoard(page);
+
+  await rowByTopic(page, "Rewrite alpha guide")
+    .getByRole("checkbox", { name: /^Select run/ })
+    .check();
+
+  await page
+    .getByRole("toolbar", { name: "Bulk actions" })
+    .getByRole("button", { name: "Set CMS metadata…" })
+    .click();
+
+  const modal = page.getByRole("dialog");
+  await expect(modal).toBeVisible();
+  await expect(modal.getByText("Set CMS metadata", { exact: true })).toBeVisible();
+
+  await modal.locator("#bm-pubstatus").selectOption("publish");
+  await modal.getByRole("button", { name: "Apply to selection" }).click();
+
+  await expect
+    .poll(
+      () =>
+        state.patchCalls.find(
+          (c) => c.runId === "r-rewrite" && c.body.wp_publish_status === "publish",
+        ) != null,
+      { timeout: 4000 },
+    )
+    .toBe(true);
+});
+
+// ── Mobile pass (390px) ────────────────────────────────────────────────────
+// The `max-md:` (<768px) breakpoint reflows the dense table into cards, turns
+// the drawer into a 92dvh stacked sheet with sticky actions, and widens the
+// bulk bar to nearly full-width. iPhone-12-class viewport: 390×844.
+test.describe("mobile viewport (390px)", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("table rows reflow into stacked cards", async ({ page }) => {
+    await mountBoard(page);
+
+    // The <tr> switches from table-row to a block card under max-md.
+    const row = rowByTopic(page, "Rewrite alpha guide");
+    await expect(row).toBeVisible();
+    const display = await row.evaluate((el) => getComputedStyle(el).display);
+    expect(display).toBe("block");
+  });
+
+  test("drawer is a ~92dvh stacked sheet with sticky actions", async ({ page }) => {
+    await mountBoard(page);
+
+    await rowByTopic(page, "Rewrite alpha guide").click();
+    const drawer = page.getByRole("complementary", { name: /Run detail/ });
+    await expect(drawer).toBeVisible();
+
+    // 92dvh of an 844px viewport ≈ 776px — assert it fills most of the screen.
+    const box = await drawer.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThan(844 * 0.7);
+
+    // The publish action sits in the sticky action bar and stays reachable.
+    await expect(drawer.getByRole("button", { name: "Approve & publish" })).toBeVisible();
+  });
+
+  test("bulk bar spans nearly the full viewport width", async ({ page }) => {
+    await mountBoard(page);
+
+    await rowByTopic(page, "Rewrite alpha guide")
+      .getByRole("checkbox", { name: /^Select run/ })
+      .check();
+
+    const bar = page.getByRole("toolbar", { name: "Bulk actions" });
+    await expect(bar).toBeVisible();
+    // max-md:inset-x-2 → ~8px gutter each side of a 390px viewport (≈374px).
+    const box = await bar.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(350);
+  });
 });

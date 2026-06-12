@@ -60,6 +60,12 @@ export interface RunSummary {
   // Post-date column reads it, falling back to "—" when the list omits it).
   wp_publish_at?: string | null;
   wp_pushed_post_id?: number | null;
+  // Latest render's SEO title + meta description (LEFT JOIN LATERAL renders⟕drafts
+  // by run_id, newest first — see GET /runs list-payload delta, both backends).
+  // Drives the ledger's draft-snippet line + the drawer's SERP preview/prefill;
+  // null when the run has no render yet.
+  seo_title?: string | null;
+  meta_description?: string | null;
   error?: { type: string; message: string } | null;
 }
 

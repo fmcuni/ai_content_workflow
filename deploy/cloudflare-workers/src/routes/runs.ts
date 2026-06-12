@@ -216,9 +216,14 @@ interface RunListRow {
   wp_publish_status: string | null;
   wp_publish_at: string | null;
   wp_pushed_post_id: number | null;
+  // Latest render per run (renders ⟕ drafts, newest iteration). NULL until a
+  // draft is rendered — the ledger reads these for the row SEO snippet,
+  // drawer preview, and CMS form prefill.
+  seo_title: string | null;
+  meta_description: string | null;
 }
 
-interface RunDetailRow extends RunListRow {
+interface RunDetailRow extends Omit<RunListRow, "seo_title" | "meta_description"> {
   updated_at: string;
   created_by: string;
   hitl_2_iteration: number;
@@ -422,8 +427,17 @@ runsRouter.get("/", async (c) => {
         keywords, persona, acf_adv_id, acf_widget_id, edit_note,
         auto_accept_hitl1,
         wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
-        wp_slug, wp_excerpt, wp_publish_status, wp_publish_at, wp_pushed_post_id
+        wp_slug, wp_excerpt, wp_publish_status, wp_publish_at, wp_pushed_post_id,
+        lr.seo_title, lr.meta_description
       FROM content_tool.runs
+      LEFT JOIN LATERAL (
+        SELECT r.seo_title, r.meta_description
+        FROM content_tool.renders r
+        JOIN content_tool.drafts d ON d.draft_id = r.draft_id
+        WHERE d.run_id = runs.run_id
+        ORDER BY d.iteration DESC
+        LIMIT 1
+      ) lr ON TRUE
       ${statusClause}
       ORDER BY created_at DESC
       LIMIT ${limit}
@@ -459,6 +473,9 @@ runsRouter.get("/", async (c) => {
       wp_publish_status: r.wp_publish_status,
       wp_publish_at: pgTimestampToIso(r.wp_publish_at),
       wp_pushed_post_id: r.wp_pushed_post_id,
+      // Latest render per run (§6.1) — ledger row SEO snippet + drawer prefill.
+      seo_title: r.seo_title,
+      meta_description: r.meta_description,
     })),
   );
 });

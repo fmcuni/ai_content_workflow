@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -188,11 +188,25 @@ async def list_runs(
     limit: int = 50,
 ) -> list[dict]:
     async with sf() as session:
-        q = select(Run)
+        # §6.1: latest render per run (renders ⟕ drafts, newest iteration) —
+        # mirrors the Workers LEFT JOIN LATERAL. NULL until a draft is rendered.
+        latest_render = (
+            select(Render.seo_title, Render.meta_description)
+            .join(Draft, Draft.draft_id == Render.draft_id)
+            .where(Draft.run_id == Run.run_id)
+            .order_by(Draft.iteration.desc())
+            .limit(1)
+            .lateral("lr")
+        )
+        q = select(
+            Run,
+            latest_render.c.seo_title,
+            latest_render.c.meta_description,
+        ).outerjoin(latest_render, true())
         if status:
             q = q.where(Run.status == status)
         q = q.order_by(Run.created_at.desc()).limit(limit)
-        rows = (await session.execute(q)).scalars().all()
+        rows = (await session.execute(q)).all()
         return [
             {
                 "run_id": str(r.run_id),
@@ -225,8 +239,11 @@ async def list_runs(
                 "wp_publish_status": r.wp_publish_status,
                 "wp_publish_at": r.wp_publish_at.isoformat() if r.wp_publish_at else None,
                 "wp_pushed_post_id": r.wp_pushed_post_id,
+                # Latest render per run (§6.1) — ledger row SEO snippet + prefill.
+                "seo_title": seo_title,
+                "meta_description": meta_description,
             }
-            for r in rows
+            for (r, seo_title, meta_description) in rows
         ]
 
 
