@@ -66,7 +66,7 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">
       <div className="mb-4 flex items-center gap-3 flex-wrap">
-        <Link href="/" className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider">
+        <Link href="/runs" className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider">
           ← All runs
         </Link>
         {batch && (

@@ -3,7 +3,7 @@
 import type { Persona, PublishTarget, RunSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import { decodeSlug, fmtDateTime, resolveTarget, voiceName } from "./fmt";
+import { decodeSlug, fmtCreator, fmtDateTime, resolveTarget, voiceName } from "./fmt";
 import { StatusPill } from "./StatusPill";
 import type { OptionMaps } from "./useWpOptionMaps";
 
@@ -161,9 +161,15 @@ export function LedgerRow({ run, view, personaBySlug, targetById, options }: Led
         </div>
       </td>
 
-      {/* Created */}
-      <td className="w-[118px] whitespace-nowrap border-b border-rule/60 p-2.5 text-[12px] tabular-nums text-ink-soft max-md:mr-2 max-md:mt-2 max-md:inline-block max-md:border-0 max-md:p-0 max-md:align-middle max-md:text-[11px]">
-        {fmtDateTime(run.created_at)}
+      {/* Created — timestamp + who created the run */}
+      <td className="w-[118px] whitespace-nowrap border-b border-rule/60 p-2.5 text-[12px] text-ink-soft max-md:mr-2 max-md:mt-2 max-md:inline-block max-md:border-0 max-md:p-0 max-md:align-middle max-md:text-[11px]">
+        <div className="tabular-nums">{fmtDateTime(run.created_at)}</div>
+        <div
+          className="mt-0.5 truncate text-[11px] text-ink-faint max-md:inline max-md:before:content-['·_']"
+          title={run.created_by ?? undefined}
+        >
+          {fmtCreator(run.created_by)}
+        </div>
       </td>
     </tr>
   );

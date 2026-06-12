@@ -195,6 +195,7 @@ interface RunListRow {
   article_url: string | null;
   mode: string;
   created_at: string;
+  created_by: string | null;
   chosen_route: string | null;
   iteration_count: number;
   start_mode: string;
@@ -422,7 +423,8 @@ runsRouter.get("/", async (c) => {
       statusFilter !== null ? sql`WHERE status = ${statusFilter}` : sql``;
     return sql<RunListRow[]>`
       SELECT
-        run_id, status, topic, article_url, mode, created_at, chosen_route,
+        run_id, status, topic, article_url, mode, created_at, created_by,
+        chosen_route,
         iteration_count, start_mode, topic_candidate_id, target_audience,
         keywords, persona, acf_adv_id, acf_widget_id, edit_note,
         auto_accept_hitl1,
@@ -452,6 +454,7 @@ runsRouter.get("/", async (c) => {
       article_url: r.article_url,
       mode: r.mode,
       created_at: pgTimestampToIso(r.created_at),
+      created_by: r.created_by,
       chosen_route: r.chosen_route,
       iteration_count: r.iteration_count,
       start_mode: r.start_mode,

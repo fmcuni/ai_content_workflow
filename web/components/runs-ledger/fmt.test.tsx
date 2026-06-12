@@ -6,6 +6,7 @@ import {
   cmsOptionLabel,
   cmsTag,
   decodeSlug,
+  fmtCreator,
   fmtDate,
   fmtDateTime,
   resolveTarget,
@@ -66,6 +67,25 @@ describe("fmtDateTime", () => {
 
   it("returns the em-dash placeholder for null", () => {
     expect(fmtDateTime(null)).toBe("—");
+  });
+});
+
+describe("fmtCreator", () => {
+  it("strips the @domain from an email", () => {
+    expect(fmtCreator("franco.ma@bowtie.com.sg")).toBe("franco.ma");
+  });
+
+  it("collapses system sentinels to 'system'", () => {
+    expect(fmtCreator("system:generated")).toBe("system");
+  });
+
+  it("returns the em-dash placeholder for null/empty", () => {
+    expect(fmtCreator(null)).toBe("—");
+    expect(fmtCreator("   ")).toBe("—");
+  });
+
+  it("passes a bare token through unchanged", () => {
+    expect(fmtCreator("dev")).toBe("dev");
   });
 });
 

@@ -215,6 +215,7 @@ async def list_runs(
                 "article_url": r.article_url,
                 "mode": r.mode,
                 "created_at": r.created_at.isoformat(),
+                "created_by": r.created_by,
                 "chosen_route": r.chosen_route,
                 "iteration_count": r.iteration_count,
                 "start_mode": r.start_mode,

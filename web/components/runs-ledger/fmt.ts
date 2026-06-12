@@ -17,6 +17,19 @@ export function fmtDateTime(iso?: string | null): string {
 }
 
 /**
+ * Short, human display for a run's `created_by` (an email, or a `system:*` /
+ * `dev@local` sentinel). Strips the `@domain` so the dense Created column shows
+ * `franco.ma` not `franco.ma@bowtie.com.sg`; `system:*` collapses to `system`.
+ * Nullish/empty → `—`.
+ */
+export function fmtCreator(createdBy?: string | null): string {
+  const raw = createdBy?.trim();
+  if (!raw) return "—";
+  if (raw.startsWith("system:")) return "system";
+  return raw.split("@")[0] || raw;
+}
+
+/**
  * Human-readable slug for the mono id line + SERP preview. Prefers an explicit
  * `wp_slug`; otherwise the last path segment of the source `article_url`.
  * Percent-decodes (CJK slugs arrive URL-encoded) and always leads with `/`.

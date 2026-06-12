@@ -6,7 +6,7 @@ import Link from "next/link";
 import type { RunSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import { fmtDateTime } from "./fmt";
+import { fmtCreator, fmtDateTime } from "./fmt";
 
 const KEYWORD_CAP = 6;
 
@@ -61,6 +61,11 @@ export function BriefColumn({ run, voice }: { run: RunSummary; voice: string | n
           </Row>
         )}
         <Row label="Created">{fmtDateTime(run.created_at)}</Row>
+        {run.created_by && (
+          <Row label="Created by">
+            <span title={run.created_by}>{fmtCreator(run.created_by)}</span>
+          </Row>
+        )}
         {rev > 0 && <Row label="Revisions">{rev}</Row>}
         <dt className="pt-px text-ink-faint" />
         <dd>

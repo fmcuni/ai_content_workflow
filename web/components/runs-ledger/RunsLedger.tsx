@@ -33,14 +33,15 @@ export function RunsLedger() {
   const [tab, setTab] = useState<LedgerTab>("drafted");
   const [search, setSearch] = useState("");
   const [voice, setVoice] = useState("");
+  const [creator, setCreator] = useState("");
   const [sort, setSort] = useState<SortOrder>("newest");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
 
   const visible = useMemo(
-    () => filterAndSortRuns(data.runs, { tab, voice, search, sort }),
-    [data.runs, tab, voice, search, sort],
+    () => filterAndSortRuns(data.runs, { tab, voice, creator, search, sort }),
+    [data.runs, tab, voice, creator, search, sort],
   );
 
   // One option-map pass over every voice present, so rows show destination names
@@ -116,6 +117,9 @@ export function RunsLedger() {
         voice={voice}
         onVoice={setVoice}
         voices={data.voices}
+        creator={creator}
+        onCreator={setCreator}
+        creators={data.creators}
         sort={sort}
         onSort={setSort}
       />

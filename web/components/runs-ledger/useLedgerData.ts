@@ -7,7 +7,7 @@ import { api, personasApi, publishTargetsApi } from "@/lib/api";
 import { statusTone } from "@/lib/run-status";
 import type { Persona, PublishTarget, RunSummary } from "@/lib/types";
 
-import { voiceName } from "./fmt";
+import { fmtCreator, voiceName } from "./fmt";
 
 // Shared query keys — the drawer + bulk mutations invalidate these to refresh
 // the table after a PATCH / resume / restart.
@@ -70,6 +70,13 @@ export interface VoiceOption {
   name: string;
 }
 
+export interface CreatorOption {
+  /** Raw `created_by` (the filter value) — usually an email. */
+  value: string;
+  /** Short display label (see `fmtCreator`). */
+  name: string;
+}
+
 export interface LedgerData {
   runs: RunSummary[];
   isLoading: boolean;
@@ -80,6 +87,8 @@ export interface LedgerData {
   counts: Record<LedgerTab, number>;
   /** Distinct voices present in the run set, for the voice filter. */
   voices: VoiceOption[];
+  /** Distinct creators present in the run set, for the "who created" filter. */
+  creators: CreatorOption[];
 }
 
 /**
@@ -146,6 +155,18 @@ export function useLedgerData(): LedgerData {
     );
   }, [runs, personaBySlug]);
 
+  const creators = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of runs) {
+      const value = r.created_by?.trim();
+      if (!value || seen.has(value)) continue;
+      seen.set(value, fmtCreator(value));
+    }
+    return Array.from(seen, ([value, name]) => ({ value, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [runs]);
+
   return {
     runs,
     isLoading: runsQuery.isLoading,
@@ -154,18 +175,20 @@ export function useLedgerData(): LedgerData {
     targetById,
     counts,
     voices,
+    creators,
   };
 }
 
 /** Apply tab + voice + search filters, then sort — pure for testability. */
 export function filterAndSortRuns(
   runs: RunSummary[],
-  opts: { tab: LedgerTab; voice: string; search: string; sort: SortOrder },
+  opts: { tab: LedgerTab; voice: string; creator: string; search: string; sort: SortOrder },
 ): RunSummary[] {
   const q = opts.search.trim().toLowerCase();
   const filtered = runs.filter((r) => {
     if (!tabMatches(opts.tab, r.status)) return false;
     if (opts.voice && r.persona !== opts.voice) return false;
+    if (opts.creator && (r.created_by ?? "") !== opts.creator) return false;
     if (q) {
       const haystack = [
         r.topic,

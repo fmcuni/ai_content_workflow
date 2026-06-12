@@ -87,7 +87,6 @@ function navActive(item: NavItem, pathname: string): boolean {
 
 const NAV: NavItem[] = [
   { href: "/runs", label: "Runs", aliases: ["/"] },
-  { href: "/topic-batches", label: "Topics" },
   { href: "/voices", label: "Voices" },
   { href: "/prompts", label: "Prompts" },
 ];
@@ -162,12 +161,12 @@ export function Masthead() {
         >
           Bowtie AI Content Workflow
         </Link>
-        <div className="font-mono text-[11px] tracking-[0.08em] text-ink-faint uppercase">
+        <div className="hidden sm:block font-mono text-[11px] tracking-[0.08em] text-ink-faint uppercase">
           {now ? dateStamp(now) : ""}
         </div>
       </div>
-      <div className="mx-auto max-w-[1400px] px-5 md:px-7 flex items-center justify-between border-t border-rule/60">
-        <nav className="flex items-baseline gap-[22px] text-[12.5px]">
+      <div className="mx-auto max-w-[1400px] px-5 md:px-7 flex items-center justify-between gap-3 border-t border-rule/60">
+        <nav className="flex min-w-0 flex-1 items-baseline gap-4 overflow-x-auto whitespace-nowrap text-[12.5px] md:gap-[22px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {navItems.map((n) => {
             const active = navActive(n, pathname);
             return (
@@ -187,9 +186,11 @@ export function Masthead() {
             );
           })}
         </nav>
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-2 md:gap-4">
           <Link href="/runs/new">
-            <Button variant="primary" size="sm">+ New run</Button>
+            <Button variant="primary" size="sm">
+              + New<span className="hidden sm:inline"> run</span>
+            </Button>
           </Link>
           {session?.user ? (
             <UserMenu email={session.user.email} role={role} onSignOut={onSignOut} />

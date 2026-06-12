@@ -32,6 +32,10 @@ export interface RunSummary {
   article_url: string;
   mode: Mode;
   created_at: string;
+  // Email (or `system:*`/`dev@local` sentinel) of whoever created the run —
+  // bound to the authenticated session at creation. Surfaced in the ledger's
+  // Created column, the "who created" filter, and the drawer brief.
+  created_by?: string | null;
   chosen_route: Route | null;
   iteration_count: number;
   hitl_2_iteration?: number;

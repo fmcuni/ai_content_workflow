@@ -48,9 +48,13 @@ export default function Hitl1Page({ params }: { params: Promise<{ runId: string 
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10 pb-32">
-      <div className="mb-4">
-        <Link href={`/runs/${runId}`} className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider">
-          ← Run · {shortId}
+      <div className="mb-4 flex min-w-0 items-center gap-2 font-mono text-[11px] uppercase tracking-wider">
+        <Link href="/runs" className="text-ink-faint hover:text-ink">
+          ← All runs
+        </Link>
+        <span className="text-ink-faint">·</span>
+        <Link href={`/runs/${runId}`} className="truncate text-ink-soft hover:text-ink">
+          Run · {shortId}
         </Link>
       </div>
 

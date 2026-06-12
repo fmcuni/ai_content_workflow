@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import {
+  type CreatorOption,
   type LedgerTab,
   type SortOrder,
   type VoiceOption,
@@ -18,13 +19,16 @@ interface ToolbarProps {
   voice: string;
   onVoice: (slug: string) => void;
   voices: VoiceOption[];
+  creator: string;
+  onCreator: (value: string) => void;
+  creators: CreatorOption[];
   sort: SortOrder;
   onSort: (s: SortOrder) => void;
 }
 
 const SELECT_CLASSES =
   "appearance-none rounded-md border border-rule bg-paper px-2.5 py-1.5 pr-7 text-[12.5px] text-ink " +
-  "focus:border-accent focus:outline-2 focus:outline-accent/25";
+  "focus:border-accent focus:outline-2 focus:outline-accent/25 max-md:min-w-0 max-md:flex-1";
 
 /**
  * Sticky toolbar (spec §4.3): status tabs with client-derived counts, search,
@@ -39,6 +43,9 @@ export function Toolbar({
   voice,
   onVoice,
   voices,
+  creator,
+  onCreator,
+  creators,
   sort,
   onSort,
 }: ToolbarProps) {
@@ -47,7 +54,7 @@ export function Toolbar({
       <div
         role="tablist"
         aria-label="Filter runs by status"
-        className="flex gap-0.5 rounded-lg bg-paper-deep p-0.5 max-md:max-w-full max-md:overflow-x-auto"
+        className="flex gap-0.5 rounded-lg bg-paper-deep p-0.5 max-md:w-full max-md:overflow-x-auto"
       >
         {TAB_ORDER.map((t) => {
           const active = t === tab;
@@ -76,7 +83,7 @@ export function Toolbar({
         })}
       </div>
 
-      <div className="grow" />
+      <div className="grow max-md:hidden" />
 
       <div className="relative max-md:order-first max-md:w-full">
         <svg
@@ -109,6 +116,20 @@ export function Toolbar({
         {voices.map((v) => (
           <option key={v.slug} value={v.slug}>
             {v.name}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={creator}
+        onChange={(e) => onCreator(e.target.value)}
+        aria-label="Filter by who created the run"
+        className={SELECT_CLASSES}
+      >
+        <option value="">Created by — all</option>
+        {creators.map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.name}
           </option>
         ))}
       </select>
