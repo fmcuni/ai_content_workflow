@@ -115,6 +115,8 @@ for (const step of steps) {
     await page.waitForSelector(val, { timeout: 30_000 });
   } else if (op === "waitMs") {
     await page.waitForTimeout(val);
+  } else if (op === "viewport") {
+    await page.setViewportSize({ width: val[0], height: val[1] });
   } else if (op === "click") {
     await guardedClick(page.locator(val), val);
   } else if (op === "clickText") {
