@@ -39,7 +39,7 @@ import { runFetchArticle } from "../agents/fetch_article";
 import { runGapAnalysis } from "../agents/gap_analysis";
 import { runWriter, type RefineNote } from "../agents/writer";
 import { resolveCitations, type GroundingChunk } from "../agents/citations";
-import { renderHtml } from "../agents/render";
+import { renderHtmlForRun } from "../agents/render";
 import { runAudit } from "../agents/audit";
 import {
   WordPressClient,
@@ -683,7 +683,9 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       await step.do(`render-${round}-${iteration}`, async () =>
         this.withSql(async (sql) => {
           const finalMarkup = await this.loadFinalMarkup(sql, draftId);
-          const render = renderHtml(finalMarkup);
+          // Locale-aware: thread the run's voice locale so non-HK voices get
+          // their configured sources/FAQ headings (default-locale = identical).
+          const render = await renderHtmlForRun(sql, run.persona, finalMarkup);
           // DELETE-then-INSERT keeps single-row semantics across loop replays
           // (renders.draft_id has no UNIQUE in the baseline, so guard manually).
           await sql`DELETE FROM content_tool.renders WHERE draft_id = ${draftId}::uuid`;

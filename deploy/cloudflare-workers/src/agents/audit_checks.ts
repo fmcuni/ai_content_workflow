@@ -25,16 +25,30 @@ export interface DeterministicChecksInput {
    */
   advEnabled?: boolean;
   widgetEnabled?: boolean;
+  /**
+   * The voice's configured sources heading. `null`/undefined (zh voices)
+   * accepts BOTH Chinese scripts exactly as before; a configured heading (e.g.
+   * English "Sources") requires THAT heading's <h2> — render emitted it.
+   */
+  sourcesHeading?: string | null;
 }
 
 // Shortcode presence regexes — mirror the Python `re.search` patterns exactly.
 const ADV_PANEL_RE = /\[adv_panel id="\d+"\]/;
 const PAGE_WIDGET_RE = /\[page_widget id="\d+"\]/;
 
-// Accept either Chinese script — the sources heading follows the voice's script
-// (see resolve_citations / citations.ts), so a zh-MY voice emits Simplified.
+// HK-ZH default: accept either Chinese script — the sources heading follows the
+// voice's script (see resolve_citations / citations.ts), so a zh-MY voice emits
+// Simplified. A non-Chinese voice configures an explicit heading instead.
 const SOURCES_MARKERS = ["<h2>資訊來源</h2>", "<h2>资讯来源</h2>"];
 const FAQ_WIDGET_MARKER = 'class="editor__item editor__faq"';
+
+/** Whether the rendered body carries the expected sources <h2> for the voice. */
+function sourcesPresent(htmlBody: string, sourcesHeading: string | null): boolean {
+  const markers =
+    sourcesHeading === null ? SOURCES_MARKERS : [`<h2>${sourcesHeading}</h2>`];
+  return markers.some((marker) => htmlBody.includes(marker));
+}
 
 /**
  * Run the pipeline format/citation deterministic checks against a rendered
@@ -45,6 +59,7 @@ export function runDeterministicChecks(input: DeterministicChecksInput): AuditFi
   const { htmlBody, citationsDeniedDisplayed, schemaJsonld } = input;
   const advEnabled = input.advEnabled ?? true;
   const widgetEnabled = input.widgetEnabled ?? true;
+  const sourcesHeading = input.sourcesHeading ?? null;
   const findings: AuditFinding[] = [];
 
   if (advEnabled && !ADV_PANEL_RE.test(htmlBody)) {
@@ -71,7 +86,7 @@ export function runDeterministicChecks(input: DeterministicChecksInput): AuditFi
     });
   }
 
-  if (!SOURCES_MARKERS.some((marker) => htmlBody.includes(marker))) {
+  if (!sourcesPresent(htmlBody, sourcesHeading)) {
     findings.push({
       id: "det-fmt-sources",
       category: "format",

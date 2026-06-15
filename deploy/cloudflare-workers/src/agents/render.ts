@@ -1,4 +1,6 @@
 import MarkdownIt from "markdown-it";
+import type { Sql } from "postgres";
+import { loadPersona } from "./persona";
 
 /**
  * Output of the HTML render node. Mirrors the Python `RenderResult` dataclass
@@ -44,10 +46,35 @@ const DEFTERM_RESIDUE_RE = /%%defterm\b|%%end%%/;
 // (group 1) to re-inject the SAME heading instead of a hard-coded Traditional
 // one — appending a constant on top of a surviving Simplified heading caused the
 // duplicate-heading bug. FAQ_HEADING_RESIDUE_RE defensively drops a stray
-// heading (either script). SOURCES_SPLIT_RE matches either script.
+// heading (either script). The sources split is built per-voice by
+// sourcesSplitRe (both Chinese scripts by default; the configured heading when
+// the voice sets one).
 const FAQ_HEADING_RE = /^##[ \t]+(.+?)[ \t]*\n(?=\s*%%acf_faq type=q%%)/m;
 const FAQ_HEADING_RESIDUE_RE = /^##[ \t]*(?:常見問題|常见问题)[ \t]*\n/m;
-const SOURCES_SPLIT_RE = /\n##\s*(?:資訊來源|资讯来源)\s*\n/;
+
+// HK-ZH defaults — keep the default render path byte-identical to before.
+const DEFAULT_FAQ_HEADING = "常見問題";
+const DEFAULT_SOURCES_HEADINGS = ["資訊來源", "资讯来源"] as const;
+
+/** Escape a string for safe use inside a RegExp character/alternation. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Regex that splits off the auto-generated sources `## <heading>` section.
+ * `sourcesHeading=null` (zh voices) recognises BOTH Chinese scripts exactly as
+ * before; a configured heading (e.g. English "Sources") matches THAT heading —
+ * citations.ts emitted the same heading, so they stay in lockstep. Mirrors
+ * Python `_sources_split_re`.
+ */
+function sourcesSplitRe(sourcesHeading: string | null): RegExp {
+  const alternation =
+    sourcesHeading === null
+      ? DEFAULT_SOURCES_HEADINGS.map(escapeRegExp).join("|")
+      : escapeRegExp(sourcesHeading);
+  return new RegExp(`\\n##\\s*(?:${alternation})\\s*\\n`);
+}
 // First <p>...</p> in the body, for the excerpt suggestion (DOTALL).
 const FIRST_PARAGRAPH_RE = /<p>([\s\S]*?)<\/p>/;
 
@@ -156,7 +183,18 @@ function extractDefterms(rest: string): DeftermExtraction {
  * content_tool/agents/render_html.py exactly so the WordPress-bound HTML and
  * out-of-band schema.org graph stay byte-compatible. No DB writes here.
  */
-export function renderHtml(markupRaw: string): RenderOutput {
+/**
+ * Locale-derived headings for the render. Defaults reproduce the HK-ZH path
+ * byte-for-byte, so `renderHtml(markup)` with no opts is unchanged.
+ */
+export interface RenderOptions {
+  faqHeading?: string;
+  sourcesHeading?: string | null;
+}
+
+export function renderHtml(markupRaw: string, opts: RenderOptions = {}): RenderOutput {
+  const faqHeadingDefault = opts.faqHeading ?? DEFAULT_FAQ_HEADING;
+  const sourcesHeading = opts.sourcesHeading ?? null;
   const lines = splitLines(markupRaw);
   // H1 = first line starting with '# '.
   if (lines.length === 0 || !(lines[0] ?? "").startsWith("# ")) {
@@ -179,7 +217,9 @@ export function renderHtml(markupRaw: string): RenderOutput {
   // FAQ items + the model's own FAQ heading (whatever script/wording), then
   // strip the shortcodes and the heading line.
   const faqItems = extractFaqItems(rest);
-  let faqHeading = "常見問題";
+  // Fallback heading when the model wrote none; the model's own heading (below)
+  // still wins first. Default 常見問題; a non-Chinese voice supplies its own.
+  let faqHeading = faqHeadingDefault;
   const headingMatch = FAQ_HEADING_RE.exec(rest);
   if (headingMatch !== null) {
     faqHeading = (headingMatch[1] ?? "").trim();
@@ -192,7 +232,7 @@ export function renderHtml(markupRaw: string): RenderOutput {
 
   // Split off the "## 資訊來源" section so it can be re-ordered after the FAQ.
   let sourcesMd = "";
-  const sourcesMatch = SOURCES_SPLIT_RE.exec(rest);
+  const sourcesMatch = sourcesSplitRe(sourcesHeading).exec(rest);
   if (sourcesMatch !== null) {
     sourcesMd = rest.slice(sourcesMatch.index).replace(/^\n+/, "");
     rest = rest.slice(0, sourcesMatch.index);
@@ -261,4 +301,23 @@ export function renderHtml(markupRaw: string): RenderOutput {
     excerptSuggestion,
     slugSuggestion: "",
   };
+}
+
+/**
+ * Locale-aware render wrapper. Loads the run's voice locale and renders the
+ * markup with its FAQ fallback heading + sources-split heading. Mirrors the
+ * Python `run_render_html` wrapper (which threads `load_persona().locale` into
+ * `render_html`). With a default-locale voice the output is byte-identical to
+ * the pure `renderHtml(markupRaw)` path.
+ */
+export async function renderHtmlForRun(
+  sql: Sql,
+  voiceSlug: string,
+  markupRaw: string,
+): Promise<RenderOutput> {
+  const { locale } = await loadPersona(sql, voiceSlug);
+  return renderHtml(markupRaw, {
+    faqHeading: locale.faqHeading,
+    sourcesHeading: locale.sourcesHeading,
+  });
 }

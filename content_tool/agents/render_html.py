@@ -6,7 +6,12 @@ from markdown_it import MarkdownIt
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_tool.db.models import Draft, Render
+from content_tool.db.models import Draft, Render, Run
+from content_tool.policy.personas import load_persona
+
+# HK-ZH defaults — keep the pure-function default path byte-identical to before.
+_DEFAULT_FAQ_HEADING = "常見問題"
+_DEFAULT_SOURCES_HEADINGS = ("資訊來源", "资讯来源")
 
 
 @dataclass
@@ -123,7 +128,27 @@ def _check_no_raw_html(markdown_body: str) -> None:
         raise ValueError("html sanitization failed: writer emitted disallowed raw tag")
 
 
-def render_html(markdown: str) -> RenderResult:
+def _sources_split_re(sources_heading: str | None) -> re.Pattern[str]:
+    """Regex that splits off the auto-generated sources ``## <heading>`` section.
+
+    With ``sources_heading=None`` (zh voices) recognise BOTH Chinese scripts
+    exactly as before. When the voice configures an explicit heading (e.g. an
+    English ``Sources``), match THAT heading instead — resolve_citations emitted
+    the same configured heading, so they stay in lockstep.
+    """
+    if sources_heading is None:
+        alternation = "|".join(re.escape(h) for h in _DEFAULT_SOURCES_HEADINGS)
+    else:
+        alternation = re.escape(sources_heading)
+    return re.compile(rf"\n##\s*(?:{alternation})\s*\n")
+
+
+def render_html(
+    markdown: str,
+    *,
+    faq_heading: str = _DEFAULT_FAQ_HEADING,
+    sources_heading: str | None = None,
+) -> RenderResult:
     lines = markdown.splitlines()
     # H1 = first line starting with '# '
     if not lines or not lines[0].startswith("# "):
@@ -144,10 +169,13 @@ def render_html(markdown: str) -> RenderResult:
     # Extract FAQ items + the model's own FAQ heading (whatever script/wording
     # the voice uses), then strip the shortcodes and the heading line.
     faq_items = [(q.strip(), a.strip()) for q, a in _FAQ_BLOCK_RE.findall(rest)]
-    faq_heading = "常見問題"
+    # Fallback heading when the model wrote no heading of its own. Defaults to
+    # the HK-ZH 常見問題; a non-Chinese voice supplies e.g. "Frequently Asked
+    # Questions". The model's own heading (captured below) still wins first.
+    resolved_faq_heading = faq_heading
     heading_match = _FAQ_HEADING_RE.search(rest)
     if heading_match is not None:
-        faq_heading = heading_match.group(1).strip()
+        resolved_faq_heading = heading_match.group(1).strip()
         rest = rest[: heading_match.start()] + rest[heading_match.end() :]
     rest = _FAQ_BLOCK_RE.sub("", rest)
     rest = _FAQ_HEADING_RESIDUE_RE.sub("", rest)
@@ -156,7 +184,7 @@ def render_html(markdown: str) -> RenderResult:
     # heading follows the article's script; see resolve_citations) so it can be
     # re-ordered to appear AFTER the FAQ widget in the final HTML.
     sources_md = ""
-    sources_split = re.search(r"\n##\s*(?:資訊來源|资讯来源)\s*\n", rest)
+    sources_split = _sources_split_re(sources_heading).search(rest)
     if sources_split is not None:
         sources_md = rest[sources_split.start():].lstrip("\n")
         rest = rest[: sources_split.start()]
@@ -228,7 +256,7 @@ def render_html(markdown: str) -> RenderResult:
 
     final = body_html
     if faq_html:
-        final += f"\n<h2>{faq_heading}</h2>\n" + faq_html + "\n"
+        final += f"\n<h2>{resolved_faq_heading}</h2>\n" + faq_html + "\n"
     if sources_md:
         final += "\n" + md.render(sources_md)
 
@@ -253,7 +281,18 @@ async def run_render_html(
 ) -> RenderResult:
     draft = (await session.execute(select(Draft).where(Draft.draft_id == draft_id))).scalar_one()
     md = draft.final_markup or draft.markup_raw
-    result = render_html(md)
+    # Resolve the run's voice locale so the FAQ fallback heading + sources-split
+    # follow the voice (e.g. English headings for a non-Chinese voice). Defaults
+    # reproduce the HK-ZH path byte-for-byte.
+    voice_slug = (
+        await session.execute(select(Run.persona).where(Run.run_id == draft.run_id))
+    ).scalar_one()
+    locale = (await load_persona(voice_slug, session=session)).locale
+    result = render_html(
+        md,
+        faq_heading=locale.faq_heading,
+        sources_heading=locale.sources_heading,
+    )
     # Idempotency: LangGraph can re-enter the production sub-graph (resume,
     # retry, refine loop) and call this node twice for the same draft. Without
     # this DELETE we accumulate duplicate Render rows for one draft and the

@@ -1,16 +1,16 @@
 JSON-LD Schema 規則（去重 / dedup against Yoast）：
 - 本文章發佈到 WordPress 時，**Yoast SEO 已自動 emit** 以下 schema.org 類型，**不要在 markup 中重複描述或手寫**：
   - `Article` / `WebPage` / `BreadcrumbList` / `WebSite`
-  - `Organization` / `Corporation`（Bowtie 機構資訊、聯絡、社交連結）
+  - `Organization` / `Corporation`（{brand_name} 機構資訊、聯絡、社交連結）
   - `Person`（作者）
   - `ImageObject`（feature image）
   - 文章 `datePublished` / `dateModified` / `headline` / `articleSection` / `inLanguage`
-- 不要在 H1、meta description、正文寫「Bowtie 創立於…」、「Bowtie 地址…」、「作者：…」、「發佈日期：…」、「分類：…」這類純機構/出版 metadata，因為 Yoast 已負責處理。
+- 不要在 H1、meta description、正文寫「{brand_name} 創立於…」、「{brand_name} 地址…」、「作者：…」、「發佈日期：…」、「分類：…」這類純機構/出版 metadata，因為 Yoast 已負責處理。
 - **必須 emit** 的額外 schema：`FAQPage`（透過上方 FAQ shortcode；renderer 會自動轉成 JSON-LD）。
 - **可選 emit** 的額外 schema：`DefinedTermSet` — 用於文章內專有名詞、英文縮寫、政策/醫學/保險術語。每個術語以下列 shortcode 表示，放在該術語**首次在正文出現之後的獨立空行**，不要連續多個堆在一起。每個 shortcode **必須三行獨立成行**（`%%defterm…%%`、描述、`%%end%%` 各佔一行），三行前後都要有 blank line：
    ```
    %%defterm name=術語%%
-   一句解釋（≤ 60 字，香港繁體中文）
+   一句解釋（≤ 60 字，{output_language}）
    %%end%%
    ```
    - `name` 為單行字串，可含空格（多字詞術語如 `Surat Rujukan`、`Klinik Kesihatan` 可接受），但不可含 `%` 或引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`

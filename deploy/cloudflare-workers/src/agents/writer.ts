@@ -11,7 +11,7 @@ import { toJsonb } from "../db/serialize";
 import { pyJsonDumps } from "../util/py_json";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import { getAssembled } from "../prompts/store";
-import { loadPersona, toPromptBlock } from "./persona";
+import { loadPersona, toPromptBlock, type VoiceLocale } from "./persona";
 import { getPolicy } from "../source_policy/store";
 import {
   WRITER_OUTPUT_SCHEMA,
@@ -117,6 +117,20 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Apply the per-voice brand/language/market locale tokens — mirror of the
+ * trailing three `.replace()` calls in Python `writer.build_system_prompt`.
+ * Backward-compatible: a string with none of the tokens is returned unchanged.
+ */
+export function applyLocaleTokens(text: string, loc: VoiceLocale): string {
+  // `replaceAll` (not `replace`) so EVERY occurrence is substituted, matching
+  // Python `str.replace`. These tokens appear multiple times in the bodies.
+  return text
+    .replaceAll("{brand_name}", loc.brandName)
+    .replaceAll("{output_language}", loc.outputLanguage)
+    .replaceAll("{market}", loc.market);
+}
+
 async function buildSystemPrompt(
   sql: Sql,
   route: string,
@@ -128,10 +142,11 @@ async function buildSystemPrompt(
   const template = await getAssembled(sql, `writer_${route}`, personaName);
   const persona = await loadPersona(sql, personaName);
   const policy = await getPolicy(sql, personaName);
-  return template
+  const withBlocks = template
     .replace("{persona_block}", toPromptBlock(persona, contextText))
     .replace("{today_date}", todayIso())
     .replace("{source_policy_block}", policy.toPromptBlock());
+  return applyLocaleTokens(withBlocks, persona.locale);
 }
 
 /**

@@ -12,6 +12,7 @@
 
 import type { Sql } from "postgres";
 import { getAssembled } from "../prompts/store";
+import { loadPersona } from "./persona";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import { TOPIC_HOT_SCHEMA, type TopicHotOutput } from "./topic_schemas";
 
@@ -50,10 +51,16 @@ async function buildSystemPrompt(sql: Sql, voiceSlug: string): Promise<string> {
 // User prompt — mirrors Python `build_user_prompt` exactly.
 // ---------------------------------------------------------------------------
 
-export function buildUserPrompt(opts: { topic: string; keywords: string[] }): string {
+export function buildUserPrompt(opts: {
+  topic: string;
+  keywords: string[];
+  /** The voice's market (VoiceLocale.market); defaults to HK-ZH "Google 香港繁中". */
+  market?: string;
+}): string {
   const keywords = opts.keywords.length > 0 ? opts.keywords.join(", ") : "（無）";
+  const market = opts.market ?? "Google 香港繁中";
   return (
-    "請分析以下單一 topic 在 Google 香港繁中 SERP 是否屬於熱門話題。" +
+    `請分析以下單一 topic 在 ${market} SERP 是否屬於熱門話題。` +
     "只輸出符合 schema 的 JSON。\n\n" +
     `topic:\n${opts.topic}\n\n` +
     `focus_keywords:\n${keywords}\n`
@@ -75,7 +82,14 @@ export async function runTopicHot(
   input: TopicHotInput,
 ): Promise<{ output: TopicHotOutput; tokens: TopicHotTokens }> {
   const systemPrompt = await buildSystemPrompt(sql, input.voiceSlug);
-  const userPrompt = buildUserPrompt({ topic: input.topic, keywords: input.keywords });
+  // Resolve the voice's market locally (spec §4.4 item 7) so a non-HK voice asks
+  // about ITS market. HK-ZH default keeps "Google 香港繁中" → byte-identical.
+  const { locale } = await loadPersona(sql, input.voiceSlug);
+  const userPrompt = buildUserPrompt({
+    topic: input.topic,
+    keywords: input.keywords,
+    market: locale.market,
+  });
 
   const result = await gemini.generate({
     agent: "topic_hot",

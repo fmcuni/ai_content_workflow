@@ -1,6 +1,23 @@
 import re
 from typing import Any
 
+# HK-ZH default: accept either Chinese script for the sources <h2> when the
+# voice does not configure an explicit heading.
+_DEFAULT_SOURCES_HEADINGS = ("資訊來源", "资讯来源")
+
+
+def _sources_present(html_body: str, sources_heading: str | None) -> bool:
+    """Whether the rendered body carries the expected sources ``<h2>``.
+
+    ``sources_heading=None`` (zh voices) accepts BOTH Chinese scripts exactly as
+    before. When the voice configures an explicit heading (e.g. English
+    ``Sources``), require THAT heading's ``<h2>`` — render_html emitted it.
+    """
+    headings = (
+        _DEFAULT_SOURCES_HEADINGS if sources_heading is None else (sources_heading,)
+    )
+    return any(f"<h2>{h}</h2>" in html_body for h in headings)
+
 
 def run_deterministic_checks(
     html_body: str,
@@ -9,6 +26,7 @@ def run_deterministic_checks(
     schema_jsonld: list[dict[str, Any]] | None = None,
     adv_enabled: bool = True,
     widget_enabled: bool = True,
+    sources_heading: str | None = None,
 ) -> list[dict[str, Any]]:
     # ``adv_enabled`` / ``widget_enabled`` are False when the run's acf id is 0
     # (the "no element" sentinel): the shortcode is intentionally absent, so its
@@ -31,9 +49,10 @@ def run_deterministic_checks(
             "must_fix": True,
         })
 
-    # Accept either Chinese script — the sources heading follows the voice's
-    # script (see resolve_citations), so a zh-MY voice emits Simplified.
-    if "<h2>資訊來源</h2>" not in html_body and "<h2>资讯来源</h2>" not in html_body:
+    # The sources heading follows the voice's locale (see resolve_citations /
+    # render_html): a zh voice emits Traditional/Simplified, a non-Chinese voice
+    # its configured heading. Default (None) accepts both Chinese scripts.
+    if not _sources_present(html_body, sources_heading):
         findings.append({
             "id": "det-fmt-sources", "category": "format", "severity": "high",
             "location": "tail", "issue": "缺少 <h2>資訊來源</h2> section",

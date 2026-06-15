@@ -133,12 +133,17 @@ export async function runAudit(
   gemini: GeminiClient,
   input: AuditInput,
 ): Promise<{ audit: AuditOutput; tokens: AuditTokens }> {
+  // Resolve the run's voice locale so the sources <h2> gate matches the heading
+  // render emitted (English "Sources" for a non-Chinese voice; null keeps
+  // accepting both Chinese scripts for zh voices — byte-identical).
+  const { locale } = await loadPersona(sql, input.run.persona);
   const deterministicFindings = runDeterministicChecks({
     htmlBody: input.htmlBody,
     citationsDeniedDisplayed: input.citationsDeniedDisplayed,
     schemaJsonld: input.schemaJsonld,
     advEnabled: input.advEnabled,
     widgetEnabled: input.widgetEnabled,
+    sourcesHeading: locale.sourcesHeading,
   });
 
   const systemPrompt = await buildSystemPrompt(
