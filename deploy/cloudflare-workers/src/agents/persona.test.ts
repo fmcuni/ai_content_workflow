@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { toPromptBlock } from "./persona";
+import { defaultVoiceLocale, toPromptBlock } from "./persona";
 import type { PersonaPack } from "./persona";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,7 @@ const BASE_PACK: PersonaPack = {
       notes: null,
     },
   ],
+  locale: defaultVoiceLocale(),
 };
 
 // ---------------------------------------------------------------------------

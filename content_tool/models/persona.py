@@ -1,8 +1,41 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 GlossaryStatus = Literal["preferred", "avoid", "forbidden", "do_not_translate"]
+
+
+class VoiceLocale(BaseModel):
+    """Per-voice locale / brand identity, stored in ``personas.locale`` (JSONB).
+
+    The defaults reproduce ``bowtie-editor`` (Bowtie HK 繁體中文) **byte-for-byte**,
+    so an empty ``{}`` locale is a no-op — existing voices behave exactly as
+    before. A voice opts into a different brand/language/market purely as data.
+
+    Fields:
+      - ``output_language`` — value for the ``{output_language}`` prompt token.
+      - ``brand_name``      — value for the ``{brand_name}`` prompt token.
+      - ``market``          — value for the ``{market}`` token (``topic_hot`` etc.).
+      - ``sources_heading`` — explicit sources ``<h2>`` text; ``None`` keeps
+        today's Traditional↔Simplified script auto-detection (safe for zh voices).
+      - ``faq_heading``     — FAQ heading used by ``render_html``'s fallback/split.
+      - ``ui_lang``         — selects the persona-block label set (``zh-Hant``
+        default = current strings; ``en`` = English labels).
+    """
+
+    output_language: str = "香港繁體中文"  # noqa: RUF001
+    brand_name: str = "Bowtie"
+    market: str = "Google 香港繁中"  # noqa: RUF001
+    sources_heading: str | None = None
+    faq_heading: str = "常見問題"  # noqa: RUF001
+    ui_lang: str = "zh-Hant"
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any] | None) -> "VoiceLocale":
+        """Build from a raw JSONB value. ``None``/``{}`` → all HK-ZH defaults."""
+        if not raw:
+            return cls()
+        return cls.model_validate(raw)
 
 
 class GlossaryEntry(BaseModel):
@@ -32,6 +65,7 @@ class PersonaPack(BaseModel):
     disclaimer_templates: dict[str, DisclaimerTemplate]
     tone_examples: dict[str, list[str]]
     glossary: list[GlossaryEntry] = Field(default_factory=list)
+    locale: VoiceLocale = Field(default_factory=VoiceLocale)
 
     def to_prompt_block(self, context_text: str | None = None) -> str:
         """Render as a Chinese-language persona block for system prompts.

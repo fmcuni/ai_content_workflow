@@ -14,7 +14,7 @@ from content_tool.db.models import (
     SourcePolicyRecord,
     SourcePolicyVersion,
 )
-from content_tool.models.persona import PersonaPack
+from content_tool.models.persona import PersonaPack, VoiceLocale
 from content_tool.source_policy_store import POLICY_ID, SHARED_VOICE
 
 # Editable prompt categories cloned when a voice is duplicated. Judges stay
@@ -54,6 +54,7 @@ def _row_to_pack(row: Persona) -> PersonaPack:
         "disclaimer_templates": row.disclaimer_templates,
         "tone_examples": row.tone_examples,
         "glossary": row.glossary or [],
+        "locale": VoiceLocale.from_raw(row.locale),
     })
 
 
@@ -231,6 +232,7 @@ async def duplicate_persona(
         disclaimer_templates={k: v.model_dump() for k, v in pack.disclaimer_templates.items()},
         tone_examples={k: list(v) for k, v in pack.tone_examples.items()},
         glossary=[g.model_dump() for g in pack.glossary],
+        locale=pack.locale.model_dump(),
         created_by=created_by,
         updated_by=created_by,
     )
