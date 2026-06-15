@@ -1,16 +1,14 @@
 /**
- * Unit tests for `loadRole` (src/auth/authz.ts) — the provider-aware role
- * source added in WS1.
+ * Unit tests for `loadRole` (src/auth/authz.ts) — the role source.
  *
- *   - AUTH_PROVIDER="supabase" → role comes from content_tool.app_user (id then
- *     email).
- *   - any other value (default better-auth) → role comes from content_tool."user".
+ *   - role comes from content_tool.app_user (id then email).
  *   - id is preferred over email; email is the fallback.
+ *   - an authenticated session with no app_user row is DENIED (invite-only).
  *   - bootstrap-admin override + the per-request cache still apply.
  *   - no session identity → null (caller maps to 401).
  *
  * `../db/client`'s `withDb` is mocked with a fake `sql` tag that records the
- * rendered query text, so each test asserts WHICH table was read and returns a
+ * rendered query text, so each test asserts the table read and returns a
  * scripted role row.
  */
 import { Hono } from "hono";
@@ -44,8 +42,7 @@ function fakeSql(strings: TemplateStringsArray, ...values: unknown[]): unknown {
   // Return the scripted role only for the lookup we want to "hit"; the other
   // lookup returns no row so the fallback path is exercised when needed.
   if ((byId && state.matchById) || (!byId && !state.matchById)) {
-    // The app_user query projects role+status+sessions_revoked_epoch; the legacy
-    // query role only. The extra keys are harmless for the legacy assertions.
+    // The app_user query projects role+status+sessions_revoked_epoch.
     return Promise.resolve([
       {
         role: state.role,
@@ -100,10 +97,10 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// app_user path (AUTH_PROVIDER="supabase").
+// app_user path.
 // ---------------------------------------------------------------------------
-describe("loadRole — app_user path (supabase)", () => {
-  const env: Partial<Env> = { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "" };
+describe("loadRole — app_user path", () => {
+  const env: Partial<Env> = { BOOTSTRAP_ADMIN_EMAILS: "" };
 
   it("reads the role from content_tool.app_user by id", async () => {
     state.role = "reviewer";
@@ -137,7 +134,7 @@ describe("loadRole — app_user path (supabase)", () => {
     const role = await resolve({
       userId: "uuid-1",
       userEmail: "boss@bowtie.com.hk",
-      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+      env: { BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
     });
     expect(role).toBe("admin");
   });
@@ -148,7 +145,7 @@ describe("loadRole — app_user path (supabase)", () => {
     const role = await resolve({
       userId: "uuid-new",
       userEmail: "boss@bowtie.com.hk",
-      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+      env: { BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
     });
     expect(role).toBe("admin");
   });
@@ -204,7 +201,7 @@ describe("loadRole — app_user path (supabase)", () => {
       userId: "uuid-1",
       userEmail: "boss@bowtie.com.hk",
       tokenIssuedAt: 999_900,
-      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+      env: { BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
     });
     expect(role).toBe("admin");
   });
@@ -217,43 +214,22 @@ describe("loadRole — app_user path (supabase)", () => {
     const role = await resolve({
       userId: "uuid-1",
       userEmail: "boss@bowtie.com.hk",
-      env: { AUTH_PROVIDER: "supabase", BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
+      env: { BOOTSTRAP_ADMIN_EMAILS: "boss@bowtie.com.hk" },
     });
     expect(role).toBe("admin");
   });
-});
-
-// ---------------------------------------------------------------------------
-// legacy "user" path (AUTH_PROVIDER unset / better-auth).
-// ---------------------------------------------------------------------------
-describe("loadRole — legacy user path (default)", () => {
-  it("reads the role from content_tool.\"user\" when the provider is unset", async () => {
-    state.role = "reviewer";
-    state.matchById = true;
-    const role = await resolve({ userId: "id-1", userEmail: "a@bowtie.com.hk", env: {} });
-    expect(role).toBe("reviewer");
-    expect(state.queries.some((q) => q.includes('content_tool."user"'))).toBe(true);
-    expect(state.queries.some((q) => q.includes("from content_tool.app_user"))).toBe(false);
-  });
 
   it("aliases a legacy stored 'editor' role to reviewer", async () => {
+    // Rows written under the old 3-role model persisted "editor"; coerceRole
+    // maps it onto the new "reviewer" tier regardless of the table.
     state.role = "editor";
-    const role = await resolve({ userId: "id-1", env: {} });
+    const role = await resolve({ userId: "uuid-1", env });
     expect(role).toBe("reviewer");
   });
 
   it("returns null when there is no session identity (→ 401)", async () => {
-    const role = await resolve({ env: {} });
+    const role = await resolve({ env });
     expect(role).toBeNull();
     expect(state.queries.length).toBe(0);
-  });
-
-  it("KEEPS the viewer floor when an authenticated legacy user has no row", async () => {
-    // The legacy better-auth path is unchanged by the OAuth invite-only gate:
-    // a session with identity but no stored role still floors to viewer.
-    state.matchById = false;
-    state.role = null;
-    const role = await resolve({ userId: "id-x", userEmail: "a@bowtie.com.hk", env: {} });
-    expect(role).toBe("viewer");
   });
 });

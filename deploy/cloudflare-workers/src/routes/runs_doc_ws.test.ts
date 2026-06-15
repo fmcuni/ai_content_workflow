@@ -14,9 +14,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // runsRouter transitively imports these; stub them so the module loads under node.
+// requireAuth's provisioning gate resolves the ticket user's role from
+// content_tool.app_user — return a provisioned row for that lookup so the gate
+// admits the ticket; every other query is irrelevant to the /doc handler.
 vi.mock("../db/client", () => ({
   withDb: async (_env: unknown, _ctx: unknown, fn: (sql: unknown) => Promise<unknown>) =>
-    fn(() => []),
+    fn((strings: TemplateStringsArray) => {
+      const text = Array.isArray(strings) ? strings.join(" ").toLowerCase() : "";
+      if (text.includes("content_tool.app_user")) {
+        return [{ role: "reviewer", status: "active", sessions_revoked_epoch: null }];
+      }
+      return [];
+    }),
 }));
 vi.mock("../gemini/do_client", () => ({ DoGeminiClient: class {} }));
 

@@ -12,12 +12,10 @@ vi.mock("next/navigation", () => ({
 const exchangeCodeForSession = vi.fn();
 const verifyOtp = vi.fn();
 vi.mock("@/lib/supabase-client", () => ({
-  isSupabaseAuth: () => true,
   getSupabaseClient: () => ({
     auth: { exchangeCodeForSession, verifyOtp },
   }),
 }));
-vi.mock("@/lib/auth-client", () => ({ authClient: { sendVerificationEmail: vi.fn() } }));
 
 import VerifyPage from "./page";
 

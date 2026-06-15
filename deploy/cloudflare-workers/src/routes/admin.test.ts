@@ -163,12 +163,11 @@ function env(): Record<string, unknown> {
   return { AUTH_DISABLED: "false", BOOTSTRAP_ADMIN_EMAILS: "" };
 }
 
-/** Supabase-provider env: routes the user store to app_user + enables GoTrue. */
+/** Env that enables GoTrue (Supabase Auth) for the admin user-management routes. */
 function supabaseEnv(): Record<string, unknown> {
   return {
     AUTH_DISABLED: "false",
     BOOTSTRAP_ADMIN_EMAILS: "",
-    AUTH_PROVIDER: "supabase",
     SUPABASE_URL: "https://proj.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
   };
@@ -248,7 +247,7 @@ describe("PUT /admin/users/:id/role", () => {
   });
 
   it("returns 404 when the target user does not exist", async () => {
-    state.target = null;
+    state.appUser = null;
     const res = await req(appWith("admin@bowtie.com.hk"), "PUT", "/admin/users/u404/role", {
       role: "reviewer",
     });
@@ -287,7 +286,14 @@ describe("PUT /admin/users/:id/role", () => {
 
   it("allows an admin to keep their OWN role as admin (no-op self update)", async () => {
     state.actorRole = "admin";
-    state.target = { id: "self1", email: "admin@bowtie.com.hk", name: "Me", role: "admin" };
+    state.appUser = {
+      id: "self1",
+      email: "admin@bowtie.com.hk",
+      display_name: "Me",
+      role: "admin",
+      status: "active",
+      last_sign_in_at: null,
+    };
     const res = await req(
       appWith("admin@bowtie.com.hk", "self1"),
       "PUT",
@@ -301,14 +307,8 @@ describe("PUT /admin/users/:id/role", () => {
 });
 
 describe("GET /admin/users", () => {
-  it("lists users for an admin", async () => {
-    const res = await req(appWith("admin@bowtie.com.hk"), "GET", "/admin/users", undefined);
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Array<Record<string, unknown>>;
-    expect(Array.isArray(json)).toBe(true);
-    expect(json[0]?.role).toBe("viewer");
-  });
-
+  // Listing (app_user + GoTrue enrichment) is covered by "Supabase provider:
+  // GET /admin/users" below; this block keeps the role-gate assertion.
   it("rejects a non-admin with 403", async () => {
     state.actorRole = "reviewer";
     const res = await req(appWith("reviewer@b.com"), "GET", "/admin/users", undefined);
@@ -368,11 +368,6 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
   it("rejects a missing email with 400", async () => {
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", {}, supabaseEnv());
     expect(res.status).toBe(400);
-  });
-
-  it("returns 501 on the better-auth provider", async () => {
-    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", { email: "x@b.com" });
-    expect(res.status).toBe(501);
   });
 
   it("adopts an existing GoTrue identity when the invite says already-registered", async () => {
@@ -495,11 +490,6 @@ describe("Supabase provider: disable / enable", () => {
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/ghost/disable", {}, supabaseEnv());
     expect(res.status).toBe(404);
     expect(gotrue.updateUser).not.toHaveBeenCalled();
-  });
-
-  it("501 on the better-auth provider", async () => {
-    const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users/u1/disable", {});
-    expect(res.status).toBe(501);
   });
 });
 

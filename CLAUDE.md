@@ -233,11 +233,12 @@ node scripts/claude-debug/browse.mjs '[{"goto":"/runs"},{"shotView":"runs.png"}]
 
 ## Supabase
 
-**Managed Postgres + (optionally) Supabase Auth** — no PostgREST, no Data API.
+**Managed Postgres + Supabase Auth** — no PostgREST, no Data API.
 SQLAlchemy/asyncpg owns all data access for the Python backend. Supabase Auth
-(GoTrue) is an **optional, flagged** auth provider for the Workers backend + web
-(see **Auth** below); the Python backend keeps better-auth. `supabase-js` is used
-**only** in the browser for the GoTrue session — never for data access.
+(GoTrue) is the auth provider for the Workers backend + web (see **Auth** below).
+The Python backend is retained for evals/local dev only and is not part of the
+prod auth path. `supabase-js` is used **only** in the browser for the GoTrue
+session — never for data access.
 
 **Workers-native backend** (`deploy/cloudflare-workers/`) uses `postgres.js` through
 Cloudflare Hyperdrive (`{ max: 5, fetch_types: false }`) instead of SQLAlchemy/asyncpg —
@@ -261,25 +262,22 @@ RLS is enabled on all tables as defense in depth; app connects via the dedicated
 - `supabase db reset` — wipe + re-apply all migrations locally
 - `supabase db push` — apply pending migrations to the linked prod project
 
-### Auth (GoTrue) — behind `AUTH_PROVIDER`
+### Auth (GoTrue / Supabase Auth)
 
-Authentication can run on **either** better-auth (default, legacy) **or Supabase
-Auth (GoTrue)**, selected by a flag so cutover is reversible:
+Authentication is **Supabase Auth (GoTrue)**. The legacy better-auth provider and
+the `AUTH_PROVIDER` / `NEXT_PUBLIC_AUTH_PROVIDER` selector flag were retired in
+`chore/retire-better-auth` — GoTrue is now the sole path (`better-auth` + `pg` were
+dropped from both `package.json`s).
 
-- **Flag:** `AUTH_PROVIDER` (Workers `Env`, default `better-auth`) and
-  `NEXT_PUBLIC_AUTH_PROVIDER` (web build env, default `better-auth`). Set both to
-  `supabase` to use GoTrue. Flip back to roll back.
 - **Google OAuth, invite-only.** Sign-in is **Google OAuth** only
   (`signInWithOAuth({provider:"google"})` → Supabase `/auth/v1/callback` →
   `/verify` exchanges the PKCE `?code=`). `/signup` redirects. Magic-link was
-  dropped (email-deliverability); the `signInWithMagicLink` helper remains in
-  `web/lib/auth-client.ts` but is unused by the UI.
+  dropped (email-deliverability).
   **Invite-only is enforced at the AUTHORIZATION layer, not sign-in:** Google
   OAuth auto-creates a GoTrue user for anyone, so `effectiveRole`/`loadRole`
   (`authz.ts`) return **null (→ 401)** for an authenticated session with no
   `content_tool.app_user` row (and not a bootstrap admin) — i.e. unprovisioned
-  users are denied, NOT floored to `viewer`. The legacy better-auth path keeps
-  the `viewer` floor. Provisioning is unchanged (admin pre-creates the
+  users are denied, NOT floored to `viewer`. Provisioning is unchanged (admin pre-creates the
   `app_user` row + GoTrue user; the invitee then signs in with Google on the
   same email — Google's verified email auto-links to the existing user).
   **Provider setup:** enable Google in Supabase → Auth → Providers (client
@@ -310,8 +308,7 @@ Auth (GoTrue)**, selected by a flag so cutover is reversible:
   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - **E2E:** `web/playwright.supabase.config.ts` mints a session via the Supabase
   password grant from the gitignored root `.env.test.local` (needs
-  `E2E_AUTH_PROVIDER=supabase`, `E2E_EMAIL`/`E2E_PASSWORD`, `E2E_SUPABASE_URL`/
-  `E2E_SUPABASE_ANON_KEY`).
+  `E2E_EMAIL`/`E2E_PASSWORD`, `E2E_SUPABASE_URL`/`E2E_SUPABASE_ANON_KEY`).
 - **Spec/plan:** `docs/superpowers/{specs,plans}/2026-06-10-supabase-auth-migration.md`.
 
 **Prod cutover runbook (E1–E9):** see [Supabase Cutover Runbook (E1–E9)](https://www.notion.so/36fef2b9861481d39723d884070e30fa) in Notion.

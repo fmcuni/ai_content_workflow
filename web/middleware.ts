@@ -1,4 +1,3 @@
-import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -88,27 +87,19 @@ function isKnownCrawler(userAgent: string | null): boolean {
 // which must not be bundled into the edge middleware. Keep the two in sync.
 const SUPABASE_COOKIE_NAME = "bowtie-sb-auth";
 
-// True when the build is configured for Supabase auth. NEXT_PUBLIC_* vars are
-// inlined at build time, so this is a static check (no runtime toggle).
-function usesSupabaseAuth(): boolean {
-  return process.env.NEXT_PUBLIC_AUTH_PROVIDER === "supabase";
-}
-
-// Optimistic presence check only — does a session cookie exist? Validity is
-// enforced by the backend 401 (and the api.ts refresh-or-/login path).
+// Optimistic presence check only — does a Supabase session cookie exist?
+// Validity is enforced by the backend 401 (and the api.ts refresh-or-/login
+// path).
 //
 // The Supabase session is chunked across `${name}.0`, `${name}.1`, … (a full
 // session exceeds the ~4096-byte single-cookie limit — see lib/supabase-client.ts),
 // so the first chunk `${name}.0` is the presence signal. The bare `${name}` is
 // also accepted for any legacy pre-chunking cookie still in a browser.
 function hasSessionCookie(request: NextRequest): boolean {
-  if (usesSupabaseAuth()) {
-    return Boolean(
-      request.cookies.get(`${SUPABASE_COOKIE_NAME}.0`)?.value ||
-        request.cookies.get(SUPABASE_COOKIE_NAME)?.value,
-    );
-  }
-  return Boolean(getSessionCookie(request));
+  return Boolean(
+    request.cookies.get(`${SUPABASE_COOKIE_NAME}.0`)?.value ||
+      request.cookies.get(SUPABASE_COOKIE_NAME)?.value,
+  );
 }
 
 // Stamp the shared security headers (CSP + hardening) onto every response the

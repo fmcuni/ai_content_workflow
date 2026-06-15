@@ -95,40 +95,22 @@
 		}
 	],
 	// Non-secret. Secrets set via `wrangler secret put`:
-	//   POSTGRES_URL, GEMINI_API_KEY, AUTH_SECRET, RESEND_API_KEY.
+	//   POSTGRES_URL, GEMINI_API_KEY, AUTH_SECRET.
 	"vars": {
 		"GEMINI_MODEL": "gemini-3.1-pro-preview",
 		// SSE CORS allow-origin: the deployed frontend Worker (browser-direct SSE to
 		// /runs/:id/events and /topic-batches/:id/events). REST goes via Next rewrites
-		// (server-side, no CORS). Also better-auth baseURL/trustedOrigins. See
-		// src/http/cors.ts and src/auth/auth.ts.
+		// (server-side, no CORS). See src/http/cors.ts.
 		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev",
-		// Auth (better-auth). From header for Resend verification/reset email.
-		// TEST PHASE: Resend's no-DNS sender (delivers only to the Resend account
-		// owner's own email). Switch to "noreply@bowtie.com.hk" once that domain is
-		// DNS-verified in Resend.
-		"RESEND_FROM": "Bowtie Content Desk <onboarding@resend.dev>",
-		// Email-domain allowlist for self-serve sign-up. Comma-separated to add more
-		// (e.g. "bowtie.com.hk,bowtie.com.sg") without a code deploy.
-		"ALLOWED_EMAIL_DOMAINS": "bowtie.com.hk",
-		// TEMPORARY: verification disabled while Resend sending is sorted out (the
-		// test sender can't reliably deliver). Remove this line (or set to "on")
-		// and redeploy once bowtie.com.hk is DNS-verified in Resend.
-		"EMAIL_VERIFICATION": "off",
 		// Verbose per-step event log: persist raw *.thinking events too. Default
 		// ON; set "0"/"false"/"off" to stream thinking live but skip persisting it
 		// to content_tool.run_event_logs. Read by the RunStream DO.
 		"PERSIST_THINKING": "on",
-		// Auth provider selector. MUST be pinned here (non-secret) so it is
-		// deterministic across deploys — a `wrangler deploy` rewrites the var set,
-		// so an out-of-band dashboard value would be wiped, silently reverting the
-		// backend to better-auth and 401-ing every Supabase Bearer token.
-		"AUTH_PROVIDER": "supabase",
 		// Supabase project URL — public (also baked into the web bundle). Required
-		// for JWKS verification of the GoTrue access token (src/auth/jwt.ts). With
-		// AUTH_PROVIDER=supabase this is authoritative; there is no HS256 fallback.
-		// Secrets SUPABASE_SERVICE_ROLE_KEY (admin user-mgmt) + optional
-		// SUPABASE_JWT_SECRET are set via `wrangler secret put`.
+		// for JWKS verification of the GoTrue access token (src/auth/jwt.ts); it is
+		// authoritative (there is no HS256 fallback once it is set). Secrets
+		// SUPABASE_SERVICE_ROLE_KEY (admin user-mgmt) + optional SUPABASE_JWT_SECRET
+		// are set via `wrangler secret put`.
 		"SUPABASE_URL": "https://gfpkqsiyeslscgsuehmj.supabase.co"
 	},
 	"hyperdrive": [
@@ -150,15 +132,6 @@
 			"namespace_id": "2001",
 			"simple": {
 				"limit": 30,
-				"period": 60
-			}
-		},
-		{
-			// Public /api/auth/* surface (credential-stuffing / signup abuse).
-			"name": "RATE_LIMITER_AUTH",
-			"namespace_id": "2002",
-			"simple": {
-				"limit": 20,
 				"period": 60
 			}
 		}
@@ -229,11 +202,7 @@
 				"GEMINI_MODEL": "gemini-3.1-pro-preview",
 				// Browser-direct SSE allow-origin: the DEV frontend Worker.
 				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.fmc.workers.dev",
-				"RESEND_FROM": "Bowtie Content Desk <onboarding@resend.dev>",
-				"ALLOWED_EMAIL_DOMAINS": "bowtie.com.hk",
-				"EMAIL_VERIFICATION": "off",
 				"PERSIST_THINKING": "on",
-				"AUTH_PROVIDER": "supabase",
 				// REPLACE with the dev Supabase project URL (JWKS issuer for the dev
 				// GoTrue tokens). Must match NEXT_PUBLIC_SUPABASE_URL baked into the
 				// dev web build, or every dev request 401s.
@@ -258,14 +227,6 @@
 					"namespace_id": "3001",
 					"simple": {
 						"limit": 30,
-						"period": 60
-					}
-				},
-				{
-					"name": "RATE_LIMITER_AUTH",
-					"namespace_id": "3002",
-					"simple": {
-						"limit": 20,
 						"period": 60
 					}
 				}

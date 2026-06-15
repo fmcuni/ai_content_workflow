@@ -15,7 +15,6 @@ import { topicBatchesRouter } from "./routes/topic_batches";
 import { complianceRouter } from "./routes/compliance";
 import { refreshRouter } from "./routes/refresh";
 import { adminRouter } from "./routes/admin";
-import { getAuth } from "./auth/auth";
 import { requireAuth, type AuthVars } from "./auth/middleware";
 import { loadRole, requireRole } from "./auth/authz";
 import { mintTicket } from "./auth/ticket";
@@ -59,23 +58,16 @@ export interface Env {
   // file keys on the authenticated user id (else the client IP) and combines a
   // per-user AND per-IP check. Generous caps (not product quotas):
   //   - RATE_LIMITER_MUTATION: run create/resume/apply-edits + topic-batches.
-  //   - RATE_LIMITER_AUTH: the public /api/auth/* surface.
   // Optional (`?`) so local dev / the node test pool (no binding) fail OPEN.
   RATE_LIMITER_MUTATION?: RateLimit;
-  RATE_LIMITER_AUTH?: RateLimit;
   // Comma-separated allowlist of frontend origins permitted to open the SSE
   // streams cross-origin (the OpenNext frontend Worker). Unset → reflect the
   // request Origin (local dev). See src/http/cors.ts.
   FRONTEND_ORIGIN?: string;
-  // --- Auth (better-auth) ---
-  // Secret — signs sessions + SSE tickets. `wrangler secret put AUTH_SECRET`.
+  // --- Auth ---
+  // Secret — signs short-lived SSE / collab WebSocket tickets (src/auth/ticket.ts).
+  // `wrangler secret put AUTH_SECRET`.
   AUTH_SECRET?: string;
-  // Secret — Resend API key for verification / password-reset emails.
-  RESEND_API_KEY?: string;
-  // Var — From header for Resend (e.g. "Bowtie Content Desk <noreply@bowtie.com.hk>").
-  RESEND_FROM?: string;
-  // Var — comma-separated email-domain allowlist for sign-up (default bowtie.com.hk).
-  ALLOWED_EMAIL_DOMAINS?: string;
   // Var — comma-separated domains eligible for the `admin` role (default
   // bowtie.com.hk,bowtie.com.sg). Non-eligible emails can log in but never be admin.
   ADMIN_EMAIL_DOMAINS?: string;
@@ -84,13 +76,7 @@ export interface Env {
   EMAIL_VERIFICATION?: string;
   // Var — set "true" to bypass the auth gate for local dev (Python backend).
   AUTH_DISABLED?: string;
-  // --- Auth provider selector (flagged parallel cutover) ---
-  // Var — "supabase" routes session validation through the Supabase JWT branch
-  // (src/auth/jwt.ts + the supabase branch in middleware.ts, wired in WS1).
-  // Anything else, or unset, keeps the legacy better-auth cookie path. Default
-  // is better-auth so `main` stays behaviorally unchanged until cutover.
-  AUTH_PROVIDER?: string;
-  // --- Supabase Auth (GoTrue) — consumed once AUTH_PROVIDER="supabase" ---
+  // --- Supabase Auth (GoTrue) ---
   // Var — Supabase project URL, e.g. https://<ref>.supabase.co. Used to derive
   // the public JWKS URL (`/auth/v1/.well-known/jwks.json`) for JWT verify and as
   // the GoTrue admin REST base (WS3). Unset → supabase branch degrades safely.
@@ -161,7 +147,7 @@ const RATE_LIMIT_PERIOD_SECONDS = 60;
  * binding must never wedge the app.
  */
 export function makeRateLimitMiddleware(
-  bindingName: "RATE_LIMITER_MUTATION" | "RATE_LIMITER_AUTH",
+  bindingName: "RATE_LIMITER_MUTATION",
 ): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
   return async (c, next) => {
     const limiter = c.env[bindingName];
@@ -211,26 +197,9 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.get("/robots.txt", (c) => c.text(ROBOTS_TXT));
 app.use("*", blockKnownCrawlers);
 
-// --- Auth (better-auth) ----------------------------------------------------
-// Mounted at a PATH-PRESERVING /api/auth/* — the frontend rewrite keeps the
-// `/api` prefix (unlike the bare-path REST rewrites), so the session cookie is
-// same-origin on the web domain. Registered before requireAuth so it stays
-// public. See src/auth/auth.ts.
-// Throttle the public auth surface (per-IP — no session yet) BEFORE the handler
-// to blunt credential-stuffing / signup abuse. Scoped to POST only so GET
-// session/callback reads (and the OAuth redirect dance) stay unthrottled.
-app.post("/api/auth/*", makeRateLimitMiddleware("RATE_LIMITER_AUTH"));
-app.on(["POST", "GET"], "/api/auth/*", async (c) => {
-  const { auth, sql } = getAuth(c.env);
-  try {
-    return await auth.handler(c.req.raw);
-  } finally {
-    c.executionCtx.waitUntil(sql.end().catch(() => undefined));
-  }
-});
-
-// Gate everything below: REST via the session cookie, SSE via `?ticket`.
-// /health, /api/auth/* (and OPTIONS preflight) are exempted inside requireAuth.
+// Gate everything below: REST via the Supabase Bearer token, SSE / collab via
+// `?ticket`. /health (+ /robots.txt) are registered above; OPTIONS preflight is
+// exempted inside requireAuth.
 app.use("*", requireAuth);
 
 // Issue a short-lived SSE ticket to the authenticated user (cookie-protected by

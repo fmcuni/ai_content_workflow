@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 // Runs Ledger (redesign) e2e. The ledger reads everything over `/api/*`, so a
-// fake better-auth cookie keeps `middleware.ts` from bouncing /runs → /login.
+// fake Supabase session cookie keeps `middleware.ts` from bouncing /runs → /login.
 // The board defaults to the "drafted" tab and opens a bottom-sheet drawer per
 // row; bulk actions fan out over the per-run endpoints.
 
@@ -82,7 +82,8 @@ async function mountBoard(page: Page): Promise<MockState> {
   const state: MockState = { hitl2Calls: [], patchCalls: [] };
 
   await page.context().addCookies([
-    { name: "better-auth.session_token", value: "e2e-stub", domain: "localhost", path: "/" },
+    // middleware.ts presence-checks the chunked Supabase cookie `${name}.0`.
+    { name: "bowtie-sb-auth.0", value: "e2e-stub", domain: "localhost", path: "/" },
   ]);
 
   await page.route("**/api/**", async (route) => {

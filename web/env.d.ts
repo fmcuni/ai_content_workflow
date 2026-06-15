@@ -4,12 +4,9 @@
 //
 // Augments (does not replace) the @types/node ProcessEnv index signature, so
 // other NEXT_PUBLIC_* vars keep resolving to `string | undefined`. Wired into the
-// Supabase browser client / auth flag in WS2; absent values degrade to the
-// better-auth path.
+// Supabase browser client.
 declare namespace NodeJS {
   interface ProcessEnv {
-    /** "supabase" switches the frontend onto the Supabase Auth client (WS2). */
-    NEXT_PUBLIC_AUTH_PROVIDER?: string;
     /** Supabase project URL for the browser client (e.g. https://<ref>.supabase.co). */
     NEXT_PUBLIC_SUPABASE_URL?: string;
     /** Supabase anon / publishable key for the browser client (safe to expose). */

@@ -55,7 +55,7 @@ function makeFakeSql(): unknown {
 
     if (lower.startsWith("select")) {
       // loadRole: role lookup on the user table.
-      if (lower.includes('from content_tool."user"')) {
+      if (lower.includes('from content_tool.app_user')) {
         return [{ role: state.userRole }];
       }
       if (lower.includes("select created_by from content_tool.runs")) {

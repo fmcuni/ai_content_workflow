@@ -23,14 +23,13 @@ import type {
 
 import { getSessionEmail } from "./auth-client";
 import { isAuthRoute } from "./auth-routes";
-import { getSupabaseClient, isSupabaseAuth } from "./supabase-client";
+import { getSupabaseClient } from "./supabase-client";
 
 const BASE = "/api/runs";
 
-// When NEXT_PUBLIC_AUTH_PROVIDER === "supabase", requests carry the Supabase
-// access token as a Bearer header (the backend validates the JWT) instead of
-// relying on the better-auth same-origin session cookie. `forceRefresh` asks
-// Supabase to mint a fresh token from the refresh token — used once after a 401.
+// Requests carry the Supabase access token as a Bearer header (the backend
+// validates the JWT). `forceRefresh` asks Supabase to mint a fresh token from
+// the refresh token — used once after a 401.
 async function supabaseBearer(forceRefresh = false): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -92,7 +91,7 @@ function wpOptionsQuery(runId?: string, persona?: string): string {
 }
 
 // Build-time fallback only (local dev). In production the signed-in editor's
-// better-auth session email is the primary source — see `resolveEditorEmail`.
+// Supabase session email is the primary source — see `resolveEditorEmail`.
 const PROMPT_EDITOR_EMAIL = process.env.NEXT_PUBLIC_PROMPT_EDITOR_EMAIL;
 
 // Cache the resolved editor email for the page session so we hit the session
@@ -102,7 +101,7 @@ let cachedEditorEmail: string | null | undefined;
 
 /**
  * Resolve the email to stamp prompt/source-policy edits with. Prefers the
- * logged-in better-auth session (so the version row shows the real editor, not
+ * logged-in Supabase session (so the version row shows the real editor, not
  * "dev@local"), falling back to the build-time env for local dev. The backend
  * trusts this `X-Editor-Email` header; RBAC permission is enforced server-side
  * independently of the stamped identity.
@@ -130,18 +129,14 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     if (editorEmail) extra["X-Editor-Email"] = editorEmail;
   }
 
-  const supabaseAuth = isSupabaseAuth();
-  if (supabaseAuth) {
-    const token = await supabaseBearer();
-    if (token) extra["authorization"] = `Bearer ${token}`;
-  }
+  const token = await supabaseBearer();
+  if (token) extra["authorization"] = `Bearer ${token}`;
 
   function buildInit(): RequestInit {
     return {
       ...init,
-      // better-auth path carries the session cookie same-origin via the /api
-      // proxy; the Supabase path uses the Bearer header above. `credentials`
-      // is harmless on the Supabase path and required on the legacy one.
+      // The Supabase path uses the Bearer header above; `credentials: "include"`
+      // is harmless here and kept for the local-dev /api proxy path.
       credentials: "include",
       headers: {
         "content-type": "application/json",
@@ -153,9 +148,9 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
   let r = await fetch(path, buildInit());
 
-  // Supabase: a 401 usually means the access token expired. Try one silent
-  // refresh + retry; if it still fails, the session is gone → go to /login.
-  if (r.status === 401 && supabaseAuth) {
+  // A 401 usually means the access token expired. Try one silent refresh +
+  // retry; if it still fails, the session is gone → go to /login.
+  if (r.status === 401) {
     const refreshed = await supabaseBearer(true);
     if (refreshed) {
       extra["authorization"] = `Bearer ${refreshed}`;

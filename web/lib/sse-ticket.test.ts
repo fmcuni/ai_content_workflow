@@ -37,8 +37,9 @@ describe("withSseTicket", () => {
     vi.unstubAllGlobals();
   });
 
-  it("appends the ticket and does NOT attach a Bearer header on better-auth", async () => {
-    isSupabaseAuthMock.mockReturnValue(false);
+  it("appends the ticket and sends credentials: include", async () => {
+    isSupabaseAuthMock.mockReturnValue(true);
+    getSessionMock.mockResolvedValue({ data: { session: { access_token: "jwt-0" } } });
     fetchMock.mockResolvedValue(jsonResponse({ ticket: "abc" }));
 
     const url = await withSseTicket("wss://api.example/runs/r1/doc");
@@ -46,11 +47,10 @@ describe("withSseTicket", () => {
     expect(url).toBe("wss://api.example/runs/r1/doc?ticket=abc");
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.credentials).toBe("include");
-    expect((init.headers as Record<string, string>).authorization).toBeUndefined();
-    expect(getSessionMock).not.toHaveBeenCalled();
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer jwt-0");
   });
 
-  it("attaches the Supabase access token as a Bearer header on supabase auth", async () => {
+  it("attaches the Supabase access token as a Bearer header", async () => {
     isSupabaseAuthMock.mockReturnValue(true);
     getSessionMock.mockResolvedValue({ data: { session: { access_token: "jwt-1" } } });
     fetchMock.mockResolvedValue(jsonResponse({ ticket: "tk" }));
@@ -90,7 +90,8 @@ describe("withSseTicket", () => {
   });
 
   it("uses & as the separator when the URL already has a query string", async () => {
-    isSupabaseAuthMock.mockReturnValue(false);
+    isSupabaseAuthMock.mockReturnValue(true);
+    getSessionMock.mockResolvedValue({ data: { session: { access_token: "jwt-q" } } });
     fetchMock.mockResolvedValue(jsonResponse({ ticket: "abc" }));
 
     const url = await withSseTicket("wss://api.example/runs/r1/events?foo=1");

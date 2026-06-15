@@ -1,11 +1,12 @@
 "use client";
 
-// Browser-side Supabase client for the Supabase Auth migration (WS2).
+// Browser-side Supabase client (Supabase Auth, GoTrue).
 //
-// Gated by NEXT_PUBLIC_AUTH_PROVIDER === "supabase". When the provider is not
-// Supabase (default = better-auth) this module still imports safely: the client
-// is created lazily and never throws at import time, even if the env vars are
-// unset. Call sites check `isSupabaseAuth()` before using `getSupabaseClient()`.
+// The app is Supabase-only; the legacy NEXT_PUBLIC_AUTH_PROVIDER flag was
+// retired. This module imports safely: the client is created lazily and never
+// throws at import time, even if the env vars are unset. Call sites still check
+// `isSupabaseAuth()`/`getSupabaseClient()` (the latter may return null when the
+// env vars are missing — e.g. local dev against the Python backend).
 //
 // Session persistence uses a custom **cookie** storage adapter (not
 // localStorage) so the Next proxy/middleware — which only sees cookies, never
@@ -112,9 +113,11 @@ const cookieStorage = {
   removeItem: (key: string): void => deleteChunkedCookie(key),
 };
 
-/** True when the app is configured to use Supabase auth (vs better-auth). */
+// The app is Supabase-only now (the legacy provider flag was retired). This is
+// kept as an always-true helper because many call sites still gate on it; it
+// lets those branches collapse without churning every caller.
 export function isSupabaseAuth(): boolean {
-  return process.env.NEXT_PUBLIC_AUTH_PROVIDER === "supabase";
+  return true;
 }
 
 let cachedClient: SupabaseClient | null = null;

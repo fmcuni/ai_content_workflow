@@ -70,7 +70,7 @@ function makeFakeSql(): unknown {
     }
     // loadRole: the review-thread mutations now require the `author` capability
     // (WS1 retiering); the authenticated actor resolves to author here.
-    if (lower.includes('from content_tool."user"')) {
+    if (lower.includes('from content_tool.app_user')) {
       return [{ role: "author" }];
     }
     if (lower.includes("from content_tool.runs")) {

@@ -96,12 +96,8 @@ jobs:
           # to dark by the next main push. To roll collab back: flip to "false"
           # (or remove) and redeploy, or `wrangler rollback <prior dark version>`.
           NEXT_PUBLIC_COLLAB_ENABLED: "true"
-          # Auth provider (BUILD-TIME). Must be pinned here so every prod deploy
-          # keeps the web on Supabase Auth — otherwise a main-push rebuild bakes
-          # an unset flag and the UI silently reverts to the better-auth login,
-          # mismatching a Supabase backend. URL is public; the anon key is a
+          # Supabase Auth (build-time). The URL is public; the anon key is a
           # public client key but routed through an Actions secret for hygiene.
-          NEXT_PUBLIC_AUTH_PROVIDER: "supabase"
           NEXT_PUBLIC_SUPABASE_URL: https://gfpkqsiyeslscgsuehmj.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: npm run cf:deploy

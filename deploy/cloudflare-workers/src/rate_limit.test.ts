@@ -56,7 +56,7 @@ function fakeLimiter(success: boolean): {
  * Build a Hono app that mirrors index.ts: optionally seed `userId`, then mount
  * the rate-limit middleware on a target POST route, then a handler.
  */
-type LimiterBinding = "RATE_LIMITER_MUTATION" | "RATE_LIMITER_AUTH";
+type LimiterBinding = "RATE_LIMITER_MUTATION";
 
 function appWith(opts: {
   binding: LimiterBinding;

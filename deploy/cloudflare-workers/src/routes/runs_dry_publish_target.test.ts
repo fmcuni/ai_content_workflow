@@ -58,7 +58,7 @@ function makeFakeSql(): unknown {
 
     if (lower.startsWith("select")) {
       // requireRole → loadRole: role lookup on the user table.
-      if (lower.includes('from content_tool."user"')) {
+      if (lower.includes('from content_tool.app_user')) {
         return [{ role: state.userRole }];
       }
       // getPublishTargetForVoice: personas → publish_targets join.
