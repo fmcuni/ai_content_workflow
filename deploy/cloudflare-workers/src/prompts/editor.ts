@@ -12,7 +12,9 @@
 
 import type { Sql } from "postgres";
 import type { PromptTemplateRow } from "../db/schema";
-import { loadPersona, toPromptBlock } from "../agents/persona";
+import type { VoiceLocale } from "../agents/persona";
+import { loadPersona, toPromptBlock, voiceLocaleFromRaw } from "../agents/persona";
+import { applyLocaleTokens } from "../agents/writer";
 import { getPolicy } from "../source_policy/store";
 
 // Re-exported for existing callers (routes/prompts.ts) — the implementations
@@ -155,10 +157,19 @@ export function consumersOf(
  * persona row. Mirrors Python `prompts.py::_default_persona_block` (the persona
  * block is preview-cosmetic — runtime assembly reads the persona at run time).
  */
-async function defaultPersonaBlock(sql: Sql, voice: string): Promise<string> {
+async function defaultPersonaBlock(
+  sql: Sql,
+  voice: string,
+  localeOverride?: VoiceLocale,
+): Promise<string> {
   for (const slug of voice === DEFAULT_PREVIEW_VOICE ? [voice] : [voice, DEFAULT_PREVIEW_VOICE]) {
     try {
-      return toPromptBlock(await loadPersona(sql, slug));
+      const persona = await loadPersona(sql, slug);
+      // When the caller supplies an unsaved locale (live preview), render the
+      // persona block under that locale's `uiLang` labels instead of the row's
+      // stored locale. Absent ⇒ stored locale, byte-identical to today.
+      const pack = localeOverride === undefined ? persona : { ...persona, locale: localeOverride };
+      return toPromptBlock(pack);
     } catch {
       continue;
     }
@@ -172,6 +183,7 @@ export async function substitutePreview(
   overrides: Record<string, string>,
   view: Map<string, PromptTemplateRow>,
   voice: string = DEFAULT_PREVIEW_VOICE,
+  localeOverride?: VoiceLocale,
 ): Promise<string> {
   const todayIso = Object.hasOwn(overrides, "today_date")
     ? (overrides["today_date"] ?? "")
@@ -181,7 +193,7 @@ export async function substitutePreview(
   if (Object.hasOwn(overrides, "persona_block")) {
     personaBlock = overrides["persona_block"] ?? "";
   } else {
-    personaBlock = await defaultPersonaBlock(sql, voice);
+    personaBlock = await defaultPersonaBlock(sql, voice, localeOverride);
   }
 
   const sourcePolicyBlock = Object.hasOwn(overrides, "source_policy_block")
@@ -202,9 +214,51 @@ export async function substitutePreview(
     .replaceAll("{source_policy_block}", sourcePolicyBlock)
     .replaceAll("{create_mode_block}", createModeBlock);
 
+  // Live-locale preview: when an unsaved locale is supplied, resolve the
+  // brand/language/market tokens and sources/FAQ heading tokens the runtime
+  // agents inject so the assembled prompt reflects the in-progress edits.
+  // Done BEFORE the context loop so an explicit `context` value still wins.
+  // Absent ⇒ these tokens fall through exactly as today.
+  if (localeOverride !== undefined) {
+    out = applyLocaleTokens(out, localeOverride)
+      .replaceAll("{faq_heading}", localeOverride.faqHeading)
+      .replaceAll("{sources_heading}", localeOverride.sourcesHeading ?? "");
+  }
+
   for (const [key, value] of Object.entries(overrides)) {
     if (NAMED_PREVIEW_KEYS.has(key)) continue;
     out = out.replaceAll(`{${key}}`, value);
   }
   return out;
+}
+
+/** Allowed `ui_lang` values (mirrors Python `VoiceLocale.ui_lang` Literal). */
+const VALID_UI_LANGS: ReadonlySet<string> = new Set(["zh-Hant", "en"]);
+
+/**
+ * Parse an optional preview `locale` override from the request body.
+ *
+ * - `undefined`/absent ⇒ `{ ok: true, locale: undefined }` (no override; preview
+ *   stays byte-identical to today).
+ * - a `ui_lang` outside {zh-Hant, en} ⇒ `{ ok: false }` (route → 422). Every
+ *   other field is free-form / defaulted via `voiceLocaleFromRaw`.
+ *
+ * The wire contract is snake_case (`output_language`, `brand_name`, `market`,
+ * `sources_heading`, `faq_heading`, `ui_lang`); `voiceLocaleFromRaw` already
+ * maps snake → camel.
+ */
+export function parsePreviewLocale(
+  raw: unknown,
+): { ok: true; locale: VoiceLocale | undefined } | { ok: false } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, locale: undefined };
+  }
+  if (typeof raw !== "object") {
+    return { ok: false };
+  }
+  const uiLang = (raw as { ui_lang?: unknown }).ui_lang;
+  if (uiLang !== undefined && (typeof uiLang !== "string" || !VALID_UI_LANGS.has(uiLang))) {
+    return { ok: false };
+  }
+  return { ok: true, locale: voiceLocaleFromRaw(raw) };
 }

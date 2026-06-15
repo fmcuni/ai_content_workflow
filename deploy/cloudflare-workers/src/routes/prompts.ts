@@ -46,6 +46,7 @@ import {
   consumersOf,
   partialsReferencedBy,
   substitutePreview,
+  parsePreviewLocale,
 } from "../prompts/editor";
 import {
   renderUserPrompt,
@@ -490,7 +491,7 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
   const templateId = c.req.param("id");
   const voice = resolveVoice(c);
   const body = await c.req
-    .json<{ template?: unknown; route?: unknown; context?: unknown }>()
+    .json<{ template?: unknown; route?: unknown; context?: unknown; locale?: unknown }>()
     .catch(() => null);
   if (body === null || typeof body.template !== "string") {
     return c.json({ detail: "template is required" }, 422);
@@ -501,6 +502,13 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
     body.context !== null && typeof body.context === "object"
       ? (body.context as Record<string, string>)
       : {};
+  // Optional unsaved-locale override for live preview (snake_case wire contract).
+  // Absent ⇒ undefined ⇒ preview uses the persona's stored locale (today's path).
+  const localeParse = parsePreviewLocale(body.locale);
+  if (!localeParse.ok) {
+    return c.json({ detail: "locale.ui_lang must be one of: zh-Hant, en" }, 422);
+  }
+  const localeOverride = localeParse.locale;
 
   return withDb(c.env, c.executionCtx, async (sql) => {
     const view = voiceView(await snapshot(sql), voice);
@@ -559,7 +567,14 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
       }
     }
 
-    const resolved = await substitutePreview(sql, assembled, context, view, voice);
+    const resolved = await substitutePreview(
+      sql,
+      assembled,
+      context,
+      view,
+      voice,
+      localeOverride,
+    );
     return c.json({ resolved, route: routeId, voice });
   });
 });

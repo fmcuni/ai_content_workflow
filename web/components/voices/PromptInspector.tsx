@@ -1,11 +1,22 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { promptsApi } from "@/lib/api";
-import type { GraphMode, PromptNode } from "@/lib/types";
+import type { GraphMode, PromptNode, VoiceLocale } from "@/lib/types";
 import { UserExamplePicker } from "./UserExamplePicker";
+
+const PREVIEW_DEBOUNCE_MS = 350;
+
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const handle = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(handle);
+  }, [value, delay]);
+  return debounced;
+}
 
 type SchemaRow = { field: string; source: string };
 
@@ -111,9 +122,14 @@ interface PromptInspectorProps {
   /** Voice (persona slug) whose template body to preview. Prompts are per-voice;
    * a voice without its own copy falls back to the shared seed server-side. */
   voice: string;
+  /** In-progress (unsaved) locale from the open ComposeDrawer. When present, the
+   * system prompt is rendered via the preview endpoint with this locale override
+   * so the assembled prompt updates live as the admin edits. Absent ⇒ the raw
+   * template is shown (behaviour unchanged outside the drawer). */
+  liveLocale?: VoiceLocale;
 }
 
-export function PromptInspector({ node, mode, voice }: PromptInspectorProps) {
+export function PromptInspector({ node, mode, voice, liveLocale }: PromptInspectorProps) {
   const templateIds = [
     node.system_prompt_template_id,
     ...(node.alt_template_ids ?? []),
@@ -125,6 +141,20 @@ export function PromptInspector({ node, mode, voice }: PromptInspectorProps) {
     enabled: activeId !== null,
     queryKey: ["prompt-template", voice, activeId],
     queryFn: () => promptsApi.template(activeId!, voice),
+  });
+
+  // Live locale preview: debounced so each keystroke in the drawer doesn't fire
+  // a preview request. Keyed by the debounced locale so the cache + refetch
+  // track the unsaved values.
+  const debouncedLocale = useDebounced(liveLocale, PREVIEW_DEBOUNCE_MS);
+  const livePreview = useQuery({
+    enabled: activeId !== null && debouncedLocale !== undefined && Boolean(tmpl.data),
+    queryKey: ["prompt-template-preview", voice, activeId, debouncedLocale],
+    queryFn: () =>
+      promptsApi.previewTemplate(activeId!, voice, {
+        template: tmpl.data!.template,
+        locale: debouncedLocale,
+      }),
   });
 
   const schema = USER_PROMPT_SCHEMAS[mode]?.[node.id] ?? [];
@@ -164,12 +194,22 @@ export function PromptInspector({ node, mode, voice }: PromptInspectorProps) {
           )}
         </div>
         {tmpl.isLoading && <p className="text-ink-faint text-[12px]">Loading…</p>}
+        {liveLocale !== undefined && (
+          <p className="font-mono text-[10px] tracking-wider uppercase text-accent mb-1">
+            Live preview · unsaved locale{livePreview.isFetching ? " — updating…" : ""}
+          </p>
+        )}
         {tmpl.data && (
           <pre className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-ink-soft border border-rule p-3 max-h-[480px] overflow-auto">
-            {tmpl.data.template.replace(
-              "{persona_block}",
-              "[ persona block — see Style Card above ]",
-            )}
+            {liveLocale !== undefined && livePreview.data
+              ? livePreview.data.resolved.replace(
+                  "{persona_block}",
+                  "[ persona block — see Style Card above ]",
+                )
+              : tmpl.data.template.replace(
+                  "{persona_block}",
+                  "[ persona block — see Style Card above ]",
+                )}
           </pre>
         )}
       </div>

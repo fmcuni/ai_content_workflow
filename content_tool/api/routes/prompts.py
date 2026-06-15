@@ -32,6 +32,7 @@ from content_tool.db.models import (
 from content_tool.models.audit import AuditOutput
 from content_tool.models.gap_analysis import GapAnalysis
 from content_tool.models.outline import Outline
+from content_tool.models.persona import VoiceLocale
 from content_tool.models.topic_batch import TopicDedupOutput, TopicGenOutput, TopicHotOutput
 from content_tool.models.writer import WriterOutput
 from content_tool.policy.personas import load_persona_from_yaml
@@ -769,6 +770,10 @@ class _PreviewRequest(BaseModel):
     template: str
     route: str | None = None
     context: dict[str, str] = Field(default_factory=dict)
+    # Optional unsaved-locale override for live preview. Snake_case wire contract
+    # (matches ``VoiceLocale``); missing fields default, bad ``ui_lang`` → 422.
+    # Absent ⇒ ``None`` ⇒ preview uses the voice's stored locale (today's path).
+    locale: VoiceLocale | None = None
 
 
 @router.post("/templates/{template_id}/preview")
@@ -837,20 +842,28 @@ async def preview_template(
         view=view,
         voice=voice,
         source_policy_default=source_policy.to_prompt_block(),
+        locale_override=body.locale,
     )
     return {"resolved": resolved, "route": route_id, "voice": voice}
 
 
-def _default_persona_block(voice: str) -> str:
+def _default_persona_block(voice: str, locale_override: VoiceLocale | None = None) -> str:
     """Best-effort persona block for the preview, from the voice's YAML config.
 
     Falls back to the default voice, then a placeholder, when a voice has no
     bundled YAML (e.g. a duplicated voice exists only in the DB). The persona
     block is preview-cosmetic — runtime assembly reads the persona from the DB.
+
+    When ``locale_override`` is supplied (live preview of unsaved locale edits),
+    the persona block renders under that locale's ``ui_lang`` labels instead of
+    the YAML-stored locale. Absent ⇒ stored locale, byte-identical to today.
     """
     for slug in dict.fromkeys((voice, DEFAULT_VOICE)):
         try:
-            return load_persona_from_yaml(slug).to_prompt_block(None)
+            pack = load_persona_from_yaml(slug)
+            if locale_override is not None:
+                pack = pack.model_copy(update={"locale": locale_override})
+            return pack.to_prompt_block(None)
         except FileNotFoundError:
             continue
     return "（preview: persona block not configured）"
@@ -863,6 +876,7 @@ def _substitute_placeholders(
     view: dict[str, TemplateRow],
     voice: str = DEFAULT_VOICE,
     source_policy_default: str = "",
+    locale_override: VoiceLocale | None = None,
 ) -> str:
     """Fill `{name}` placeholders with overrides or sensible defaults.
 
@@ -877,7 +891,7 @@ def _substitute_placeholders(
     if "persona_block" in overrides:
         persona_block = overrides["persona_block"]
     else:
-        persona_block = _default_persona_block(voice)
+        persona_block = _default_persona_block(voice, locale_override)
 
     if "source_policy_block" in overrides:
         source_policy_block = overrides["source_policy_block"]
@@ -896,6 +910,19 @@ def _substitute_placeholders(
         .replace("{source_policy_block}", source_policy_block)
         .replace("{create_mode_block}", create_mode_block)
     )
+    # Live-locale preview: when an unsaved locale is supplied, resolve the
+    # brand/language/market tokens and sources/FAQ heading tokens the runtime
+    # agents inject so the assembled prompt reflects the in-progress edits.
+    # Done BEFORE the context loop so an explicit ``context`` value still wins.
+    # Absent ⇒ these tokens fall through exactly as today.
+    if locale_override is not None:
+        out = (
+            out.replace("{brand_name}", locale_override.brand_name)
+            .replace("{output_language}", locale_override.output_language)
+            .replace("{market}", locale_override.market)
+            .replace("{faq_heading}", locale_override.faq_heading)
+            .replace("{sources_heading}", locale_override.sources_heading or "")
+        )
     for key, value in overrides.items():
         if key in {"persona_block", "today_date", "source_policy_block", "create_mode_block"}:
             continue

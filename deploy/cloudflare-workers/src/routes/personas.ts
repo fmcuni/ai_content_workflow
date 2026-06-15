@@ -13,6 +13,7 @@ import {
   PG_UNIQUE_VIOLATION,
   type CreatePersonaInput,
   type UpdatePersonaInput,
+  type RawLocaleInput,
 } from "../db/personas";
 import { invalidate as invalidatePrompts } from "../prompts/store";
 import { invalidate as invalidateSourcePolicy } from "../source_policy/store";
@@ -35,6 +36,57 @@ function pgErrorCode(err: unknown): string | null {
     return typeof code === "string" ? code : null;
   }
   return null;
+}
+
+// HK-ZH defaults for the locale's snake_case raw shape — kept byte-identical to
+// VoiceLocale's Python field defaults and `defaultVoiceLocale()` (agents/persona.ts).
+const LOCALE_DEFAULTS: RawLocaleInput = {
+  output_language: "香港繁體中文",
+  brand_name: "Bowtie",
+  market: "Google 香港繁中",
+  sources_heading: null,
+  faq_heading: "常見問題",
+  ui_lang: "zh-Hant",
+};
+
+const UI_LANGS = new Set(["zh-Hant", "en"]);
+
+type LocaleParseResult =
+  | { ok: true; value: RawLocaleInput }
+  | { ok: false; detail: string };
+
+/**
+ * Validate + normalise an untrusted `locale` from a request body into the
+ * snake_case `RawLocaleInput` stored verbatim in the JSONB column. Whole-object
+ * replace: every field is filled from the raw input or the HK-ZH default. The
+ * only hard rule (mirrors the Python `VoiceLocale.ui_lang` Literal → 422) is
+ * `ui_lang ∈ {zh-Hant, en}`; other fields fall back to defaults when missing.
+ */
+function parseLocale(raw: unknown): LocaleParseResult {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, detail: "locale must be an object" };
+  }
+  const r = raw as Record<string, unknown>;
+  const uiLangRaw = r.ui_lang ?? LOCALE_DEFAULTS.ui_lang;
+  if (typeof uiLangRaw !== "string" || !UI_LANGS.has(uiLangRaw)) {
+    return { ok: false, detail: "locale.ui_lang must be one of: zh-Hant, en" };
+  }
+  const str = (v: unknown, fallback: string): string =>
+    typeof v === "string" ? v : fallback;
+  return {
+    ok: true,
+    value: {
+      output_language: str(r.output_language, LOCALE_DEFAULTS.output_language),
+      brand_name: str(r.brand_name, LOCALE_DEFAULTS.brand_name),
+      market: str(r.market, LOCALE_DEFAULTS.market),
+      sources_heading:
+        r.sources_heading === null || r.sources_heading === undefined
+          ? null
+          : str(r.sources_heading, ""),
+      faq_heading: str(r.faq_heading, LOCALE_DEFAULTS.faq_heading),
+      ui_lang: uiLangRaw,
+    },
+  };
 }
 
 // GET /personas
@@ -105,6 +157,19 @@ personasRouter.post("/", async (c) => {
     return c.json({ detail: "name must be 1–128 characters" }, 422);
   }
 
+  // locale is optional on create; when present it is validated + normalised to
+  // the snake_case raw shape, else HK-ZH defaults are stored (byte-identical
+  // no-op). A bad ui_lang → 422, mirroring the Python VoiceLocale Literal.
+  const localeRaw = (body as { locale?: unknown }).locale;
+  let locale: RawLocaleInput = LOCALE_DEFAULTS;
+  if (localeRaw !== undefined) {
+    const parsed = parseLocale(localeRaw);
+    if (!parsed.ok) {
+      return c.json({ detail: parsed.detail }, 422);
+    }
+    locale = parsed.value;
+  }
+
   const input: CreatePersonaInput = {
     slug,
     name,
@@ -120,6 +185,7 @@ personasRouter.post("/", async (c) => {
         ? body.tone_examples
         : {},
     glossary: Array.isArray(body.glossary) ? body.glossary : [],
+    locale,
   };
 
   const ctx = c.executionCtx as ExecutionContext;
@@ -195,6 +261,15 @@ personasRouter.put("/:slug", async (c) => {
     patch.tone_examples = body.tone_examples;
   }
   if (Array.isArray(body.glossary)) patch.glossary = body.glossary;
+  // Whole-object replace: present → validate + normalise to snake_case raw and
+  // overwrite; absent → column untouched. Bad ui_lang → 422 (Python parity).
+  if ("locale" in body) {
+    const parsed = parseLocale((body as { locale?: unknown }).locale);
+    if (!parsed.ok) {
+      return c.json({ detail: parsed.detail }, 422);
+    }
+    patch.locale = parsed.value;
+  }
   // Clearable: present-with-uuid assigns the target, present-with-null resets
   // to the default; absent preserves. Mirrors the Python exclude_unset path.
   if ("publish_target_id" in body) {

@@ -9,7 +9,7 @@ import type {
   PublishTargetCreate, PublishTargetReadiness, PublishTargetUpdate, PublishTargetUsage,
   PromoteRequest, PromoteResponse, PromptGraph, PromptPreviewResponse, PromptRevertResponse,
   PromptSaveResponse, PromptTemplate, PromptTemplateConsumers, PromptTemplateListResponse,
-  PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse,
+  PromptTemplateSchema, PromptVersionDetail, PromptVersionsResponse, VoiceLocale,
   RefreshEvaluation, Render, RepublishResponse, ReviewThread, CreateReviewThreadIn,
   RunCost, RunEventLog, RunSummary,
   RunWpMetaPatch, ScanResponse,
@@ -562,7 +562,14 @@ export const promptsApi = {
   previewTemplate: (
     id: string,
     voice: string,
-    body: { template: string; route?: string; context?: Record<string, string> },
+    body: {
+      template: string;
+      route?: string;
+      context?: Record<string, string>;
+      // Optional unsaved locale override. When present the assembled preview
+      // reflects this locale instead of the persona's stored one.
+      locale?: VoiceLocale;
+    },
   ) =>
     http<PromptPreviewResponse>(`${PROMPTS_BASE}/templates/${id}/preview${voiceQuery(voice)}`, {
       method: "POST",

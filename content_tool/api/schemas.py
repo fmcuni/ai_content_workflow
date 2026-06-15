@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from content_tool.models.persona import VoiceLocale
 from content_tool.net.url_guard import UrlNotAllowedError, validate_url_scheme
 
 # Cap on operator-supplied keywords per run (WS5 input validation).
@@ -438,6 +439,8 @@ class PersonaIn(BaseModel):
     disclaimer_templates: dict[str, DisclaimerTemplate]
     tone_examples: dict[str, list[str]]
     glossary: list[GlossaryEntry] = Field(default_factory=list)
+    # Per-voice locale / brand identity. Omitted → HK-ZH defaults (no-op).
+    locale: VoiceLocale = Field(default_factory=VoiceLocale)
 
 
 class PersonaPatch(BaseModel):
@@ -450,6 +453,8 @@ class PersonaPatch(BaseModel):
     glossary: list[GlossaryEntry] | None = None
     # CMS publish target for this voice; null clears it (→ legacy WP env).
     publish_target_id: UUID | None = None
+    # Whole-object replace of the voice's locale; omitted → column untouched.
+    locale: VoiceLocale | None = None
 
 
 class PersonaOut(BaseModel):
@@ -463,6 +468,8 @@ class PersonaOut(BaseModel):
     tone_examples: dict[str, list[str]]
     glossary: list[GlossaryEntry] = Field(default_factory=list)
     publish_target_id: UUID | None = None
+    # Per-voice locale / brand identity; empty {} in DB → HK-ZH defaults.
+    locale: VoiceLocale = Field(default_factory=VoiceLocale)
     is_archived: bool
     created_at: datetime
     updated_at: datetime

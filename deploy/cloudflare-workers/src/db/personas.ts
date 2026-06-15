@@ -3,6 +3,19 @@ import type { getSql } from "./client";
 import { pgTimestampToIso, toJsonb } from "./serialize";
 import { POLICY_ID, SHARED_VOICE } from "../source_policy/store";
 
+// Per-voice locale / brand identity as accepted on the HTTP boundary and stored
+// raw in the `locale` JSONB column: snake_case keys, mirroring the Python
+// VoiceLocale model and the raw shape `voiceLocaleFromRaw` reads back. Whole-
+// object replace — all six fields are written together.
+export interface RawLocaleInput {
+  output_language: string;
+  brand_name: string;
+  market: string;
+  sources_heading: string | null;
+  faq_heading: string;
+  ui_lang: string;
+}
+
 // Shape returned to callers — timestamps are already normalised to ISO strings.
 export interface PersonaRecord {
   persona_id: string;
@@ -14,6 +27,8 @@ export interface PersonaRecord {
   disclaimer_templates: unknown;
   tone_examples: unknown;
   glossary: unknown;
+  // Per-voice locale / brand identity (snake_case JSONB; {} → HK-ZH defaults).
+  locale: unknown;
   publish_target_id: string | null;
   is_archived: boolean;
   created_at: string;
@@ -33,6 +48,7 @@ function normaliseRow(row: PersonaRow): PersonaRecord {
     disclaimer_templates: row.disclaimer_templates,
     tone_examples: row.tone_examples,
     glossary: row.glossary,
+    locale: row.locale,
     publish_target_id: row.publish_target_id,
     is_archived: row.is_archived,
     // created_at / updated_at are NOT NULL columns, so the helper never
@@ -60,7 +76,7 @@ export async function listPersonas(
         SELECT
           persona_id, slug, name,
           voice_rules, banned_terms, required_phrasings,
-          disclaimer_templates, tone_examples, glossary,
+          disclaimer_templates, tone_examples, glossary, locale,
           publish_target_id,
           is_archived, created_at, updated_at, created_by, updated_by
         FROM content_tool.personas
@@ -70,7 +86,7 @@ export async function listPersonas(
         SELECT
           persona_id, slug, name,
           voice_rules, banned_terms, required_phrasings,
-          disclaimer_templates, tone_examples, glossary,
+          disclaimer_templates, tone_examples, glossary, locale,
           publish_target_id,
           is_archived, created_at, updated_at, created_by, updated_by
         FROM content_tool.personas
@@ -138,7 +154,7 @@ export async function getPersonaBySlug(
     SELECT
       persona_id, slug, name,
       voice_rules, banned_terms, required_phrasings,
-      disclaimer_templates, tone_examples, glossary,
+      disclaimer_templates, tone_examples, glossary, locale,
       publish_target_id,
       is_archived, created_at, updated_at, created_by, updated_by
     FROM content_tool.personas
@@ -162,6 +178,7 @@ const PERSONA_COLUMNS = [
   "disclaimer_templates",
   "tone_examples",
   "glossary",
+  "locale",
   "publish_target_id",
   "is_archived",
   "created_at",
@@ -181,6 +198,9 @@ export interface CreatePersonaInput {
   disclaimer_templates: Record<string, { condition: string; disclaimer: string }>;
   tone_examples: Record<string, string[]>;
   glossary: unknown[];
+  // Per-voice locale / brand identity as snake_case raw JSONB (see RawVoiceLocale
+  // in agents/persona.ts). Omitted → {} stored → HK-ZH defaults on read.
+  locale?: RawLocaleInput;
 }
 
 // Partial patch accepted by updatePersona — mirrors the Python `PersonaPatch`
@@ -193,6 +213,9 @@ export interface UpdatePersonaInput {
   disclaimer_templates?: Record<string, { condition: string; disclaimer: string }>;
   tone_examples?: Record<string, string[]>;
   glossary?: unknown[];
+  // Whole-object replace of the voice's locale (snake_case raw JSONB). Present →
+  // replaces the stored locale; absent (key not in patch) preserves it.
+  locale?: RawLocaleInput;
   // CMS publish target. Present-with-uuid assigns it; present-with-null clears
   // it (→ legacy WP env); absent (key not in patch) preserves the stored value.
   publish_target_id?: string | null;
@@ -214,7 +237,7 @@ export async function createPersona(
   const rows = await sql<PersonaRow[]>`
     INSERT INTO content_tool.personas (
       slug, name, voice_rules, banned_terms, required_phrasings,
-      disclaimer_templates, tone_examples, glossary
+      disclaimer_templates, tone_examples, glossary, locale
     ) VALUES (
       ${input.slug},
       ${input.name},
@@ -223,7 +246,8 @@ export async function createPersona(
       ${toJsonb(sql, input.required_phrasings)},
       ${toJsonb(sql, input.disclaimer_templates)},
       ${toJsonb(sql, input.tone_examples)},
-      ${toJsonb(sql, input.glossary)}
+      ${toJsonb(sql, input.glossary)},
+      ${toJsonb(sql, input.locale ?? {})}
     )
     RETURNING ${sql(PERSONA_COLUMNS as unknown as string[])}
   `;
@@ -257,6 +281,7 @@ export async function updatePersona(
       disclaimer_templates = COALESCE(${patch.disclaimer_templates === undefined ? null : toJsonb(sql, patch.disclaimer_templates)}, disclaimer_templates),
       tone_examples = COALESCE(${patch.tone_examples === undefined ? null : toJsonb(sql, patch.tone_examples)}, tone_examples),
       glossary = COALESCE(${patch.glossary === undefined ? null : toJsonb(sql, patch.glossary)}, glossary),
+      locale = COALESCE(${patch.locale === undefined ? null : toJsonb(sql, patch.locale)}, locale),
       publish_target_id = CASE WHEN ${ptProvided} THEN ${ptValue}::uuid ELSE publish_target_id END,
       updated_at = now()
     WHERE slug = ${slug}
@@ -331,7 +356,7 @@ export async function duplicatePersona(
       SELECT
         persona_id, slug, name,
         voice_rules, banned_terms, required_phrasings,
-        disclaimer_templates, tone_examples, glossary,
+        disclaimer_templates, tone_examples, glossary, locale,
         publish_target_id,
         is_archived, created_at, updated_at, created_by, updated_by
       FROM content_tool.personas
@@ -350,7 +375,7 @@ export async function duplicatePersona(
     const cloneRows = await tx<PersonaRow[]>`
       INSERT INTO content_tool.personas (
         slug, name, voice_rules, banned_terms, required_phrasings,
-        disclaimer_templates, tone_examples, glossary
+        disclaimer_templates, tone_examples, glossary, locale
       ) VALUES (
         ${newSlug},
         ${newName},
@@ -359,7 +384,8 @@ export async function duplicatePersona(
         ${toJsonb(sql, src.required_phrasings)},
         ${toJsonb(sql, src.disclaimer_templates)},
         ${toJsonb(sql, src.tone_examples)},
-        ${toJsonb(sql, src.glossary ?? [])}
+        ${toJsonb(sql, src.glossary ?? [])},
+        ${toJsonb(sql, src.locale ?? {})}
       )
       RETURNING ${tx(PERSONA_COLUMNS as unknown as string[])}
     `;

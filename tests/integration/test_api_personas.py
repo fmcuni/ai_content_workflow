@@ -263,3 +263,114 @@ async def test_cannot_archive_last_voice(api_client: AsyncClient):
     finally:
         for slug in archived:
             await api_client.post(f"/personas/{slug}/restore")
+
+
+_LOCALE_MY_EN = {
+    "output_language": "English",
+    "brand_name": "Bowtie MY",
+    "market": "Google Malaysia EN",
+    "sources_heading": "Sources",
+    "faq_heading": "Frequently Asked Questions",
+    "ui_lang": "en",
+}
+
+
+@pytest.mark.asyncio
+async def test_create_persona_with_locale_round_trips(
+    api_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    payload = {
+        "slug": "locale-create",
+        "name": "Locale Create",
+        "voice_rules": [],
+        "banned_terms": [],
+        "required_phrasings": [],
+        "disclaimer_templates": {},
+        "tone_examples": {"good": [], "bad": []},
+        "locale": _LOCALE_MY_EN,
+    }
+    try:
+        r = await api_client.post("/personas", json=payload)
+        assert r.status_code == 201, r.text
+        assert r.json()["locale"] == _LOCALE_MY_EN
+
+        got = await api_client.get("/personas/locale-create")
+        assert got.json()["locale"] == _LOCALE_MY_EN
+    finally:
+        async with pg_session_factory() as s:
+            await s.execute(delete(Persona).where(Persona.slug == "locale-create"))
+            await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_create_persona_without_locale_defaults_hk_zh(
+    api_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    payload = {
+        "slug": "locale-default",
+        "name": "Locale Default",
+        "voice_rules": [],
+        "banned_terms": [],
+        "required_phrasings": [],
+        "disclaimer_templates": {},
+        "tone_examples": {"good": [], "bad": []},
+    }
+    try:
+        r = await api_client.post("/personas", json=payload)
+        assert r.status_code == 201, r.text
+        loc = r.json()["locale"]
+        assert loc["ui_lang"] == "zh-Hant"
+        assert loc["faq_heading"] == "常見問題"
+        assert loc["sources_heading"] is None
+    finally:
+        async with pg_session_factory() as s:
+            await s.execute(delete(Persona).where(Persona.slug == "locale-default"))
+            await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_persona_locale_round_trips_and_omit_untouched(
+    api_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    create = {
+        "slug": "locale-edit", "name": "Loc",
+        "voice_rules": [], "banned_terms": [], "required_phrasings": [],
+        "disclaimer_templates": {}, "tone_examples": {"good": [], "bad": []},
+    }
+    try:
+        await api_client.post("/personas", json=create)
+
+        # PUT with a locale → whole-object replace, round-trips snake_case.
+        r = await api_client.put("/personas/locale-edit", json={"locale": _LOCALE_MY_EN})
+        assert r.status_code == 200, r.text
+        assert r.json()["locale"] == _LOCALE_MY_EN
+
+        # PUT without locale → column untouched (locale survives).
+        r2 = await api_client.put("/personas/locale-edit", json={"name": "Loc2"})
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["name"] == "Loc2"
+        assert r2.json()["locale"] == _LOCALE_MY_EN
+    finally:
+        async with pg_session_factory() as s:
+            await s.execute(delete(Persona).where(Persona.slug == "locale-edit"))
+            await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_persona_bad_ui_lang_rejected(
+    api_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    create = {
+        "slug": "locale-bad", "name": "Bad",
+        "voice_rules": [], "banned_terms": [], "required_phrasings": [],
+        "disclaimer_templates": {}, "tone_examples": {"good": [], "bad": []},
+    }
+    try:
+        await api_client.post("/personas", json=create)
+        bad = {**_LOCALE_MY_EN, "ui_lang": "fr"}
+        r = await api_client.put("/personas/locale-bad", json={"locale": bad})
+        assert r.status_code == 422, r.text
+    finally:
+        async with pg_session_factory() as s:
+            await s.execute(delete(Persona).where(Persona.slug == "locale-bad"))
+            await s.commit()

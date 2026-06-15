@@ -28,7 +28,7 @@ class VoiceLocale(BaseModel):
     market: str = "Google 香港繁中"
     sources_heading: str | None = None
     faq_heading: str = "常見問題"
-    ui_lang: str = "zh-Hant"
+    ui_lang: Literal["zh-Hant", "en"] = "zh-Hant"
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any] | None) -> "VoiceLocale":

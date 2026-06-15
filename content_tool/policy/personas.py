@@ -31,6 +31,7 @@ _PERSONA_PATCH_KEYS = {
     "disclaimer_templates",
     "tone_examples",
     "glossary",
+    "locale",
     "publish_target_id",
     "is_archived",
 }
@@ -98,6 +99,7 @@ async def create_persona(
     disclaimer_templates: dict[str, dict[str, str]],
     tone_examples: dict[str, list[str]],
     glossary: list[dict[str, Any]] | None = None,
+    locale: dict[str, Any] | None = None,
     created_by: str | None = None,
 ) -> Persona:
     row = Persona(
@@ -109,6 +111,7 @@ async def create_persona(
         disclaimer_templates=disclaimer_templates,
         tone_examples=tone_examples,
         glossary=glossary or [],
+        locale=locale or {},
         created_by=created_by,
         updated_by=created_by,
     )
