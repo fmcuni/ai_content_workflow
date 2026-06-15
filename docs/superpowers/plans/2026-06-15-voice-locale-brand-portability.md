@@ -4,6 +4,14 @@
 **Spec:** `docs/superpowers/specs/2026-06-15-voice-locale-brand-portability.md`
 **Branch:** `feat/voice-locale-portability` (dev Workers stack first, then prod)
 
+**Status (2026-06-15):** Phases A + B + integration SHIPPED to the branch
+(`10d0061`, `542a6f2`). Migrations `20260616000000_persona_locale` +
+`20260616000001_reseed_shared_locale_tokens` applied to **dev**; `bowtie-en-my.locale`
+set in dev; dev backend deployed. Verified on live dev DB: en → `## Sources` +
+audit passes + English persona block + zero token leaks; HK-ZH byte-identical
+(round-trip + goldens). **Stopped before prod promotion** per plan. Remaining:
+apply migrations to prod, deploy prod, set prod locales, mark SHIPPED.
+
 ## How to run this with sub-agents
 
 The work is a small **foundation** (Phase A) that several **independent**
