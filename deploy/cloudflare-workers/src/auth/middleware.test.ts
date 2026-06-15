@@ -1,17 +1,17 @@
 /**
  * Unit tests for `requireAuth` (src/auth/middleware.ts).
  *
- * Covers BOTH provider branches selected by `AUTH_PROVIDER`:
- *   - default / unset → better-auth cookie session (getSession).
- *   - "supabase" → `Authorization: Bearer <jwt>` verified via verifySupabaseJwt.
- * Plus the provider-agnostic invariants: AUTH_DISABLED bypass, the public
- * /api/auth/* path, OPTIONS preflight, and the SSE/collab `?ticket=` transport
- * (which must keep working unchanged on the supabase branch).
+ * Covers the Supabase auth flow:
+ *   - `Authorization: Bearer <jwt>` verified via verifySupabaseJwt.
+ *   - AUTH_DISABLED bypass, OPTIONS preflight, and the SSE/collab `?ticket=`
+ *     transport.
+ *   - the provisioning gate: a valid session whose app_user row is gone/disabled
+ *     (loadRole → null) is denied at the gate.
  *
  * The collaborators are mocked so this stays a pure middleware unit test:
- *   - ./jwt verifySupabaseJwt — drives the supabase branch.
- *   - ./auth getAuth — drives the better-auth branch.
+ *   - ./jwt verifySupabaseJwt — verifies the Bearer token.
  *   - ./ticket verifyTicket — drives the SSE/collab branch.
+ *   - ./authz loadRole — the provisioning gate.
  */
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,8 +21,6 @@ import type { Env } from "../index";
 // ---- Mocks ----------------------------------------------------------------
 const verifySupabaseJwt = vi.fn();
 const verifyTicket = vi.fn();
-const getSession = vi.fn();
-const sqlEnd = vi.fn(async () => undefined);
 const loadRole = vi.fn();
 
 vi.mock("./jwt", () => ({
@@ -31,14 +29,8 @@ vi.mock("./jwt", () => ({
 vi.mock("./ticket", () => ({
   verifyTicket: (...args: unknown[]) => verifyTicket(...args),
 }));
-vi.mock("./auth", () => ({
-  getAuth: () => ({
-    auth: { api: { getSession: (...args: unknown[]) => getSession(...args) } },
-    sql: { end: () => sqlEnd() },
-  }),
-}));
-// The middleware's supabase-branch provisioning gate consults loadRole; mock it
-// so this stays a pure middleware unit test (no DB).
+// The middleware's provisioning gate consults loadRole; mock it so this stays a
+// pure middleware unit test (no DB).
 vi.mock("./authz", () => ({
   loadRole: (...args: unknown[]) => loadRole(...args),
 }));
@@ -81,8 +73,6 @@ async function call(
 beforeEach(() => {
   verifySupabaseJwt.mockReset();
   verifyTicket.mockReset();
-  getSession.mockReset();
-  sqlEnd.mockClear();
   // Default: the session user IS provisioned (app_user row, active). Tests for
   // the deletion/disable gate override this with null.
   loadRole.mockReset();
@@ -90,83 +80,62 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Provider-agnostic invariants.
+// Transport invariants.
 // ---------------------------------------------------------------------------
-describe("requireAuth — provider-agnostic", () => {
+describe("requireAuth — transport invariants", () => {
   it("AUTH_DISABLED=true bypasses the gate (no session check)", async () => {
     const res = await call(makeApp(), "/runs", { method: "GET" }, { AUTH_DISABLED: "true" });
     expect(res.status).toBe(200);
     expect(verifySupabaseJwt).not.toHaveBeenCalled();
-    expect(getSession).not.toHaveBeenCalled();
   });
 
   it("OPTIONS preflight is admitted without a session", async () => {
-    const res = await call(makeApp(), "/runs", { method: "OPTIONS" }, { AUTH_PROVIDER: "supabase" });
+    const res = await call(makeApp(), "/runs", { method: "OPTIONS" }, {});
     expect(res.status).toBe(200);
     expect(verifySupabaseJwt).not.toHaveBeenCalled();
   });
 
-  it("the SSE ticket transport is unchanged on the supabase branch", async () => {
+  it("the SSE ticket transport authenticates via `?ticket=`", async () => {
     verifyTicket.mockResolvedValue("user-from-ticket");
-    const res = await call(
-      makeApp(),
-      "/runs/abc/events?ticket=t0",
-      { method: "GET" },
-      { AUTH_PROVIDER: "supabase" },
-    );
+    const res = await call(makeApp(), "/runs/abc/events?ticket=t0", { method: "GET" }, {});
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.userId).toBe("user-from-ticket");
-    // Ticket path must NOT fall through to Bearer/cookie verification.
+    // Ticket path must NOT fall through to Bearer verification.
     expect(verifySupabaseJwt).not.toHaveBeenCalled();
-    expect(getSession).not.toHaveBeenCalled();
   });
 
-  it("the collab /doc ticket transport is unchanged on the supabase branch", async () => {
+  it("the collab /doc ticket transport authenticates via `?ticket=`", async () => {
     verifyTicket.mockResolvedValue("user-from-ticket");
-    const res = await call(
-      makeApp(),
-      "/runs/abc/doc?ticket=t0",
-      { method: "GET" },
-      { AUTH_PROVIDER: "supabase" },
-    );
+    const res = await call(makeApp(), "/runs/abc/doc?ticket=t0", { method: "GET" }, {});
     expect(res.status).toBe(200);
     expect(verifyTicket).toHaveBeenCalled();
   });
 
   it("a missing/invalid ticket on the SSE path → 401", async () => {
     verifyTicket.mockResolvedValue(null);
-    const res = await call(
-      makeApp(),
-      "/runs/abc/events?ticket=bad",
-      { method: "GET" },
-      { AUTH_PROVIDER: "supabase" },
-    );
+    const res = await call(makeApp(), "/runs/abc/events?ticket=bad", { method: "GET" }, {});
     expect(res.status).toBe(401);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Supabase branch — Authorization: Bearer <jwt>.
+// Bearer token — Authorization: Bearer <jwt>.
 // ---------------------------------------------------------------------------
-describe("requireAuth — supabase branch (Bearer)", () => {
-  const env: Partial<Env> = { AUTH_PROVIDER: "supabase" };
-
+describe("requireAuth — Bearer token", () => {
   it("verifies the Bearer token and sets userId + userEmail", async () => {
     verifySupabaseJwt.mockResolvedValue({ sub: "uuid-1", email: "a@bowtie.com.hk" });
     const res = await call(
       makeApp(),
       "/runs",
       { method: "GET", headers: { authorization: "Bearer jwt-token" } },
-      env,
+      {},
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.userId).toBe("uuid-1");
     expect(json.userEmail).toBe("a@bowtie.com.hk");
     expect(verifySupabaseJwt).toHaveBeenCalledWith("jwt-token", expect.anything());
-    // Supabase branch must NOT touch the better-auth cookie path.
-    expect(getSession).not.toHaveBeenCalled();
   });
 
   it("sets userId but leaves userEmail unset when the token has no email", async () => {
@@ -175,7 +144,7 @@ describe("requireAuth — supabase branch (Bearer)", () => {
       makeApp(),
       "/runs",
       { method: "GET", headers: { authorization: "Bearer jwt-token" } },
-      env,
+      {},
     );
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.userId).toBe("uuid-2");
@@ -188,14 +157,14 @@ describe("requireAuth — supabase branch (Bearer)", () => {
       makeApp(),
       "/runs",
       { method: "GET", headers: { authorization: "Bearer bad" } },
-      env,
+      {},
     );
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
   it("returns 401 when the Authorization header is absent", async () => {
-    const res = await call(makeApp(), "/runs", { method: "GET" }, env);
+    const res = await call(makeApp(), "/runs", { method: "GET" }, {});
     expect(res.status).toBe(401);
     // No token → verifier is never even consulted.
     expect(verifySupabaseJwt).not.toHaveBeenCalled();
@@ -207,7 +176,7 @@ describe("requireAuth — supabase branch (Bearer)", () => {
       "/runs",
       // Computed at runtime so secret scanners don't flag a literal basic-auth header.
       { method: "GET", headers: { authorization: `Basic ${btoa("foo:bar")}` } },
-      env,
+      {},
     );
     expect(res.status).toBe(401);
     expect(verifySupabaseJwt).not.toHaveBeenCalled();
@@ -215,50 +184,18 @@ describe("requireAuth — supabase branch (Bearer)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// better-auth branch — default provider (cookie session). Unchanged behavior.
+// Provisioning gate: a cryptographically valid session whose app_user row is
+// gone (deleted) or disabled is denied AT THE AUTH GATE, on every route — this
+// is what makes admin delete/disable take effect on the target's next request
+// instead of "whenever their access token happens to expire".
 // ---------------------------------------------------------------------------
-describe("requireAuth — better-auth branch (default)", () => {
-  it("validates the cookie session and sets userId + userEmail", async () => {
-    getSession.mockResolvedValue({ user: { id: "ba-1", email: "b@bowtie.com.hk" } });
-    const res = await call(makeApp(), "/runs", { method: "GET" }, {});
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as Record<string, unknown>;
-    expect(json.userId).toBe("ba-1");
-    expect(json.userEmail).toBe("b@bowtie.com.hk");
-    // Default provider must NOT consult the supabase verifier.
-    expect(verifySupabaseJwt).not.toHaveBeenCalled();
-  });
-
-  it("returns 401 when there is no cookie session", async () => {
-    getSession.mockResolvedValue(null);
-    const res = await call(makeApp(), "/runs", { method: "GET" }, {});
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "unauthorized" });
-  });
-
-  it("an explicit non-supabase AUTH_PROVIDER still uses the better-auth path", async () => {
-    getSession.mockResolvedValue({ user: { id: "ba-2", email: "c@bowtie.com.hk" } });
-    const res = await call(makeApp(), "/runs", { method: "GET" }, { AUTH_PROVIDER: "better-auth" });
-    expect(res.status).toBe(200);
-    expect(getSession).toHaveBeenCalled();
-    expect(verifySupabaseJwt).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Supabase provisioning gate: a cryptographically valid session whose app_user
-// row is gone (deleted) or disabled is denied AT THE AUTH GATE, on every
-// route — this is what makes admin delete/disable take effect on the target's
-// next request instead of "whenever their access token happens to expire".
-// ---------------------------------------------------------------------------
-describe("requireAuth — supabase provisioning gate (deleted/disabled users)", () => {
-  const env: Partial<Env> = { AUTH_PROVIDER: "supabase" };
+describe("requireAuth — provisioning gate (deleted/disabled users)", () => {
   const bearer = { method: "GET" as const, headers: { authorization: "Bearer tok" } };
 
   it("401s a valid Bearer session whose role resolves to null (deleted/disabled)", async () => {
     verifySupabaseJwt.mockResolvedValue({ sub: "deleted-1", email: "gone@gmail.com" });
     loadRole.mockResolvedValue(null);
-    const res = await call(makeApp(), "/runs", bearer, env);
+    const res = await call(makeApp(), "/runs", bearer, {});
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
@@ -266,7 +203,7 @@ describe("requireAuth — supabase provisioning gate (deleted/disabled users)", 
   it("admits a valid Bearer session with a provisioned role", async () => {
     verifySupabaseJwt.mockResolvedValue({ sub: "u-1", email: "a@bowtie.com.hk" });
     loadRole.mockResolvedValue("viewer");
-    const res = await call(makeApp(), "/runs", bearer, env);
+    const res = await call(makeApp(), "/runs", bearer, {});
     expect(res.status).toBe(200);
     expect(loadRole).toHaveBeenCalledOnce();
   });
@@ -274,15 +211,8 @@ describe("requireAuth — supabase provisioning gate (deleted/disabled users)", 
   it("401s a valid SSE ticket whose user was deleted/disabled after mint", async () => {
     verifyTicket.mockResolvedValue("deleted-1");
     loadRole.mockResolvedValue(null);
-    const res = await call(makeApp(), "/runs/abc/events?ticket=t0", { method: "GET" }, env);
+    const res = await call(makeApp(), "/runs/abc/events?ticket=t0", { method: "GET" }, {});
     expect(res.status).toBe(401);
-  });
-
-  it("does NOT consult loadRole on the better-auth branch (no extra DB hop)", async () => {
-    getSession.mockResolvedValue({ user: { id: "ba-1", email: "b@bowtie.com.hk" } });
-    const res = await call(makeApp(), "/runs", { method: "GET" }, {});
-    expect(res.status).toBe(200);
-    expect(loadRole).not.toHaveBeenCalled();
   });
 
   it("does NOT consult loadRole when AUTH_DISABLED bypasses the gate", async () => {

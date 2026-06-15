@@ -2,20 +2,17 @@
  * Admin-only user-management routes (RBAC). Mounted at /admin; every route is
  * gated by `requireRole("admin")` at registration in src/index.ts.
  *
- *   GET    /admin/users                  → list users (stored role; provider-aware)
- *   POST   /admin/users                  → create + invite a user (supabase only)
+ *   GET    /admin/users                  → list users (stored role)
+ *   POST   /admin/users                  → create + invite a user
  *   PUT    /admin/users/:id/role         → set a user's stored role (enum-validated)
  *   POST   /admin/users/:id/disable      → ban in GoTrue + status='disabled'
  *   POST   /admin/users/:id/enable       → unban in GoTrue + status='active'
  *   DELETE /admin/users/:id              → delete GoTrue user + app_user row
  *   POST   /admin/users/:id/revoke-sessions → GoTrue admin sign-out (all sessions)
  *
- * Provider awareness: when `env.AUTH_PROVIDER === "supabase"` the user store is
- * `content_tool.app_user` and GoTrue is the identity provider; otherwise the
- * legacy better-auth path reads/writes `content_tool."user"` exactly as before
- * (so `main` stays behaviorally unchanged until cutover). The GoTrue-only routes
- * (create/disable/enable/delete/revoke) return 501 on the better-auth
- * path or when GoTrue is unconfigured.
+ * The user store is `content_tool.app_user` and GoTrue (Supabase Auth) is the
+ * identity provider. The GoTrue-backed routes (create/disable/enable/delete/
+ * revoke) surface 501 when GoTrue is unconfigured (no SUPABASE_SERVICE_ROLE_KEY).
  *
  * Every mutation is audited via the structured logger (actor, target, old→new).
  * The list returns the STORED role (not the effective role) so an admin sees and
@@ -48,15 +45,7 @@ import {
 } from "../auth/gotrue-admin";
 import type { GoTrueUser } from "../auth/gotrue-admin";
 
-/** A row from the legacy better-auth `user` table. */
-interface UserRow {
-  id: string;
-  email: string;
-  name: string | null;
-  role: string | null;
-}
-
-/** A row from the Supabase-provider `app_user` table. */
+/** A row from the `content_tool.app_user` table. */
 interface AppUserRow {
   id: string;
   email: string;
@@ -92,11 +81,6 @@ type AdminContext = Context<AdminEnv>;
 
 const adminRouter = new Hono<AdminEnv>();
 
-/** True when the Supabase Auth provider is selected. */
-function isSupabaseProvider(env: Env): boolean {
-  return env.AUTH_PROVIDER === "supabase";
-}
-
 /** Resolve the audit actor from the verified session (never the payload). */
 function actorOf(c: { get: (k: "userEmail" | "userId") => string | undefined }): string {
   return resolveActorIdentity({ userEmail: c.get("userEmail"), userId: c.get("userId") }, null);
@@ -104,8 +88,8 @@ function actorOf(c: { get: (k: "userEmail" | "userId") => string | undefined }):
 
 /**
  * Map a GoTrueAdminError to the flat error body + status the rest of the router
- * uses. `not_configured` surfaces as 501 (the route needs Supabase but it is the
- * better-auth path or env is unset). The message is always secret-free.
+ * uses. `not_configured` surfaces as 501 (the route needs GoTrue but
+ * SUPABASE_SERVICE_ROLE_KEY/SUPABASE_URL is unset). The message is always secret-free.
  */
 function gotrueErrorResponse(e: GoTrueAdminError): { body: Record<string, string>; status: 400 | 404 | 409 | 501 | 502 } {
   switch (e.code) {
@@ -143,28 +127,10 @@ function isConfirmed(u: GoTrueUser): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// GET /admin/users — list users (stored role; provider-aware)
+// GET /admin/users — list users (stored role)
 // ---------------------------------------------------------------------------
 adminRouter.get("/users", async (c) => {
-  if (!isSupabaseProvider(c.env)) {
-    // Legacy better-auth path — unchanged from the pre-WS3 behavior.
-    const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
-      sql<UserRow[]>`
-        SELECT id, email, name, role
-        FROM content_tool."user"
-        ORDER BY email ASC
-      `,
-    );
-    const out: AdminUserResponse[] = rows.map((r) => ({
-      id: r.id,
-      email: r.email,
-      name: r.name,
-      role: (r.role ?? "viewer") as Role,
-    }));
-    return c.json(out);
-  }
-
-  // Supabase path: app_user is the source of truth for role/status; enrich with
+  // app_user is the source of truth for role/status; enrich with
   // GoTrue (last-sign-in, confirmed). GoTrue enrichment is best-effort — if it
   // is unconfigured/unreachable we still return the app_user list.
   const rows = await withDb(c.env, c.executionCtx, (sql: Sql) =>
@@ -205,19 +171,9 @@ adminRouter.get("/users", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /admin/users — create + invite a user (supabase provider only)
+// POST /admin/users — create + invite a user
 // ---------------------------------------------------------------------------
 adminRouter.post("/users", async (c) => {
-  if (!isSupabaseProvider(c.env)) {
-    return c.json(
-      {
-        error: "not_supported",
-        message: "user creation requires the Supabase auth provider",
-      },
-      501,
-    );
-  }
-
   const body = await c.req.json<CreateUserBody>().catch(() => ({}) as CreateUserBody);
   const email = typeof body.email === "string" ? body.email.trim() : "";
   if (email.length === 0) {
@@ -342,46 +298,23 @@ adminRouter.put("/users/:id/role", async (c) => {
   }
 
   const actor = actorOf(c);
-  const supabase = isSupabaseProvider(c.env);
 
   const outcome = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-    if (supabase) {
-      const before = await sql<AppUserRow[]>`
-        SELECT id, email, display_name, role, status, last_sign_in_at
-        FROM content_tool.app_user WHERE id = ${targetId} LIMIT 1
-      `;
-      const existing = before[0];
-      if (existing === undefined) return { kind: "not_found" as const };
-      // Domain rule: only bowtie.com.hk / bowtie.com.sg emails may be admin.
-      if (newRole === "admin" && !isAdminEligibleEmail(existing.email, c.env)) {
-        return { kind: "admin_domain_forbidden" as const };
-      }
-      const rows = await sql<AppUserRow[]>`
-        UPDATE content_tool.app_user
-        SET role = ${newRole}, updated_at = now()
-        WHERE id = ${targetId}
-        RETURNING id, email, display_name, role, status, last_sign_in_at
-      `;
-      const u = rows[0]!;
-      return {
-        kind: "ok" as const,
-        oldRole: existing.role ?? "viewer",
-        id: u.id,
-        email: u.email,
-        name: u.display_name,
-        role: (u.role ?? "viewer") as Role,
-      };
-    }
-    const before = await sql<UserRow[]>`
-      SELECT id, email, name, role FROM content_tool."user" WHERE id = ${targetId} LIMIT 1
+    const before = await sql<AppUserRow[]>`
+      SELECT id, email, display_name, role, status, last_sign_in_at
+      FROM content_tool.app_user WHERE id = ${targetId} LIMIT 1
     `;
     const existing = before[0];
     if (existing === undefined) return { kind: "not_found" as const };
-    const rows = await sql<UserRow[]>`
-      UPDATE content_tool."user"
-      SET role = ${newRole}
+    // Domain rule: only bowtie.com.hk / bowtie.com.sg emails may be admin.
+    if (newRole === "admin" && !isAdminEligibleEmail(existing.email, c.env)) {
+      return { kind: "admin_domain_forbidden" as const };
+    }
+    const rows = await sql<AppUserRow[]>`
+      UPDATE content_tool.app_user
+      SET role = ${newRole}, updated_at = now()
       WHERE id = ${targetId}
-      RETURNING id, email, name, role
+      RETURNING id, email, display_name, role, status, last_sign_in_at
     `;
     const u = rows[0]!;
     return {
@@ -389,7 +322,7 @@ adminRouter.put("/users/:id/role", async (c) => {
       oldRole: existing.role ?? "viewer",
       id: u.id,
       email: u.email,
-      name: u.name,
+      name: u.display_name,
       role: (u.role ?? "viewer") as Role,
     };
   });
@@ -442,12 +375,6 @@ async function loadAppUser(c: AdminContext, targetId: string): Promise<AppUserRo
 // ---------------------------------------------------------------------------
 function registerDisableEnable(action: "disable" | "enable"): void {
   adminRouter.post(`/users/:id/${action}`, async (c) => {
-    if (!isSupabaseProvider(c.env)) {
-      return c.json(
-        { error: "not_supported", message: `${action} requires the Supabase auth provider` },
-        501,
-      );
-    }
     const targetId = c.req.param("id");
     const existing = await loadAppUser(c, targetId);
     if (existing === null) return c.json({ detail: "user not found" }, 404);
@@ -516,12 +443,6 @@ registerDisableEnable("enable");
 // DELETE /admin/users/:id — delete GoTrue user + app_user row
 // ---------------------------------------------------------------------------
 adminRouter.delete("/users/:id", async (c) => {
-  if (!isSupabaseProvider(c.env)) {
-    return c.json(
-      { error: "not_supported", message: "user deletion requires the Supabase auth provider" },
-      501,
-    );
-  }
   const targetId = c.req.param("id");
 
   // Self-delete guard: an admin must not delete their OWN account (mirrors the
@@ -569,12 +490,6 @@ adminRouter.delete("/users/:id", async (c) => {
 // POST /admin/users/:id/revoke-sessions — sign the user out of all sessions
 // ---------------------------------------------------------------------------
 adminRouter.post("/users/:id/revoke-sessions", async (c) => {
-  if (!isSupabaseProvider(c.env)) {
-    return c.json(
-      { error: "not_supported", message: "revoke-sessions requires the Supabase auth provider" },
-      501,
-    );
-  }
   const targetId = c.req.param("id");
   const existing = await loadAppUser(c, targetId);
   if (existing === null) return c.json({ detail: "user not found" }, 404);

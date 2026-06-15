@@ -12,15 +12,9 @@ const google = vi.fn();
 const sessionEmail = vi.fn();
 const signOutMock = vi.fn();
 vi.mock("@/lib/auth-client", () => ({
-  signIn: { email: vi.fn() },
   signInWithGoogle: (redirect?: string) => google(redirect),
   getSessionEmail: () => sessionEmail(),
   signOut: () => signOutMock(),
-}));
-
-const supabaseFlag = { value: true };
-vi.mock("@/lib/supabase-client", () => ({
-  isSupabaseAuth: () => supabaseFlag.value,
 }));
 
 import LoginPage from "./page";
@@ -32,7 +26,6 @@ beforeEach(() => {
   sessionEmail.mockResolvedValue(null);
   signOutMock.mockReset();
   signOutMock.mockResolvedValue(undefined);
-  supabaseFlag.value = true;
   for (const k of [...searchParams.keys()]) searchParams.delete(k);
 });
 afterEach(() => {
@@ -73,12 +66,6 @@ describe("LoginPage (supabase Google OAuth)", () => {
     searchParams.set("reason", "inactivity");
     render(<LoginPage />);
     expect(screen.getByText(/signed out due to inactivity/i)).toBeInTheDocument();
-  });
-
-  it("falls back to the password form when not on the supabase provider", () => {
-    supabaseFlag.value = false;
-    render(<LoginPage />);
-    expect(screen.getByLabelText("Password")).toBeInTheDocument();
   });
 
   it("shows a sign-out escape (not a Google loop) when a rejected session lingers", async () => {

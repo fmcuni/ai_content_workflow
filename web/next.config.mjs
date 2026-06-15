@@ -58,10 +58,9 @@ const nextConfig = {
     // slash (`/personas/`), which the backend's router rejects (and would
     // 307-redirect a POST, dropping its body — e.g. POST /api/runs to create a run).
     return [
-      // Auth (better-auth) is PATH-PRESERVING — keep the `/api` prefix so the
-      // backend mount (`/api/auth/*`) and the same-origin session cookie line up.
-      { source: "/api/auth/:path*", destination: `${apiBase}/api/auth/:path*` },
-      // SSE ticket issuer (cookie-protected on the backend).
+      // SSE ticket issuer (session-protected on the backend). PATH-PRESERVING —
+      // keep the `/api` prefix so the same-origin proxy lines up with the backend
+      // mount at `/api/auth-ticket`.
       { source: "/api/auth-ticket", destination: `${apiBase}/api/auth-ticket` },
       { source: "/api/setup", destination: `${apiBase}/setup` },
       { source: "/api/setup/:path*", destination: `${apiBase}/setup/:path*` },

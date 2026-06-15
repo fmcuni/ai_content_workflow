@@ -4,20 +4,17 @@
 // short-lived HMAC ticket from the `/api/auth-ticket` route and append it to
 // the URL.
 //
-// Auth on the ticket fetch itself is provider-specific:
-//   - better-auth (default): the Next proxy forwards the same-origin session
-//     cookie, so `credentials: "include"` is enough.
-//   - supabase: the backend authenticates the `Authorization: Bearer <jwt>`
-//     access token and never reads the session cookie (src/auth/middleware.ts
-//     validateSupabaseSession). We must attach that header here exactly like
-//     lib/api.ts does for REST — otherwise the ticket fetch 401s, no ticket is
-//     appended, and the SSE/collab socket opens unauthenticated → rejected
-//     (a returning run's collab editor then renders empty).
+// The backend authenticates the `Authorization: Bearer <jwt>` Supabase access
+// token and never reads the session cookie (src/auth/middleware.ts
+// validateSupabaseSession). We attach that header here exactly like lib/api.ts
+// does for REST — otherwise the ticket fetch 401s, no ticket is appended, and
+// the SSE/collab socket opens unauthenticated → rejected (a returning run's
+// collab editor then renders empty).
 //
 // On failure (e.g. local dev against the Python backend, where AUTH_DISABLED is
 // set and there is no ticket route), the URL is returned unchanged so streaming
 // still works without auth.
-import { getSupabaseClient, isSupabaseAuth } from "./supabase-client";
+import { getSupabaseClient } from "./supabase-client";
 
 async function supabaseAccessToken(forceRefresh = false): Promise<string | null> {
   const supabase = getSupabaseClient();
@@ -36,11 +33,10 @@ async function fetchTicket(token: string | null): Promise<Response> {
 
 export async function withSseTicket(sseUrl: string): Promise<string> {
   try {
-    const supabaseAuth = isSupabaseAuth();
-    let r = await fetchTicket(supabaseAuth ? await supabaseAccessToken() : null);
+    let r = await fetchTicket(await supabaseAccessToken());
     // A stale Supabase access token 401s; force-refresh once and retry
     // (mirrors the REST client's recovery in lib/api.ts).
-    if (r.status === 401 && supabaseAuth) {
+    if (r.status === 401) {
       const refreshed = await supabaseAccessToken(true);
       if (refreshed) r = await fetchTicket(refreshed);
     }

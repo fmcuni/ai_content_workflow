@@ -2,8 +2,6 @@
 
 import { useEffect, useRef } from "react";
 
-import { isSupabaseAuth } from "@/lib/supabase-client";
-
 // 6-hour idle timeout. After this much inactivity (no pointer/key/visibility
 // activity) the watchdog signs the user out and routes them to the login page
 // with an `inactivity` reason so the UI can explain why.
@@ -26,7 +24,7 @@ export interface IdleWatchdogOptions {
   onExpire: () => void;
   /** Override the timeout (tests). Defaults to IDLE_TIMEOUT_MS. */
   timeoutMs?: number;
-  /** When false, the watchdog does nothing (e.g. legacy auth path). */
+  /** When false, the watchdog does nothing. */
   enabled?: boolean;
 }
 
@@ -89,7 +87,7 @@ export function useIdleWatchdog({
   }, [enabled, timeoutMs]);
 }
 
-/** True when the idle watchdog should run (Supabase auth path only). */
+/** True when the idle watchdog should run. The app is Supabase-only. */
 export function idleWatchdogEnabled(): boolean {
-  return isSupabaseAuth();
+  return true;
 }

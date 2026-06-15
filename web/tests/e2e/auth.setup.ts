@@ -33,12 +33,6 @@ function writeState(state: unknown): void {
 
 setup("authenticate via supabase password grant", async () => {
   const env = loadTestEnv();
-  if (!env.isSupabase) {
-    writeState(EMPTY_STATE);
-    setup.skip(true, "supabase harness: set E2E_AUTH_PROVIDER=supabase (or NEXT_PUBLIC_AUTH_PROVIDER)");
-    return;
-  }
-
   try {
     writeState(await supabaseStorageState(env.baseUrl));
   } catch (e) {

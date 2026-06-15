@@ -1,28 +1,21 @@
 "use client";
-import { createAuthClient } from "better-auth/react";
 import { useEffect, useState } from "react";
 
-import { getSupabaseClient, isSupabaseAuth } from "./supabase-client";
+import { getSupabaseClient } from "./supabase-client";
 
-// Dual-provider auth client.
+// Supabase-backed auth client (GoTrue). The legacy better-auth provider was
+// retired, so these are the unconditional implementations.
 //
-// Default (NEXT_PUBLIC_AUTH_PROVIDER !== "supabase") keeps the existing
-// better-auth surface BYTE-FOR-BYTE: the browser talks to better-auth
-// same-origin through the Next rewrite (`/api/auth/:path*` → backend, path
-// preserving). baseURL is left to the current origin; basePath matches mount.
-//
-// When the provider is "supabase", the SAME export names resolve to
-// Supabase-backed equivalents so call sites barely change:
-//   - signInWithMagicLink(email) — passwordless OTP, shouldCreateUser:false
+//   - signInWithGoogle(redirect) — Google OAuth, invite-only (gate is backend)
 //   - signOut()                  — clears the Supabase session
 //   - useSession()               — { data: { user: { email } } | null } shape
-//   - authClient.getSession()    — same envelope, async (api.ts uses this)
+//   - getSessionEmail()          — resolves the signed-in user's email (api.ts)
 //
 // Spec: docs/superpowers/specs/2026-06-10-supabase-auth-migration.md
 
-// Minimal session envelope shared by both providers' useSession()/getSession().
-// `name` is optional: better-auth sessions carry it (used for collab display);
-// Supabase sessions may not, so consumers must tolerate its absence.
+// Minimal session envelope returned by useSession()/getSessionEmail().
+// `name` is optional: Supabase sessions may not carry it, so consumers must
+// tolerate its absence.
 export interface SessionUser {
   email: string;
   name?: string;
@@ -32,34 +25,6 @@ export interface SessionData {
 }
 export interface SessionResult {
   data: SessionData | null;
-}
-
-// ---- better-auth path (default) -------------------------------------------
-
-const betterAuthClient = createAuthClient({
-  basePath: "/api/auth",
-});
-
-// ---- Supabase path ---------------------------------------------------------
-
-/**
- * Send a passwordless magic link. `shouldCreateUser: false` keeps the flow
- * invite-only; the UI always shows the same "check your inbox" copy regardless
- * of whether the address exists, so the response stays enumeration-safe.
- */
-async function supabaseSignInWithMagicLink(
-  email: string,
-): Promise<{ error: { message: string } | null }> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return { error: { message: "Supabase auth is not configured." } };
-  }
-  const emailRedirectTo = `${window.location.origin}/verify`;
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false, emailRedirectTo },
-  });
-  return { error: error ? { message: error.message } : null };
 }
 
 /**
@@ -72,7 +37,7 @@ async function supabaseSignInWithMagicLink(
  * for any Google account. The gate is the backend authz layer, which denies a
  * session with no `content_tool.app_user` row (see authz.ts `effectiveRole`).
  */
-async function supabaseSignInWithGoogle(
+export async function signInWithGoogle(
   redirect?: string,
 ): Promise<{ error: { message: string } | null }> {
   const supabase = getSupabaseClient();
@@ -88,21 +53,24 @@ async function supabaseSignInWithGoogle(
   return { error: error ? { message: error.message } : null };
 }
 
-async function supabaseSignOut(): Promise<void> {
+export async function signOut(): Promise<void> {
   const supabase = getSupabaseClient();
   if (supabase) await supabase.auth.signOut();
 }
 
-async function supabaseGetSession(): Promise<SessionResult> {
+/**
+ * Resolve the signed-in user's email, or null when there is no session.
+ * api.ts uses this to stamp X-Editor-Email.
+ */
+export async function getSessionEmail(): Promise<string | null> {
   const supabase = getSupabaseClient();
-  if (!supabase) return { data: null };
+  if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
-  const email = data.session?.user?.email;
-  return { data: email ? { user: { email } } : null };
+  return data.session?.user?.email ?? null;
 }
 
-/** Supabase-backed React hook mirroring better-auth's `useSession()` shape. */
-function useSupabaseSession(): SessionResult {
+/** Supabase-backed React hook exposing the shared SessionResult envelope. */
+export function useSession(): SessionResult {
   const [session, setSession] = useState<SessionResult>({ data: null });
 
   useEffect(() => {
@@ -129,73 +97,3 @@ function useSupabaseSession(): SessionResult {
 
   return session;
 }
-
-// ---- Unified exports (same names regardless of provider) -------------------
-
-const SUPABASE = isSupabaseAuth();
-
-/**
- * Passwordless magic-link sign-in. On the Supabase path it sends a Supabase
- * OTP; on the legacy better-auth path there is no magic-link surface, so it
- * returns a clear, non-throwing error.
- */
-export async function signInWithMagicLink(
-  email: string,
-): Promise<{ error: { message: string } | null }> {
-  if (SUPABASE) return supabaseSignInWithMagicLink(email);
-  return { error: { message: "Magic-link sign-in is not enabled." } };
-}
-
-/**
- * Google OAuth sign-in (Supabase path only). On success the browser is
- * redirected to Google and this never resolves to the caller; a returned error
- * means the redirect could not be started. `redirect` is the post-login target.
- */
-export async function signInWithGoogle(
-  redirect?: string,
-): Promise<{ error: { message: string } | null }> {
-  if (SUPABASE) return supabaseSignInWithGoogle(redirect);
-  return { error: { message: "Google sign-in is not enabled." } };
-}
-
-// `authClient` always exposes the better-auth surface (signIn.email,
-// signUp.email, sendVerificationEmail, getSession). Legacy auth pages call
-// these directly; they only render on the non-Supabase path. To resolve the
-// signed-in user's email provider-agnostically, use `getSessionEmail()` below.
-export const authClient = betterAuthClient;
-
-// better-auth's destructured exports — only meaningful on the legacy path; the
-// legacy auth pages import them directly.
-export const signIn = betterAuthClient.signIn;
-export const signUp = betterAuthClient.signUp;
-
-/**
- * Resolve the signed-in user's email regardless of provider. Returns null when
- * there is no session. api.ts uses this to stamp X-Editor-Email.
- */
-export async function getSessionEmail(): Promise<string | null> {
-  if (SUPABASE) {
-    const { data } = await supabaseGetSession();
-    return data?.user.email ?? null;
-  }
-  const res = await betterAuthClient.getSession();
-  return res.data?.user?.email ?? null;
-}
-
-export const signOut: () => Promise<unknown> = SUPABASE
-  ? supabaseSignOut
-  : betterAuthClient.signOut;
-
-/**
- * Adapter mapping better-auth's richer useSession() return to the shared
- * SessionResult envelope. Replaces an `as unknown as` cast that would otherwise
- * hide a future shape change in the library's return type. Named `use*` so the
- * rules-of-hooks lint recognizes it as a hook (it calls one).
- */
-function useBetterAuthSession(): SessionResult {
-  const { data } = betterAuthClient.useSession();
-  const email = data?.user?.email;
-  return email ? { data: { user: { email, name: data.user.name ?? undefined } } } : { data: null };
-}
-
-export const useSession: () => SessionResult = SUPABASE ? useSupabaseSession : useBetterAuthSession;

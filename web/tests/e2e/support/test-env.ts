@@ -49,7 +49,7 @@ const pick = (keys: readonly string[]): string | undefined =>
   keys.map((k) => process.env[k]).find((v) => v != null && v !== "");
 
 export interface TestEnv {
-  /** Staff login email (for password-grant or the better-auth form). */
+  /** Staff login email (for the Supabase password-grant). */
   email: string | undefined;
   /** Staff login password. */
   password: string | undefined;
@@ -59,7 +59,7 @@ export interface TestEnv {
   supabaseUrl: string | undefined;
   /** Supabase anon (publishable) key (required for the password-grant). */
   supabaseAnonKey: string | undefined;
-  /** True when NEXT_PUBLIC_AUTH_PROVIDER / E2E_AUTH_PROVIDER selects Supabase. */
+  /** Always true — the app is Supabase-only (kept for harness-gate readability). */
   isSupabase: boolean;
 }
 
@@ -76,14 +76,15 @@ export function loadTestEnv(): TestEnv {
   if (cached) return cached;
   parseEnvFileInto(REPO_ROOT_ENV);
 
-  const provider = process.env.E2E_AUTH_PROVIDER ?? process.env.NEXT_PUBLIC_AUTH_PROVIDER;
   cached = {
     email: pick(EMAIL_KEYS),
     password: pick(PW_KEYS),
     baseUrl: pick(BASE_KEYS) ?? DEFAULT_BASE_URL,
     supabaseUrl: pick(SUPABASE_URL_KEYS),
     supabaseAnonKey: pick(SUPABASE_ANON_KEYS),
-    isSupabase: provider === "supabase",
+    // The app is Supabase-only; the field is retained so the spec CONFIGURED
+    // gates (which also need creds) read clearly.
+    isSupabase: true,
   };
   return cached;
 }

@@ -60,7 +60,7 @@ function makeFakeSql(): unknown {
 
     if (lower.startsWith("select")) {
       // requireRole → loadRole.
-      if (lower.includes('from content_tool."user"')) {
+      if (lower.includes('from content_tool.app_user')) {
         return [{ role: state.userRole }];
       }
       // authRefExists.

@@ -10,9 +10,8 @@
  * admin). The old `editor` tier — create/HITL/publish — maps onto the new
  * `reviewer` tier; content authoring splits down into the new `author` tier.
  * `coerceRole` aliases a stored legacy "editor" → "reviewer" so rows written
- * under the old model (and the still-active better-auth path before the
- * AUTH_PROVIDER cutover) keep their authority. This matches the WS4
- * user-migration mapping (admin→admin, editor→reviewer, viewer→author).
+ * under the old model keep their authority (admin→admin, editor→reviewer,
+ * viewer→author).
  *
  * The *effective* role layers a break-glass bootstrap on top of the stored
  * role: an admin-eligible email listed in BOOTSTRAP_ADMIN_EMAILS is always
@@ -48,9 +47,9 @@ export const ROLE_RANK: Readonly<Record<Role, number>> = {
 
 /**
  * Legacy stored-role aliases. The pre-4-role model persisted "editor" for the
- * create/HITL/publish tier; map it onto "reviewer" so existing rows (and the
- * better-auth path before cutover) retain that authority. Aliases apply only to
- * `coerceRole` (reading stored/legacy values) — NOT to `isRole`, so an admin can
+ * create/HITL/publish tier; map it onto "reviewer" so existing rows retain that
+ * authority. Aliases apply only to `coerceRole` (reading stored/legacy values)
+ * — NOT to `isRole`, so an admin can
  * never *assign* the dead "editor" token via the role-change endpoint.
  */
 const LEGACY_ROLE_ALIASES: Readonly<Record<string, Role>> = {
@@ -132,12 +131,11 @@ export function isAdminEligibleEmail(email: string | null | undefined, env: Env)
  * file header for why this matters for invite-only enforcement.
  *
  * `unprovisionedFloor` is returned when there is NO stored role (null/undefined,
- * i.e. no `app_user` / legacy `user` row). It defaults to `"viewer"` to preserve
- * the legacy better-auth behavior, but the supabase path passes `null` so that an
- * authenticated-but-unprovisioned user is DENIED rather than silently granted
- * read access — invite-only is enforced here at the authorization layer, since
- * Google OAuth (unlike magic-link's `shouldCreateUser:false`) auto-creates a
- * GoTrue user for anyone who signs in.
+ * i.e. no `app_user` row). `loadRole` passes `null` so that an authenticated-
+ * but-unprovisioned user is DENIED rather than silently granted read access —
+ * invite-only is enforced here at the authorization layer, since Google OAuth
+ * auto-creates a GoTrue user for anyone who signs in. The `"viewer"` default
+ * exists only for callers that explicitly want a permissive floor.
  *
  * Pure — unit-testable without an HTTP/DB harness.
  */
@@ -191,15 +189,11 @@ type AuthzContext = Context<AuthzEnv>;
  * Load the effective role for the current session, caching it on the context so
  * repeated middleware / handler reads hit the DB once per request.
  *
- * Resolution is provider-aware so `main` stays deployable under the flag:
- *   - `AUTH_PROVIDER="supabase"` reads the Supabase-backed `content_tool.app_user`
- *     table (id = the auth user uuid, else email).
- *   - any other value (default `better-auth`) reads the legacy
- *     `content_tool."user"` table exactly as before.
- * Both paths prefer the id (stable PK) and fall back to email, then apply
- * `effectiveRole` (bootstrap-admin override + default "viewer"). Returns null
- * when there is NO session identity at all (neither id nor email) — the caller
- * maps that to 401.
+ * Reads the Supabase-backed `content_tool.app_user` table (id = the auth user
+ * uuid, else email), preferring the id (stable PK) and falling back to email,
+ * then applies `effectiveRole` (bootstrap-admin override; unprovisioned → null).
+ * Returns null when there is NO session identity at all (neither id nor email)
+ * — the caller maps that to 401.
  */
 export async function loadRole(c: AuthzContext): Promise<Role | null> {
   const cached = c.get(ROLE_CACHE_KEY);
@@ -216,8 +210,6 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
     return null;
   }
 
-  const useAppUser = c.env.AUTH_PROVIDER === "supabase";
-
   type StoredRow = {
     role: string | null;
     status?: string | null;
@@ -228,44 +220,36 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
   };
   const stored = await withDb(c.env, c.executionCtx, async (sql): Promise<StoredRow | null> => {
     if (typeof userId === "string" && userId.length > 0) {
-      const rows = useAppUser
-        ? await sql<StoredRow[]>`
-            SELECT role, status,
-                   extract(epoch FROM sessions_revoked_at) AS sessions_revoked_epoch
-            FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
-          `
-        : await sql<StoredRow[]>`
-            SELECT role FROM content_tool."user" WHERE id = ${userId} LIMIT 1
-          `;
+      const rows = await sql<StoredRow[]>`
+        SELECT role, status,
+               extract(epoch FROM sessions_revoked_at) AS sessions_revoked_epoch
+        FROM content_tool.app_user WHERE id = ${userId} LIMIT 1
+      `;
       if (rows[0] !== undefined) {
         return rows[0];
       }
     }
     if (typeof userEmail === "string" && userEmail.length > 0) {
-      const rows = useAppUser
-        ? await sql<StoredRow[]>`
-            SELECT role, status,
-                   extract(epoch FROM sessions_revoked_at) AS sessions_revoked_epoch
-            FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
-          `
-        : await sql<StoredRow[]>`
-            SELECT role FROM content_tool."user" WHERE email = ${userEmail} LIMIT 1
-          `;
+      const rows = await sql<StoredRow[]>`
+        SELECT role, status,
+               extract(epoch FROM sessions_revoked_at) AS sessions_revoked_epoch
+        FROM content_tool.app_user WHERE email = ${userEmail} LIMIT 1
+      `;
       return rows[0] ?? null;
     }
     return null;
   });
 
-  // Supabase path: an authenticated user with no app_user row is DENIED (null),
-  // not floored to "viewer" — Google OAuth auto-creates GoTrue users, so the
-  // invite-only gate lives here. Legacy better-auth path keeps the viewer floor.
+  // An authenticated user with no app_user row is DENIED (null), not floored to
+  // "viewer" — Google OAuth auto-creates GoTrue users, so the invite-only gate
+  // lives here.
   //
   // status='disabled' is likewise a DENIAL: the GoTrue ban only blocks new
   // sign-ins/refreshes, so live access tokens must be cut off here, per request.
   // A disabled row resolves exactly like a missing row — except the bootstrap
   // break-glass (admin-eligible email in BOOTSTRAP_ADMIN_EMAILS) still wins
   // inside `effectiveRole`, so lockout recovery survives a mass-disable.
-  const isDisabled = useAppUser && stored !== null && stored.status === "disabled";
+  const isDisabled = stored !== null && stored.status === "disabled";
 
   // Admin "revoke sessions" gate: GoTrue's admin sign-out only kills REFRESH
   // tokens — the live access token stays cryptographically valid until expiry
@@ -276,9 +260,7 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
   // short-lived and re-minting one requires a Bearer call that IS gated here.
   const tokenIssuedAt = c.get("tokenIssuedAt");
   const revokedEpoch =
-    useAppUser && stored?.sessions_revoked_epoch != null
-      ? Number(stored.sessions_revoked_epoch)
-      : null;
+    stored?.sessions_revoked_epoch != null ? Number(stored.sessions_revoked_epoch) : null;
   const isRevoked =
     revokedEpoch !== null &&
     Number.isFinite(revokedEpoch) &&
@@ -288,7 +270,7 @@ export async function loadRole(c: AuthzContext): Promise<Role | null> {
   const resolved =
     isDisabled || isRevoked
       ? effectiveRole(null, userEmail, c.env, null)
-      : effectiveRole(stored?.role ?? null, userEmail, c.env, useAppUser ? null : "viewer");
+      : effectiveRole(stored?.role ?? null, userEmail, c.env, null);
   c.set(ROLE_CACHE_KEY, resolved);
   return resolved;
 }
