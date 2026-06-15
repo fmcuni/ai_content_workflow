@@ -31,8 +31,12 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
-      - run: uv venv
-      - run: uv pip install -e ".[dev]"
+      # Install from the lockfile (not a fresh resolve) so CI tests the exact
+      # pinned versions in uv.lock. A floating `uv pip install` previously pulled
+      # an upstream fastapi (0.137.0) that regressed OPTIONS/CORS routing and went
+      # red while the locked 0.136.1 was fine. --frozen fails fast if the lock
+      # drifts from pyproject.
+      - run: uv sync --frozen --extra dev
       # Lint/typecheck the touched files only. The repo carries a large
       # pre-existing ruff + pyright baseline; the policy (CLAUDE.md) is "don't
       # add new errors in touched files", so we gate on changed Python files
@@ -68,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv venv && uv pip install -e ".[dev]"
+      - run: uv sync --frozen --extra dev
       # Exercises judge_runner against canned fixtures (FakeGeminiClient) to prove
       # wiring — no DB and no real Gemini key needed. When evals/runner.py grows a
       # "sample N fixtures with judge" mode that hits a real DB, add schema setup via
