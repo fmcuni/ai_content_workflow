@@ -236,7 +236,7 @@ async def list_runs(
                 "topic_candidate_id": (
                     str(r.topic_candidate_id) if r.topic_candidate_id else None
                 ),
-                "topic_batch_id": (str(r.topic_batch_id) if r.topic_batch_id else None),
+                "topic_batch_id": (str(topic_batch_id) if topic_batch_id else None),
                 "target_audience": r.target_audience,
                 "keywords": r.keywords,
                 "persona": r.persona,
@@ -259,7 +259,7 @@ async def list_runs(
                 "seo_title": seo_title,
                 "meta_description": meta_description,
             }
-            for (r, seo_title, meta_description) in rows
+            for (r, seo_title, meta_description, topic_batch_id) in rows
         ]
 
 
