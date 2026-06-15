@@ -117,6 +117,23 @@ describe("buildBoard", () => {
     expect(oneOpen.visibleRuns.map((r) => r.run_id)).toEqual(["r1", "r3"]);
   });
 
+  it("interleaves themes and standalone runs chronologically (themes not pinned on top)", () => {
+    const batches = [mkBatch({ batch_id: "bMid", created_at: "2026-06-05T00:00:00Z" })];
+    const runs = [
+      mkRun({ run_id: "rNew", created_at: "2026-06-10T00:00:00Z" }),
+      mkRun({ run_id: "rOld", created_at: "2026-06-01T00:00:00Z" }),
+    ];
+    const ids = (b: ReturnType<typeof buildBoard>) =>
+      b.items.map((it) => (it.kind === "theme" ? it.group.batch.batch_id : it.run.run_id));
+
+    expect(ids(buildBoard(runs, batches, ALL, new Set()))).toEqual(["rNew", "bMid", "rOld"]);
+    expect(ids(buildBoard(runs, batches, { ...ALL, sort: "oldest" }, new Set()))).toEqual([
+      "rOld",
+      "bMid",
+      "rNew",
+    ]);
+  });
+
   it("sorts standalone runs by created_at per the sort order", () => {
     const runs = [
       mkRun({ run_id: "old", created_at: "2026-06-01T00:00:00Z" }),

@@ -7,6 +7,7 @@ import { BATCH_META, type StampTone } from "@/lib/desk-items";
 import { cn } from "@/lib/utils";
 
 import { summarizeChildren, type ThemeGroup } from "./board";
+import { fmtCreator, fmtDateTime } from "./fmt";
 
 interface ThemeGroupRowProps {
   group: ThemeGroup;
@@ -135,6 +136,16 @@ export function ThemeGroupRow({
           <span className="shrink-0 whitespace-nowrap text-[11px] font-medium tabular-nums text-ink-soft">
             {summary.total} {summary.total === 1 ? "run" : "runs"}
           </span>
+
+          {/* Created — when the theme was created + who created it */}
+          <div className="flex shrink-0 flex-col items-end leading-tight text-ink-faint max-sm:hidden">
+            <span className="whitespace-nowrap text-[11px] tabular-nums">
+              {fmtDateTime(batch.created_at)}
+            </span>
+            <span className="max-w-[120px] truncate text-[10px]" title={batch.created_by}>
+              {fmtCreator(batch.created_by)}
+            </span>
+          </div>
 
           {/* Batch status pill */}
           <span

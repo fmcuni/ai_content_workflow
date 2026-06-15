@@ -20,9 +20,19 @@ export interface ThemeGroup {
   matchedByTitle: boolean;
 }
 
+/** A single top-level board row: either a theme (topic batch) parent task or a
+ *  standalone run. Themes and standalone runs are interleaved chronologically so
+ *  themes are no longer pinned above every run. */
+export type BoardItem =
+  | { kind: "theme"; group: ThemeGroup }
+  | { kind: "run"; run: RunSummary };
+
 export interface BoardModel {
   themes: ThemeGroup[];
   standalone: RunSummary[];
+  /** Themes + standalone runs interleaved in chronological (sort) order — the
+   *  exact top-level render sequence for the board. */
+  items: BoardItem[];
   /** Flattened run order of everything currently rendered (expanded children +
    *  standalone) — drives "select all", keyboard nav, and drawer stepping. */
   visibleRuns: RunSummary[];
@@ -85,12 +95,35 @@ export function buildBoard(
     if (visible) themes.push({ batch, children, matchedByTitle });
   }
 
-  const visibleRuns: RunSummary[] = [
-    ...themes.filter((t) => expanded.has(t.batch.batch_id)).flatMap((t) => t.children),
-    ...sortRuns(standalone, opts.sort),
-  ];
+  const sortedStandalone = sortRuns(standalone, opts.sort);
 
-  return { themes, standalone: sortRuns(standalone, opts.sort), visibleRuns };
+  // Interleave themes (keyed by their batch's created_at) with standalone runs
+  // (keyed by the run's created_at) so themes sort chronologically among runs
+  // instead of always headlining the board. localeCompare on ISO-8601
+  // timestamps is a correct chronological compare; the sort is stable so equal
+  // timestamps preserve insertion order (themes before standalone).
+  const dir = opts.sort === "newest" ? -1 : 1;
+  const ordered: { item: BoardItem; key: string }[] = [
+    ...themes.map((group) => ({
+      item: { kind: "theme" as const, group },
+      key: group.batch.created_at,
+    })),
+    ...sortedStandalone.map((run) => ({ item: { kind: "run" as const, run }, key: run.created_at })),
+  ];
+  ordered.sort((a, b) => dir * a.key.localeCompare(b.key));
+  const items: BoardItem[] = ordered.map((o) => o.item);
+
+  // visibleRuns follows the rendered order: each standalone run in place, plus
+  // the children of any expanded theme, walked in board sequence.
+  const visibleRuns: RunSummary[] = items.flatMap((it) =>
+    it.kind === "run"
+      ? [it.run]
+      : expanded.has(it.group.batch.batch_id)
+        ? it.group.children
+        : [],
+  );
+
+  return { themes, standalone: sortedStandalone, items, visibleRuns };
 }
 
 /** Aggregate counts of a theme's children by coarse lifecycle bucket — drives

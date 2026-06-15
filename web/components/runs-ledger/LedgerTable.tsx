@@ -31,10 +31,10 @@ const TH =
 const COL_SPAN = 6;
 
 /**
- * Monday.com-style runs board. Themes (topic batches) headline as collapsible
- * parent rows; their promoted runs nest beneath as indented sub-tasks.
- * Standalone (no-theme) runs render as a flat list below every theme group.
- * Header hides on mobile (rows reflow to cards).
+ * Monday.com-style runs board. Themes (topic batches) are collapsible parent
+ * rows; their promoted runs nest beneath as indented sub-tasks. Themes and
+ * standalone (no-theme) runs interleave chronologically (`board.items`) rather
+ * than themes always headlining. Header hides on mobile (rows reflow to cards).
  */
 export function LedgerTable({
   board,
@@ -51,10 +51,10 @@ export function LedgerTable({
   optionsFor,
   loading,
 }: LedgerTableProps) {
-  const { themes, standalone, visibleRuns } = board;
+  const { items, visibleRuns } = board;
   const allSelected =
     visibleRuns.length > 0 && visibleRuns.every((r) => selected.has(r.run_id));
-  const isEmpty = themes.length === 0 && standalone.length === 0;
+  const isEmpty = items.length === 0;
 
   return (
     <div className="mx-auto max-w-[1400px] px-7 pb-[120px] max-md:px-3.5 max-md:pb-[160px]">
@@ -78,7 +78,26 @@ export function LedgerTable({
           </tr>
         </thead>
         <tbody className="max-md:block">
-          {themes.map((group) => {
+          {items.map((item) => {
+            if (item.kind === "run") {
+              const run = item.run;
+              return (
+                <LedgerRow
+                  key={run.run_id}
+                  run={run}
+                  view={{
+                    selected: selected.has(run.run_id),
+                    open: openRun === run.run_id,
+                    onToggleSelect,
+                    onOpen,
+                  }}
+                  personaBySlug={personaBySlug}
+                  targetById={targetById}
+                  options={optionsFor(run.persona)}
+                />
+              );
+            }
+            const group = item.group;
             const isOpen = expanded.has(group.batch.batch_id);
             return (
               <Fragment key={group.batch.batch_id}>
@@ -110,21 +129,6 @@ export function LedgerTable({
               </Fragment>
             );
           })}
-          {standalone.map((run) => (
-            <LedgerRow
-              key={run.run_id}
-              run={run}
-              view={{
-                selected: selected.has(run.run_id),
-                open: openRun === run.run_id,
-                onToggleSelect,
-                onOpen,
-              }}
-              personaBySlug={personaBySlug}
-              targetById={targetById}
-              options={optionsFor(run.persona)}
-            />
-          ))}
         </tbody>
       </table>
 
