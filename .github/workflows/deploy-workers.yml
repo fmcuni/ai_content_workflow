@@ -58,6 +58,14 @@ jobs:
         # the ubuntu runner. install resolves the platform deps at deploy time.
         run: npm install --no-audit --no-fund
 
+      # Names-only drift guard: fails if a required secret is missing on the
+      # live Worker (catches a broken/half-provisioned env before we deploy).
+      - name: Check secret drift (prod)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/check-secrets.mjs
+
       - name: Deploy backend Worker (bowtie-content-tool-poc)
         working-directory: deploy/cloudflare-workers
         env:
@@ -87,17 +95,14 @@ jobs:
 
       - name: Deploy frontend Worker (bowtie-content-tool-web)
         working-directory: web
+        # All build-time NEXT_PUBLIC_* values come from the committed SSOT
+        # web/env.prod.public (parsed by scripts/deploy-web.mjs), so they are no
+        # longer hand-maintained here. Only the secret (anon key) + Cloudflare
+        # creds are injected. To roll collab back: edit NEXT_PUBLIC_COLLAB_ENABLED
+        # in web/env.prod.public and redeploy (or `wrangler rollback`).
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          NEXT_PUBLIC_API_BASE: https://bowtie-content-tool-poc.fmc.workers.dev
-          # Realtime collab is a BUILD-TIME flag. Set here so every prod deploy
-          # keeps collab ON durably — a one-off manual cf:deploy would be reverted
-          # to dark by the next main push. To roll collab back: flip to "false"
-          # (or remove) and redeploy, or `wrangler rollback <prior dark version>`.
-          NEXT_PUBLIC_COLLAB_ENABLED: "true"
-          # Supabase Auth (build-time). The URL is public; the anon key is a
-          # public client key but routed through an Actions secret for hygiene.
-          NEXT_PUBLIC_SUPABASE_URL: https://gfpkqsiyeslscgsuehmj.supabase.co
+          # Public client key, routed through an Actions secret for hygiene.
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: npm run cf:deploy
