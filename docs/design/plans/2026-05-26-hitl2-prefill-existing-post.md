@@ -1,14 +1,12 @@
 # hitl2 prefill from existing WP post + post id display — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Prefill the hitl2 WP-metadata form's Author, Category, and Slug from the existing WP post; show the WP post id as a clickable link in the page header; and give the reviewer a "Re-read from WP" button (with confirm-on-dirty).
 
 **Architecture:** Persist three extra columns (`wp_author_id`, `wp_slug`, `wp_link`) on `FetchedArticle` at run-start fetch time. A new `/existing-post` GET reads the cached row; a `/existing-post/refresh` POST live-refetches from WP and updates the row. The frontend prefills the form once on first resolution, gated by a `prefilledRef` to avoid race-clobber.
 
 **Tech Stack:** Alembic · SQLAlchemy · FastAPI · httpx · respx · pytest-asyncio · Next.js 16 · React 19 · TanStack Query v5 · `@base-ui/react` Dialog
 
-**Spec:** [docs/superpowers/specs/2026-05-26-hitl2-prefill-existing-post-design.md](../specs/2026-05-26-hitl2-prefill-existing-post-design.md)
+**Spec:** [docs/design/specs/2026-05-26-hitl2-prefill-existing-post-design.md](../specs/2026-05-26-hitl2-prefill-existing-post-design.md)
 
 ---
 

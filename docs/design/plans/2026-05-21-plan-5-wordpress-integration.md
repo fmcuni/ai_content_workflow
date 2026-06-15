@@ -1,7 +1,5 @@
 # Plan 5 — WordPress Integration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Prereq:** Plans 1, 2, 3, 4 shipped.
 
 **Goal:** Replace the `persist` no-op with a real `publish_to_wordpress` node. Detect SEO plugin (Yoast vs RankMath) at startup. Implement `If-Unmodified-Since` idempotency. Add dry-run mode + staging/production WP target switch. Default publish status remains `draft`.

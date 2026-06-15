@@ -1,7 +1,5 @@
 # Plan 1 — Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Stand up the Python project, Postgres schema, FastAPI skeleton, Gemini client (real + fake), and the first agent (`gap_analysis`) runnable via CLI against a test database with a reference eval.
 
 **Architecture:** Single Python package `content_tool` with sub-modules per concern (`models`, `gemini`, `agents`, `policy`, `db`, `api`). Async throughout (FastAPI, SQLAlchemy 2.0 async, httpx). Tests use a real Postgres via `testcontainers-python` and a fake Gemini client that replays JSON fixtures. No LangGraph yet — Plan 2 introduces it. Plan 1 calls the `gap_analysis` node function directly.
@@ -205,7 +203,7 @@ LOG_LEVEL=info
 ```markdown
 # Bowtie AI Content Tool
 
-LangGraph-based content update tool. See `docs/superpowers/specs/2026-05-21-bowtie-ai-content-tool-update-route-mvp-design.md` for design.
+LangGraph-based content update tool. See `docs/design/specs/2026-05-21-bowtie-ai-content-tool-update-route-mvp-design.md` for design.
 
 ## Dev setup
 

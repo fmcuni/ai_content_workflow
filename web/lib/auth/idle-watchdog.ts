@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 // activity) the watchdog signs the user out and routes them to the login page
 // with an `inactivity` reason so the UI can explain why.
 //
-// Spec: docs/superpowers/specs/2026-06-10-supabase-auth-migration.md ("Idle expiry")
+// Spec: docs/design/specs/2026-06-10-supabase-auth-migration.md ("Idle expiry")
 export const IDLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 // Activity signals that reset the idle timer. `visibilitychange` catches the

@@ -1,6 +1,6 @@
 # Plan — Human tracked changes + review threads
 
-**Spec:** `docs/superpowers/specs/2026-06-09-tracked-changes-and-comment-threads.md`
+**Spec:** `docs/design/specs/2026-06-09-tracked-changes-and-comment-threads.md`
 **Date:** 2026-06-09
 **Autonomy:** code + tests + commit on a feature branch. No push to main, no prod
 migration push, no Worker deploy.

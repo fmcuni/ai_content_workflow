@@ -1,5 +1,5 @@
 -- content_tool.app_user — the app's view of an authenticated user.
--- Spec: docs/superpowers/specs/2026-06-10-supabase-auth-migration.md (WS0)
+-- Spec: docs/design/specs/2026-06-10-supabase-auth-migration.md (WS0)
 --
 -- Identity itself lives in Supabase's `auth` schema (GoTrue). This table holds
 -- only the app-owned facets: role (4-role cumulative model), display name,

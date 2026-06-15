@@ -1,7 +1,7 @@
 # Plan: Migrate to Supabase Auth
 
 Date: 2026-06-10
-Spec: `docs/superpowers/specs/2026-06-10-supabase-auth-migration.md`
+Spec: `docs/design/specs/2026-06-10-supabase-auth-migration.md`
 Strategy: flagged parallel cutover (`AUTH_PROVIDER`), build OFF → verify → flip.
 
 ## Guiding constraints

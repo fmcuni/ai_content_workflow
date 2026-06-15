@@ -1,7 +1,7 @@
 # Voice Management — Locale & Brand Admin UI — Plan
 
 **Date:** 2026-06-15
-**Spec:** `docs/superpowers/specs/2026-06-15-voice-locale-admin-ui.md`
+**Spec:** `docs/design/specs/2026-06-15-voice-locale-admin-ui.md`
 **Branch:** `feat/voice-locale-portability` (continue on the branch the backend
 foundation already landed on; dev Workers first, then prod)
 

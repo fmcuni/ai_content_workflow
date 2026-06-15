@@ -1,5 +1,5 @@
 -- Per-voice WordPress taxonomy cache (Phase 1.5).
--- Spec: docs/superpowers/specs/2026-06-08-per-voice-wp-taxonomy-cache.md
+-- Spec: docs/design/specs/2026-06-08-per-voice-wp-taxonomy-cache.md
 --
 -- wp_users / wp_categories were single-instance snapshots (the Bowtie WP only).
 -- Add an `auth_ref` discriminator (the publish_targets env-prefix, e.g. 'WP' or

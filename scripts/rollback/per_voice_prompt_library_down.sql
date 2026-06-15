@@ -7,7 +7,7 @@
 -- ⚠️  STAGED, NOT AUTO-APPLIED. This file deliberately lives OUTSIDE
 --     supabase/migrations/ so `supabase db push` never runs it. Apply by hand
 --     ONLY as part of a coordinated full rollback (see the runbook:
---     docs/superpowers/plans/2026-06-06-per-voice-rollback-runbook.md).
+--     docs/design/plans/2026-06-06-per-voice-rollback-runbook.md).
 --
 -- ⚠️  LOSSY. Restoring the pre-feature (singleton) schema discards all per-voice
 --     data created since rollout:

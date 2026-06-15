@@ -1,7 +1,5 @@
 # Plan 3 — Production Subgraph Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Prereq:** Plans 1 + 2 shipped.
 
 **Goal:** Build the Production subgraph — `writer` (with grounding + urlContext), `resolve_citations` (deterministic), `render_html` (deterministic), `audit` (deterministic + LLM). Wire the refine loop (writer⇄audit, max 2 iterations). Compose into the root graph with HITL_2 interrupt.

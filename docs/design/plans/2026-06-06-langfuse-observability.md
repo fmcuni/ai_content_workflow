@@ -1,7 +1,7 @@
 # Plan: Langfuse Observability + Eval Hub
 
 **Date:** 2026-06-06
-**Spec:** `docs/superpowers/specs/2026-06-06-langfuse-observability.md`
+**Spec:** `docs/design/specs/2026-06-06-langfuse-observability.md`
 **Status:** Ready to implement
 
 ---

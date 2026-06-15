@@ -7,7 +7,7 @@
 > This is a thinking document to align on where the tool goes next. Items are
 > proposals, not commitments. Reorder and prune freely. Anything that graduates
 > into real work should get a dated design doc under
-> `docs/superpowers/specs/` and a plan under `docs/superpowers/plans/`.
+> `docs/design/specs/` and a plan under `docs/design/plans/`.
 
 ---
 

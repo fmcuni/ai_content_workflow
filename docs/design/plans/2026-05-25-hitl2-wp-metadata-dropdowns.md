@@ -1,14 +1,12 @@
 # hitl2 WP metadata: searchable author/category dropdowns + post date — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Replace numeric author / category inputs in the HITL-2 reviewer form with searchable dropdowns sourced live from WordPress, and wire a new HK-time post date picker through to WP REST `date_gmt`.
 
 **Architecture:** Two new GET endpoints (`/wp-options/users`, `/wp-options/categories`) proxy WP REST with pagination + a 10-min in-process TTL cache. Frontend uses `@base-ui/react`'s `Combobox` for an accessible, keyboard-driven searchable select; React Query caches the option lists. The existing `wp_publish_at` DB column gets wired to WP REST via a new `date_gmt` field on `PublishPayload`.
 
 **Tech Stack:** FastAPI · httpx · respx · pytest-asyncio · Next.js 16 (App Router) · React 19 · TanStack Query v5 · `@base-ui/react` Combobox · react-day-picker
 
-**Spec:** [docs/superpowers/specs/2026-05-25-hitl2-wp-metadata-dropdowns-design.md](../specs/2026-05-25-hitl2-wp-metadata-dropdowns-design.md)
+**Spec:** [docs/design/specs/2026-05-25-hitl2-wp-metadata-dropdowns-design.md](../specs/2026-05-25-hitl2-wp-metadata-dropdowns-design.md)
 
 ---
 

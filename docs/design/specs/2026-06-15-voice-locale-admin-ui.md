@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-15
 **Status:** Proposed
-**Builds on:** `docs/superpowers/specs/2026-06-15-voice-locale-brand-portability.md`
+**Builds on:** `docs/design/specs/2026-06-15-voice-locale-brand-portability.md`
 (the backend `VoiceLocale` foundation — SHIPPED to `feat/voice-locale-portability`)
 **Branch:** `feat/voice-locale-portability` (continue here) — dev Workers first, then prod
 

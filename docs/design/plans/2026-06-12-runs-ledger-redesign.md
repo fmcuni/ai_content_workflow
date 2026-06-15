@@ -1,7 +1,7 @@
 # Runs Ledger Redesign — Implementation Plan
 
 **Date:** 2026-06-12
-**Spec:** `docs/superpowers/specs/2026-06-12-runs-ledger-redesign.md`
+**Spec:** `docs/design/specs/2026-06-12-runs-ledger-redesign.md`
 **Visual source of truth:** `design/runs-redesign/runs-redesign.html`
 (open in a browser; embedded real prod data in `design/runs-redesign/demo-data.json`).
 Deliver the implementation to match this HTML exactly, plus the spec §2 deltas

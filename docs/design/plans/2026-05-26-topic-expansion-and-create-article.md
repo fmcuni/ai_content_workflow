@@ -1,7 +1,5 @@
 # Topic Expansion & New-Article Creation — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Turn on Front II ("Expand Topics") and Front III ("Create New Articles") at `/runs/new`. Front II takes a research-theme brief and produces a vetted batch of topic candidates (theme → topic-gen → dedup + hot-topic SERP analysis → HITL_T1 review → fan-out to runs). Front III is a single-topic create-mode run with no theme/batch overhead. Both flows reuse the existing outline → HITL_1 → writer → audit → HITL_2 → publish pipeline via a new `start_mode = "create"` switch; create-mode runs publish to WordPress as **drafts**, not live posts.
 
 **Architecture:**
@@ -15,7 +13,7 @@
 
 **Tech Stack:** Python 3.13, FastAPI, LangGraph, SQLAlchemy (async) + Alembic, PostgreSQL, Pydantic v2, asyncpg, sse-starlette, pytest + pytest-asyncio + testcontainers; Next.js (custom — see [web/AGENTS.md](../../../web/AGENTS.md) — read `node_modules/next/dist/docs/` before touching framework APIs), React 19, React Query (`@tanstack/react-query`), TypeScript, Tailwind 4, the project's existing `ui/*` primitives.
 
-**Spec:** [docs/superpowers/specs/2026-05-26-topic-expansion-and-create-article-design.md](../specs/2026-05-26-topic-expansion-and-create-article-design.md)
+**Spec:** [docs/design/specs/2026-05-26-topic-expansion-and-create-article-design.md](../specs/2026-05-26-topic-expansion-and-create-article-design.md)
 
 **Reference workflow:** `~/Downloads/AI Content Creation - 1) Create article (1).json` (n8n). Prompts in the n8n nodes are the source of truth for the four new prompt files; copy them verbatim where the spec says "verbatim."
 

@@ -9,7 +9,7 @@ Open it in a browser at desktop (≥1080px) and mobile (390px) widths. The
 implementation MUST match this HTML's layout, hierarchy, copy, colors, and
 interaction behavior, except for the deltas listed in §2.
 
-**Plan:** `docs/superpowers/plans/2026-06-12-runs-ledger-redesign.md`
+**Plan:** `docs/design/plans/2026-06-12-runs-ledger-redesign.md`
 
 ---
 

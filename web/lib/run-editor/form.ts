@@ -2,7 +2,7 @@
  * Shared, pure form-shaping helpers for the run-editor pages (/hitl2, /edit,
  * /regenerate). Every function is immutable — it returns new objects and never
  * mutates its arguments. See the spec at
- * docs/superpowers/specs/2026-06-01-run-editor-shared-components.md (§A).
+ * docs/design/specs/2026-06-01-run-editor-shared-components.md (§A).
  */
 import type {
   ArticleEditRequest,

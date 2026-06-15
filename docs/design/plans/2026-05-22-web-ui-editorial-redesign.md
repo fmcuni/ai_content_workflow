@@ -1,7 +1,5 @@
 # Web UI Editorial Redesign Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Replace the current generic shadcn-defaults look across `web/app/**` with a single, cohesive **Modern Newsroom CMS** identity — masthead/folio header, Fraunces + IBM Plex Sans/Mono, cream paper + ink + editorial red — and apply it deeply to all five page templates plus the shared component primitives.
 
 **Architecture:** Token-first restyle on top of the existing shadcn + Tailwind v4 + base-ui foundation. Replace tokens in `globals.css`, load five Google font families via `next/font/google`, remap existing shadcn semantic tokens (`--background`, `--foreground`, `--primary`, etc.) so unmodified shadcn components inherit. Three new presentation primitives (`Masthead`, `Folio`, `SectionHead`, `PaperStamp`) carry the editorial chrome. Restyle each `web/components/ui/*` and project component to drop shadcn defaults (rounded blobs, card backgrounds, generic badges) in favor of the paper-and-ink language. Each page then composes the new primitives with no behavior changes.
@@ -10,7 +8,7 @@
 
 **Note on TDD:** This is a presentation-only redesign. We preserve behavior parity with existing Playwright tests rather than writing new failing tests. Each task verifies via type-check + dev-server render check. The final task updates Playwright tests if selectors changed and runs the suite.
 
-**Spec:** [`docs/superpowers/specs/2026-05-22-web-ui-editorial-redesign-design.md`](../specs/2026-05-22-web-ui-editorial-redesign-design.md)
+**Spec:** [`docs/design/specs/2026-05-22-web-ui-editorial-redesign-design.md`](../specs/2026-05-22-web-ui-editorial-redesign-design.md)
 
 ---
 

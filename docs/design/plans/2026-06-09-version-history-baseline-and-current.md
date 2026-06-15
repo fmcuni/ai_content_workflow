@@ -1,6 +1,6 @@
 # Plan — Version-history baselines + "current" marker + better UX
 
-**Spec:** `docs/superpowers/specs/2026-06-09-version-history-baseline-and-current.md`
+**Spec:** `docs/design/specs/2026-06-09-version-history-baseline-and-current.md`
 **Date:** 2026-06-09
 
 Implemented in phases; each phase is independently shippable and TDD-first.

@@ -1,7 +1,5 @@
 # Plan 2 — Strategy Subgraph Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Prereq:** Plan 1 shipped.
 
 **Goal:** Compose the LangGraph Strategy subgraph (gap_analysis → outline), wire in HITL_1 interrupt, add the `fetch_article` node (real WordPress REST), expose `POST /runs` + `GET /runs/{id}/events` (SSE) + `POST /runs/{id}/resume`, and stream events end-to-end via curl with a fake Gemini.

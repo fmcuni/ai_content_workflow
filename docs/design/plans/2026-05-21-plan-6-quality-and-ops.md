@@ -1,7 +1,5 @@
 # Plan 6 — Quality & Ops Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Prereq:** Plans 1–5 shipped — full app works end-to-end.
 
 **Goal:** Add the things that make the system trustworthy at scale: promptfoo eval harness, LLM-as-judge evals, compliance audit log table + CSV export, cost meter UI, OpenTelemetry tracing, nightly eval cron.

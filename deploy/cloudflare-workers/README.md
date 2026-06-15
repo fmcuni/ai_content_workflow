@@ -102,6 +102,6 @@ npx wrangler secret put LANGFUSE_SECRET_KEY
 
 ## Design docs
 
-- Spec: [`docs/superpowers/specs/2026-05-31-workers-native-backend-design.md`](../../docs/superpowers/specs/2026-05-31-workers-native-backend-design.md)
-- Plan: [`docs/superpowers/plans/2026-05-31-workers-native-backend.md`](../../docs/superpowers/plans/2026-05-31-workers-native-backend.md)
-- Load limits: [`docs/superpowers/specs/2026-05-31-workers-native-load-limits.md`](../../docs/superpowers/specs/2026-05-31-workers-native-load-limits.md)
+- Spec: [`docs/design/specs/2026-05-31-workers-native-backend-design.md`](../../docs/design/specs/2026-05-31-workers-native-backend-design.md)
+- Plan: [`docs/design/plans/2026-05-31-workers-native-backend.md`](../../docs/design/plans/2026-05-31-workers-native-backend.md)
+- Load limits: [`docs/design/specs/2026-05-31-workers-native-load-limits.md`](../../docs/design/specs/2026-05-31-workers-native-load-limits.md)

@@ -1,10 +1,8 @@
 # Plan 7 — CMS Stage 0: Refresh Route Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Prereq:** Plans 1–6 shipped — full Update-route backend + UI is live.
 
-**Spec:** [`docs/superpowers/specs/2026-05-22-cms-stage-0-refresh-route-design.md`](../specs/2026-05-22-cms-stage-0-refresh-route-design.md) (commit `9f8408d`)
+**Spec:** [`docs/design/specs/2026-05-22-cms-stage-0-refresh-route-design.md`](../specs/2026-05-22-cms-stage-0-refresh-route-design.md) (commit `9f8408d`)
 
 **Goal:** Ship the Refresh route — a queue-only monitor that periodically re-audits onboarded Bowtie articles and surfaces a prioritised "needs refresh" list at `/library`. Introduces `Article` as a first-class entity. Editor-driven: clicking a queue row pre-fills the existing `/runs/new` Update form. No auto-trigger.
 
@@ -3763,8 +3761,8 @@ In the appropriate section of `README.md` (alongside the existing route docs), a
 
 Periodic re-audit of onboarded articles, surfaced at `/library`.
 
-- **Spec:** `docs/superpowers/specs/2026-05-22-cms-stage-0-refresh-route-design.md`
-- **Plan:** `docs/superpowers/plans/2026-05-22-plan-7-refresh-route.md`
+- **Spec:** `docs/design/specs/2026-05-22-cms-stage-0-refresh-route-design.md`
+- **Plan:** `docs/design/plans/2026-05-22-plan-7-refresh-route.md`
 - **Cron entrypoint:** `uv run python -m scripts.refresh_scan`
 - **Manual scan:** `POST /refresh/scan`
 - **Manual single-article:** `POST /refresh/scan/{article_id}`

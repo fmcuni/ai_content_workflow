@@ -11,7 +11,7 @@ import { getSupabaseClient } from "./supabase-client";
 //   - useSession()               — { data: { user: { email } } | null } shape
 //   - getSessionEmail()          — resolves the signed-in user's email (api.ts)
 //
-// Spec: docs/superpowers/specs/2026-06-10-supabase-auth-migration.md
+// Spec: docs/design/specs/2026-06-10-supabase-auth-migration.md
 
 // Minimal session envelope returned by useSession()/getSessionEmail().
 // `name` is optional: Supabase sessions may not carry it, so consumers must

@@ -1,7 +1,5 @@
 # HITL2 Reviewer Comments + AI Revise Loop — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Capture reviewer comments (anchored + overall) at HITL2, feed them into the existing `production` sub-graph's `refine_notes` channel, and loop the reviewer back to HITL2 after each AI revision. Capped at 3 rounds.
 
 **Architecture:** Two new `Run` columns (`hitl_2_comments` JSONB, `hitl_2_iteration` Integer). The graph's `publish` node becomes `publish_or_revise` with a conditional edge back to `production`. `n_writer` already takes `refine_notes` — we widen the source. Frontend adds a custom TipTap `commentAnchor` mark, a comments sidebar (tab-switcher with WP metadata in the right rail), a "Notes to AI" textarea, and a round-counter badge.
@@ -1142,7 +1140,7 @@ Expected: `hitl_2_iteration` matches rounds taken; `hitl_2_comments` is the late
 
 ## Self-review
 
-Cross-checked against the spec [docs/superpowers/specs/2026-05-24-hitl2-reviewer-comments-revise-loop-design.md](../specs/2026-05-24-hitl2-reviewer-comments-revise-loop-design.md):
+Cross-checked against the spec [docs/design/specs/2026-05-24-hitl2-reviewer-comments-revise-loop-design.md](../specs/2026-05-24-hitl2-reviewer-comments-revise-loop-design.md):
 
 - ✓ Anchored comments — Task 7 (mark), Task 8 (sidebar), Task 9 (selection pill + wiring), Task 10 (page integration).
 - ✓ Overall note ("Notes to AI") — Task 10.

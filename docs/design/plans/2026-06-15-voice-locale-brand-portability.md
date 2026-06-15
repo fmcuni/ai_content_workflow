@@ -1,7 +1,7 @@
 # Voice Locale & Brand Portability — Plan
 
 **Date:** 2026-06-15
-**Spec:** `docs/superpowers/specs/2026-06-15-voice-locale-brand-portability.md`
+**Spec:** `docs/design/specs/2026-06-15-voice-locale-brand-portability.md`
 **Branch:** `feat/voice-locale-portability` (dev Workers stack first, then prod)
 
 **Status (2026-06-15):** Phases A + B + integration SHIPPED to the branch

@@ -9,7 +9,7 @@ to WordPress.
 - 🤝 [`CONTRIBUTING.md`](CONTRIBUTING.md) — local setup, the two-backend parity
   rule, migrations, code style, and the PR workflow.
 - 🧭 [`CLAUDE.md`](CLAUDE.md) — the canonical one-screen project brief.
-- 🏗️ Original design: `docs/superpowers/specs/2026-05-21-bowtie-ai-content-tool-update-route-mvp-design.md`.
+- 🏗️ Original design: `docs/design/specs/2026-05-21-bowtie-ai-content-tool-update-route-mvp-design.md`.
 
 ## Dev setup
 
@@ -89,8 +89,8 @@ it is just not the production hosting path.
   personal `fmc` Cloudflare account on push to `main`.
 - **Backend source + deploy runbook:** [`deploy/cloudflare-workers/README.md`](deploy/cloudflare-workers/README.md)
 - **Frontend deploy:** `cd web && npm run cf:deploy` (see [`web/README.md`](web/README.md))
-- **Design docs:** spec `docs/superpowers/specs/2026-05-31-workers-native-backend-design.md`,
-  plan `docs/superpowers/plans/2026-05-31-workers-native-backend.md`.
+- **Design docs:** spec `docs/design/specs/2026-05-31-workers-native-backend-design.md`,
+  plan `docs/design/plans/2026-05-31-workers-native-backend.md`.
 
 This replaced the retired "Worker + 2 Containers" stack (formerly `deploy/cloudflare/`,
 `Dockerfile.cf-*`, `.github/workflows/deploy-cloudflare.yml` — all removed).
@@ -147,8 +147,8 @@ export WP_APP_PASSWORD=<application-password>
 
 Periodic re-audit of onboarded articles, surfaced at `/library`.
 
-- **Spec:** `docs/superpowers/specs/2026-05-22-cms-stage-0-refresh-route-design.md`
-- **Plan:** `docs/superpowers/plans/2026-05-22-plan-7-refresh-route.md`
+- **Spec:** `docs/design/specs/2026-05-22-cms-stage-0-refresh-route-design.md`
+- **Plan:** `docs/design/plans/2026-05-22-plan-7-refresh-route.md`
 - **Cron entrypoint:** `uv run python -m scripts.refresh_scan`
 - **Manual scan:** `POST /refresh/scan`
 - **Manual single-article:** `POST /refresh/scan/{article_id}`

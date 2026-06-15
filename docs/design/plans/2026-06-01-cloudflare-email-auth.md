@@ -1,6 +1,6 @@
 # Plan: Email/Password Auth for Cloudflare Production
 
-**Source spec:** `docs/superpowers/specs/2026-06-01-cloudflare-email-auth.md`
+**Source spec:** `docs/design/specs/2026-06-01-cloudflare-email-auth.md`
 **Complexity:** Medium–Large
 
 ## Build order

@@ -1,14 +1,12 @@
 # Voices Page Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Ship a `/voices` page that lists every persona, lets editors create / edit / archive personas, and shows the LangGraph topology with each LLM agent's system prompt template and a "load real user prompt from past run" picker — replacing today's YAML-only workflow.
 
 **Architecture:** New `content_tool.personas` table (Alembic migration) becomes source of truth; YAML file stays as cold-start seed and fallback. `load_persona()` becomes async, DB-first. Two new FastAPI routers: `/personas` (CRUD + usage) and `/prompts` (graph metadata + template content + on-demand user-prompt rendering from past run state). New Next.js route `/voices` reuses existing broadsheet typography; key components are `Rolodex`, `StyleCard`, `RedlineList` (the visual hook), `PressWorkflow` + `AgentRow`, `PromptInspector`, `ComposeDrawer`.
 
 **Tech Stack:** Python 3.13, FastAPI, SQLAlchemy (async) + Alembic, PostgreSQL, Pydantic v2, pytest + testcontainers; Next.js (custom — see `web/AGENTS.md` — read `node_modules/next/dist/docs/` before touching framework APIs), React Query (`@tanstack/react-query`), TypeScript, Tailwind, the project's existing `ui/*` primitives.
 
-**Spec:** [docs/superpowers/specs/2026-05-26-voices-page-design.md](../specs/2026-05-26-voices-page-design.md)
+**Spec:** [docs/design/specs/2026-05-26-voices-page-design.md](../specs/2026-05-26-voices-page-design.md)
 
 **File map (locks in decomposition):**
 
@@ -2959,7 +2957,7 @@ git commit -m "fix(voices): smoke-test fixes"
 
 - [ ] **Step 5: Final spec compliance check**
 
-Re-read [docs/superpowers/specs/2026-05-26-voices-page-design.md](../specs/2026-05-26-voices-page-design.md) acceptance criteria 1–8 and confirm each passes. If any are missing, open a follow-up task here; do not silently skip.
+Re-read [docs/design/specs/2026-05-26-voices-page-design.md](../specs/2026-05-26-voices-page-design.md) acceptance criteria 1–8 and confirm each passes. If any are missing, open a follow-up task here; do not silently skip.
 
 ---
 
@@ -3010,7 +3008,7 @@ Every section of the spec maps to at least one task.
 
 ## Execution Handoff
 
-Plan complete and saved to [docs/superpowers/plans/2026-05-26-voices-page.md](docs/superpowers/plans/2026-05-26-voices-page.md). Two execution options:
+Plan complete and saved to [docs/design/plans/2026-05-26-voices-page.md](docs/design/plans/2026-05-26-voices-page.md). Two execution options:
 
 1. **Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration.
 2. **Inline Execution** — Execute tasks in this session using `executing-plans`, batch execution with checkpoints.

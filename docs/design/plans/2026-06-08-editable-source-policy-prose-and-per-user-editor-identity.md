@@ -1,6 +1,6 @@
 # Plan — editable source-policy prose + per-user editor identity (2026-06-08)
 
-Spec: `docs/superpowers/specs/2026-06-08-editable-source-policy-prose-and-per-user-editor-identity.md`
+Spec: `docs/design/specs/2026-06-08-editable-source-policy-prose-and-per-user-editor-identity.md`
 
 ## Status: IMPLEMENTED (uncommitted) — local checks green; live parity + deploy pending
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-06
 **Feature:** `feat/per-voice-prompt-library` (PR #9) — shipped to prod 2026-06-05.
-**Spec/Plan:** `docs/superpowers/specs|plans/2026-06-05-per-voice-prompt-library.md`
+**Spec/Plan:** `docs/design/specs|plans/2026-06-05-per-voice-prompt-library.md`
 
 > Current prod status: **healthy** (backend & web `/health` 200; smoke green).
 > This runbook is precautionary.

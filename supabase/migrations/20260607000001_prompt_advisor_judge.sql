@@ -1,5 +1,5 @@
 -- Seed the Prompt-Improvement Advisor judge rubric (judge_prompt_advisor).
--- Spec: docs/superpowers/specs/2026-06-07-prompt-improvement-advisor.md
+-- Spec: docs/design/specs/2026-06-07-prompt-improvement-advisor.md
 --
 -- Companion forward migration (the documented pattern for adding a template
 -- post-baseline — see scripts/gen_prompt_seed.py): the per-voice reseed

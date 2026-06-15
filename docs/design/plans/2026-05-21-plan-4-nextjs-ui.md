@@ -1,7 +1,5 @@
 # Plan 4 — Next.js UI Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Prereq:** Plans 1, 2, 3 shipped — full backend runnable via API.
 
 **Goal:** Build a Next.js (App Router, TypeScript) UI under `web/` that talks to the FastAPI backend. Pages: trigger form, run list, run detail with live SSE, HITL_1 (gap analysis + outline edit), HITL_2 (TipTap, diff view, WP metadata form, FAQ editor). Tailwind + shadcn/ui for components.
