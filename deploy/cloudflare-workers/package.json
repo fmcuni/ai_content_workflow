@@ -13,6 +13,9 @@
     "test": "vitest run",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
+  "overrides": {
+    "esbuild": ">=0.28.1"
+  },
   "dependencies": {
     "@google/genai": "^2.7.0",
     "@types/markdown-it": "^14.1.2",
