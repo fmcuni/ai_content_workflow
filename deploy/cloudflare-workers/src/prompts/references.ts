@@ -138,8 +138,9 @@ focus_keywords:
 
 {existing_articles — stage-1 grounded search results, title + URL per candidate}`,
 
-  // src/agents/topic_hot.ts
-  topic_hot: `請分析以下單一 topic 在 Google 香港繁中 SERP 是否屬於熱門話題。只輸出符合 schema 的 JSON。
+  // src/agents/topic_hot.ts — {market} is filled from the voice's locale by the
+  // /schema route (mirrors topic_hot buildUserPrompt).
+  topic_hot: `請分析以下單一 topic 在 {market} SERP 是否屬於熱門話題。只輸出符合 schema 的 JSON。
 
 topic:
 {topic}

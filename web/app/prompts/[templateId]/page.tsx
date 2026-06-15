@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, use, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, use, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { SectionHead } from "@/components/SectionHead";
@@ -333,6 +333,39 @@ function PromptEditorContent({
                 </ul>
               )}
             </div>
+
+            {schemaQ.data?.voice_locale && (
+              <div>
+                <h3 className="kicker mb-2">Voice locale</h3>
+                <p className="text-ink-faint text-[11px] mb-2 leading-snug">
+                  What this voice’s tokens resolve to at runtime (shown assembled
+                  in the preview below).
+                </p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                  {(
+                    [
+                      ["{brand_name}", schemaQ.data.voice_locale.brand_name],
+                      ["{output_language}", schemaQ.data.voice_locale.output_language],
+                      ["{market}", schemaQ.data.voice_locale.market],
+                      ["{faq_heading}", schemaQ.data.voice_locale.faq_heading],
+                      [
+                        "{sources_heading}",
+                        schemaQ.data.voice_locale.sources_heading ?? "auto · by script",
+                      ],
+                    ] as const
+                  ).map(([token, value]) => (
+                    <Fragment key={token}>
+                      <dt className="font-mono text-[10.5px] text-ink-faint whitespace-nowrap">
+                        {token}
+                      </dt>
+                      <dd className="font-mono text-[11px] text-ink-soft break-words">
+                        {value}
+                      </dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              </div>
+            )}
 
             {schemaQ.data && schemaQ.data.found_includes.length > 0 && (
               <div>

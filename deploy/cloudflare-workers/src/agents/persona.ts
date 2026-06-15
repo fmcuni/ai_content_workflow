@@ -38,7 +38,6 @@ export interface VoiceLocale {
   market: string;
   sourcesHeading: string | null;
   faqHeading: string;
-  uiLang: string;
 }
 
 /** HK-ZH defaults (mirror VoiceLocale's Python field defaults). */
@@ -49,7 +48,6 @@ export function defaultVoiceLocale(): VoiceLocale {
     market: "Google 香港繁中",
     sourcesHeading: null,
     faqHeading: "常見問題",
-    uiLang: "zh-Hant",
   };
 }
 
@@ -59,7 +57,6 @@ interface RawVoiceLocale {
   market?: string;
   sources_heading?: string | null;
   faq_heading?: string;
-  ui_lang?: string;
 }
 
 /** Build a VoiceLocale from a raw JSONB value. null/{}/non-object → defaults. */
@@ -75,7 +72,26 @@ export function voiceLocaleFromRaw(raw: unknown): VoiceLocale {
     market: r.market ?? d.market,
     sourcesHeading: r.sources_heading ?? d.sourcesHeading,
     faqHeading: r.faq_heading ?? d.faqHeading,
-    uiLang: r.ui_lang ?? d.uiLang,
+  };
+}
+
+/** Raw snake_case shape of a VoiceLocale (wire/JSONB form). */
+export interface RawVoiceLocaleOut {
+  output_language: string;
+  brand_name: string;
+  market: string;
+  sources_heading: string | null;
+  faq_heading: string;
+}
+
+/** Serialize a VoiceLocale back to its snake_case wire shape (camel → snake). */
+export function voiceLocaleToRaw(loc: VoiceLocale): RawVoiceLocaleOut {
+  return {
+    output_language: loc.outputLanguage,
+    brand_name: loc.brandName,
+    market: loc.market,
+    sources_heading: loc.sourcesHeading,
+    faq_heading: loc.faqHeading,
   };
 }
 
@@ -91,7 +107,7 @@ export interface PersonaPack {
 }
 
 // ---------------------------------------------------------------------------
-// Persona-block scaffolding labels (selected by VoiceLocale.uiLang)
+// Persona-block scaffolding labels (auto-derived from VoiceLocale.outputLanguage)
 // ---------------------------------------------------------------------------
 
 /**
@@ -170,9 +186,18 @@ const LABELS_EN: PersonaBlockLabels = {
   variantsClose: ")",
 };
 
-/** Pick the persona-block label set for `uiLang` (mirror of `_labels_for`). */
-function labelsFor(uiLang: string): PersonaBlockLabels {
-  return uiLang === "en" ? LABELS_EN : LABELS_ZH_HANT;
+// CJK detection (CJK Ext A + Unified + Compatibility Ideographs) — mirrors the
+// Python `_CJK_RE` so both backends auto-derive the label set identically.
+const CJK_RE = /[㐀-鿿豈-﫿]/;
+
+/**
+ * Pick the persona-block label set from the voice's `outputLanguage`
+ * (mirror of Python `_labels_for`). Auto-derived: a Chinese output language
+ * (any CJK ideograph) → Traditional-Chinese labels; a non-Chinese (Latin-script)
+ * output language → English labels. No separate manual control.
+ */
+function labelsFor(outputLanguage: string): PersonaBlockLabels {
+  return CJK_RE.test(outputLanguage) ? LABELS_ZH_HANT : LABELS_EN;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +266,7 @@ function renderGlossary(
  * This mirrors Python's `PersonaPack.to_prompt_block(context_text)` exactly.
  */
 export function toPromptBlock(persona: PersonaPack, contextText?: string): string {
-  const lbl = labelsFor(persona.locale.uiLang);
+  const lbl = labelsFor(persona.locale.outputLanguage);
   const good = persona.toneExamples.good.map((x) => `  ${lbl.toneGood}${x}`).join("\n");
   const bad = persona.toneExamples.bad.map((x) => `  ${lbl.toneBad}${x}`).join("\n");
   const glossarySection = renderGlossary(persona.glossary, contextText, lbl);

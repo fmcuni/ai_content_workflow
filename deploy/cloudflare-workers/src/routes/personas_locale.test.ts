@@ -8,7 +8,7 @@
  *   - PUT update with `locale` replaces the whole object (snake_case round-trip).
  *   - PUT update WITHOUT `locale` leaves the column untouched (COALESCE → the
  *     locale bound param is null, so the stored value survives).
- *   - A bad `ui_lang` (outside {zh-Hant,en}) → 422 on both create and update.
+ *   - A non-object `locale` → 422 on both create and update.
  *   - POST create without `locale` stores the HK-ZH defaults (no-op).
  *
  * Plus a unit check that `voiceLocaleFromRaw` maps the stored snake_case raw to
@@ -42,7 +42,6 @@ const LOCALE_MY_EN = {
   market: "Google Malaysia EN",
   sources_heading: "Sources",
   faq_heading: "Frequently Asked Questions",
-  ui_lang: "en",
 };
 
 const HK_ZH_DEFAULTS = {
@@ -51,7 +50,6 @@ const HK_ZH_DEFAULTS = {
   market: "Google 香港繁中",
   sources_heading: null,
   faq_heading: "常見問題",
-  ui_lang: "zh-Hant",
 };
 
 const state: { userRole: string | null; persona: PersonaRowLite | null } = {
@@ -143,11 +141,12 @@ function makeFakeSql(): unknown {
       // banned_terms, required_phrasings, disclaimer_templates, tone_examples,
       // glossary, locale). Find the locale COALESCE arg: it is the param that is
       // either a JsonParam or null sitting in the "locale =" position. We locate
-      // it structurally by scanning for the json param whose value has ui_lang.
+      // it structurally by scanning for the json param whose value has
+      // output_language (always present in a normalised locale).
       const jsonLocale = params.find(
         (p) => isJson(p) && typeof (p as JsonParam).value === "object" &&
           (p as JsonParam).value !== null &&
-          "ui_lang" in ((p as JsonParam).value as Record<string, unknown>),
+          "output_language" in ((p as JsonParam).value as Record<string, unknown>),
       );
       const nameParam = params[0];
       state.persona = {
@@ -275,7 +274,7 @@ describe("persona locale CRUD (snake_case wire contract)", () => {
     expect(json.locale).toEqual(LOCALE_MY_EN);
   });
 
-  it("POST create with a bad ui_lang → 422", async () => {
+  it("POST create with a non-object locale → 422", async () => {
     const res = await req("/personas", {
       method: "POST",
       headers: JSON_HEADERS,
@@ -283,18 +282,18 @@ describe("persona locale CRUD (snake_case wire contract)", () => {
         slug: "loc-bad",
         name: "Bad",
         ...CREATE_BASE,
-        locale: { ...LOCALE_MY_EN, ui_lang: "fr" },
+        locale: "not-an-object",
       }),
     });
     expect(res.status).toBe(422);
   });
 
-  it("PUT update with a bad ui_lang → 422", async () => {
+  it("PUT update with a non-object locale → 422", async () => {
     state.persona = { ...baseRow(), slug: "loc-bad", name: "Bad", locale: {} };
     const res = await req("/personas/loc-bad", {
       method: "PUT",
       headers: JSON_HEADERS,
-      body: JSON.stringify({ locale: { ...LOCALE_MY_EN, ui_lang: "zh-Hans" } }),
+      body: JSON.stringify({ locale: 123 }),
     });
     expect(res.status).toBe(422);
   });
@@ -309,7 +308,6 @@ describe("voiceLocaleFromRaw camel↔snake mapping", () => {
       market: "Google Malaysia EN",
       sourcesHeading: "Sources",
       faqHeading: "Frequently Asked Questions",
-      uiLang: "en",
     });
   });
 
@@ -321,7 +319,6 @@ describe("voiceLocaleFromRaw camel↔snake mapping", () => {
       market: "Google 香港繁中",
       sourcesHeading: null,
       faqHeading: "常見問題",
-      uiLang: "zh-Hant",
     });
   });
 });

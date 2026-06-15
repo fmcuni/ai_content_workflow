@@ -1,7 +1,7 @@
 // Phase B: locale override on POST /templates/:id/preview.
 // `substitutePreview` with no `localeOverride` is byte-identical to today;
 // with an override it resolves {brand_name}/{output_language}/{market} and the
-// sources/FAQ heading tokens. `parsePreviewLocale` rejects a bad `ui_lang`.
+// sources/FAQ heading tokens. `parsePreviewLocale` rejects a non-object locale.
 
 import { describe, expect, it } from "vitest";
 
@@ -77,7 +77,6 @@ describe("substitutePreview locale override", () => {
       market: "Google Malaysia (gobowtie.com/my)",
       sources_heading: "Sources",
       faq_heading: "Frequently Asked Questions",
-      ui_lang: "en",
     });
 
     const out = await substitutePreview(sql, TEMPLATE, { ...CONTEXT }, view, "bowtie-editor", locale);
@@ -95,7 +94,7 @@ describe("substitutePreview locale override", () => {
   });
 
   it("override with null sources_heading → empty string substitution", async () => {
-    const locale = voiceLocaleFromRaw({ ui_lang: "en", brand_name: "Acme" });
+    const locale = voiceLocaleFromRaw({ brand_name: "Acme" });
     const out = await substitutePreview(
       sql,
       "S={sources_heading}",
@@ -114,24 +113,23 @@ describe("parsePreviewLocale", () => {
     expect(parsePreviewLocale(null)).toEqual({ ok: true, locale: undefined });
   });
 
-  it("valid ui_lang → ok with mapped (snake→camel) locale", () => {
-    const r = parsePreviewLocale({ ui_lang: "en", brand_name: "Bowtie MY" });
+  it("object locale → ok with mapped (snake→camel) locale", () => {
+    const r = parsePreviewLocale({ output_language: "English", brand_name: "Bowtie MY" });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.locale?.uiLang).toBe("en");
+      expect(r.locale?.outputLanguage).toBe("English");
       expect(r.locale?.brandName).toBe("Bowtie MY");
     }
   });
 
-  it("omitted ui_lang is allowed (defaults to zh-Hant)", () => {
+  it("missing fields fall back to HK-ZH defaults", () => {
     const r = parsePreviewLocale({ brand_name: "Bowtie" });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.locale?.uiLang).toBe("zh-Hant");
+    if (r.ok) expect(r.locale?.outputLanguage).toBe("香港繁體中文");
   });
 
-  it("bad ui_lang → rejected (route maps to 422)", () => {
-    expect(parsePreviewLocale({ ui_lang: "fr" })).toEqual({ ok: false });
-    expect(parsePreviewLocale({ ui_lang: 123 })).toEqual({ ok: false });
+  it("non-object locale → rejected (route maps to 422)", () => {
     expect(parsePreviewLocale("nonsense")).toEqual({ ok: false });
+    expect(parsePreviewLocale(123)).toEqual({ ok: false });
   });
 });

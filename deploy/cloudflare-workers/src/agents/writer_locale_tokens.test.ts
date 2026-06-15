@@ -41,7 +41,6 @@ describe("applyLocaleTokens", () => {
       market: "Google Malaysia",
       sourcesHeading: "Sources",
       faqHeading: "Frequently Asked Questions",
-      uiLang: "en",
     });
     expect(out).toContain("English (Malaysia)");
     expect(out).toContain("Acme");

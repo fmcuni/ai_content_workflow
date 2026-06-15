@@ -35,7 +35,7 @@ from content_tool.models.outline import Outline
 from content_tool.models.persona import VoiceLocale
 from content_tool.models.topic_batch import TopicDedupOutput, TopicGenOutput, TopicHotOutput
 from content_tool.models.writer import WriterOutput
-from content_tool.policy.personas import load_persona_from_yaml
+from content_tool.policy.personas import load_persona, load_persona_from_yaml
 from content_tool.prompts_store import SHARED_VOICE, TemplateRow
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
@@ -188,8 +188,9 @@ focus_keywords:
 {keywords, comma-separated, or （無）}
 
 {existing_articles — stage-1 grounded search results, title + URL per candidate}""",
-    # content_tool/agents/topic_hot.py
-    "topic_hot": """請分析以下單一 topic 在 Google 香港繁中 SERP 是否屬於熱門話題。\
+    # content_tool/agents/topic_hot.py — {market} is filled from the voice's
+    # locale by the /schema endpoint (mirrors topic_hot.build_user_prompt).
+    "topic_hot": """請分析以下單一 topic 在 {market} SERP 是否屬於熱門話題。\
 只輸出符合 schema 的 JSON。
 
 topic:
@@ -384,6 +385,14 @@ async def template_schema(
     partial_ids = _partial_ids(view)
     unknown_includes = sorted(name for name in found_includes if name not in partial_ids)
     schema_model = _RESPONSE_SCHEMA_MODELS.get(template_id)
+    # Resolve the voice's stored locale so the user-prompt reference reflects the
+    # same {market} the runtime injects, and expose it for the editor's locale
+    # panel. Mirrors the preview path (DB-first, default-voice + HK-ZH fallback).
+    async with sf() as session:
+        locale = await _stored_locale(voice, session=session)
+    user_prompt = _USER_PROMPT_REFERENCES.get(template_id)
+    if user_prompt is not None:
+        user_prompt = user_prompt.replace("{market}", locale.market)
     return {
         "template_id": template_id,
         "voice": voice,
@@ -391,7 +400,8 @@ async def template_schema(
         "found_placeholders": found_placeholders,
         "found_includes": found_includes,
         "unknown_includes": unknown_includes,
-        "user_prompt_template": _USER_PROMPT_REFERENCES.get(template_id),
+        "user_prompt_template": user_prompt,
+        "voice_locale": locale.model_dump(),
         "response_json_schema": (
             schema_model.model_json_schema() if schema_model is not None else None
         ),
@@ -771,7 +781,7 @@ class _PreviewRequest(BaseModel):
     route: str | None = None
     context: dict[str, str] = Field(default_factory=dict)
     # Optional unsaved-locale override for live preview. Snake_case wire contract
-    # (matches ``VoiceLocale``); missing fields default, bad ``ui_lang`` → 422.
+    # (matches ``VoiceLocale``); missing fields fall back to HK-ZH defaults.
     # Absent ⇒ ``None`` ⇒ preview uses the voice's stored locale (today's path).
     locale: VoiceLocale | None = None
 
@@ -836,15 +846,41 @@ async def preview_template(
 
     async with sf() as session:
         source_policy = await source_policy_store.get_policy(voice_slug=voice, session=session)
+        # Absent an unsaved override (the /voices live-edit path), resolve the
+        # voice's STORED locale so the assembled prompt shows the same
+        # brand/language/market/heading tokens the runtime agents inject —
+        # instead of leaking literal {brand_name}/… placeholders.
+        effective_locale = (
+            body.locale
+            if body.locale is not None
+            else await _stored_locale(voice, session=session)
+        )
     resolved = _substitute_placeholders(
         assembled,
         overrides=body.context,
         view=view,
         voice=voice,
         source_policy_default=source_policy.to_prompt_block(),
-        locale_override=body.locale,
+        locale_override=effective_locale,
     )
     return {"resolved": resolved, "route": route_id, "voice": voice}
+
+
+async def _stored_locale(voice: str, *, session: AsyncSession) -> VoiceLocale:
+    """The voice's stored locale (DB-first, YAML fallback) for preview surfaces.
+
+    Mirrors what the runtime writer/outline/audit/topic_hot agents inject so the
+    assembled-prompt preview and the user-prompt reference resolve
+    ``{brand_name}``/``{output_language}``/``{market}``/… to the same values
+    Gemini sees. Falls back to the default voice, then the HK-ZH defaults, when
+    no persona row/YAML exists for ``voice``.
+    """
+    for slug in dict.fromkeys((voice, DEFAULT_VOICE)):
+        try:
+            return (await load_persona(slug, session=session)).locale
+        except FileNotFoundError:
+            continue
+    return VoiceLocale()
 
 
 def _default_persona_block(voice: str, locale_override: VoiceLocale | None = None) -> str:
@@ -855,8 +891,9 @@ def _default_persona_block(voice: str, locale_override: VoiceLocale | None = Non
     block is preview-cosmetic — runtime assembly reads the persona from the DB.
 
     When ``locale_override`` is supplied (live preview of unsaved locale edits),
-    the persona block renders under that locale's ``ui_lang`` labels instead of
-    the YAML-stored locale. Absent ⇒ stored locale, byte-identical to today.
+    the persona block renders under labels derived from that locale's
+    ``output_language`` instead of the YAML-stored locale. Absent ⇒ stored
+    locale, byte-identical to today.
     """
     for slug in dict.fromkeys((voice, DEFAULT_VOICE)):
         try:

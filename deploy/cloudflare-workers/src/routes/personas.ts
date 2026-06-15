@@ -46,10 +46,7 @@ const LOCALE_DEFAULTS: RawLocaleInput = {
   market: "Google 香港繁中",
   sources_heading: null,
   faq_heading: "常見問題",
-  ui_lang: "zh-Hant",
 };
-
-const UI_LANGS = new Set(["zh-Hant", "en"]);
 
 type LocaleParseResult =
   | { ok: true; value: RawLocaleInput }
@@ -58,19 +55,15 @@ type LocaleParseResult =
 /**
  * Validate + normalise an untrusted `locale` from a request body into the
  * snake_case `RawLocaleInput` stored verbatim in the JSONB column. Whole-object
- * replace: every field is filled from the raw input or the HK-ZH default. The
- * only hard rule (mirrors the Python `VoiceLocale.ui_lang` Literal → 422) is
- * `ui_lang ∈ {zh-Hant, en}`; other fields fall back to defaults when missing.
+ * replace: every field is filled from the raw input or the HK-ZH default. There
+ * is no per-field enum to validate — every field is free text (the persona-block
+ * label set is auto-derived from `output_language` at render time, not stored).
  */
 function parseLocale(raw: unknown): LocaleParseResult {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, detail: "locale must be an object" };
   }
   const r = raw as Record<string, unknown>;
-  const uiLangRaw = r.ui_lang ?? LOCALE_DEFAULTS.ui_lang;
-  if (typeof uiLangRaw !== "string" || !UI_LANGS.has(uiLangRaw)) {
-    return { ok: false, detail: "locale.ui_lang must be one of: zh-Hant, en" };
-  }
   const str = (v: unknown, fallback: string): string =>
     typeof v === "string" ? v : fallback;
   return {
@@ -84,7 +77,6 @@ function parseLocale(raw: unknown): LocaleParseResult {
           ? null
           : str(r.sources_heading, ""),
       faq_heading: str(r.faq_heading, LOCALE_DEFAULTS.faq_heading),
-      ui_lang: uiLangRaw,
     },
   };
 }
@@ -159,7 +151,7 @@ personasRouter.post("/", async (c) => {
 
   // locale is optional on create; when present it is validated + normalised to
   // the snake_case raw shape, else HK-ZH defaults are stored (byte-identical
-  // no-op). A bad ui_lang → 422, mirroring the Python VoiceLocale Literal.
+  // no-op). A non-object locale → 422.
   const localeRaw = (body as { locale?: unknown }).locale;
   let locale: RawLocaleInput = LOCALE_DEFAULTS;
   if (localeRaw !== undefined) {
@@ -262,7 +254,7 @@ personasRouter.put("/:slug", async (c) => {
   }
   if (Array.isArray(body.glossary)) patch.glossary = body.glossary;
   // Whole-object replace: present → validate + normalise to snake_case raw and
-  // overwrite; absent → column untouched. Bad ui_lang → 422 (Python parity).
+  // overwrite; absent → column untouched. A non-object locale → 422.
   if ("locale" in body) {
     const parsed = parseLocale((body as { locale?: unknown }).locale);
     if (!parsed.ok) {

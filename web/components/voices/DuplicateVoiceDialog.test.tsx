@@ -36,7 +36,6 @@ function makePersona(slug: string, name: string): Persona {
       market: "Google 香港繁中",
       sources_heading: null,
       faq_heading: "常見問題",
-      ui_lang: "zh-Hant",
     },
     publish_target_id: null,
     is_archived: false,

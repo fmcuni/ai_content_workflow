@@ -21,7 +21,6 @@ def test_default_locale_reproduces_hk_zh() -> None:
     assert loc.market == HK_ZH_MARKET
     assert loc.sources_heading is None  # → keeps script auto-detection
     assert loc.faq_heading == HK_ZH_FAQ_HEADING
-    assert loc.ui_lang == "zh-Hant"
 
 
 def test_from_raw_none_and_empty_are_defaults() -> None:
@@ -37,13 +36,11 @@ def test_from_raw_partial_overrides_only_given_fields() -> None:
             "market": "Google Malaysia (gobowtie.com/my)",
             "sources_heading": "Sources",
             "faq_heading": "Frequently Asked Questions",
-            "ui_lang": "en",
         }
     )
     assert loc.output_language == "English (Malaysia)"
     assert loc.sources_heading == "Sources"
     assert loc.faq_heading == "Frequently Asked Questions"
-    assert loc.ui_lang == "en"
 
 
 def test_personapack_without_locale_gets_hk_zh_defaults() -> None:

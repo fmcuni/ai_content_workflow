@@ -14,7 +14,6 @@ describe("VoiceLocale defaults (HK-ZH)", () => {
       market: "Google 香港繁中",
       sourcesHeading: null,
       faqHeading: "常見問題",
-      uiLang: "zh-Hant",
     });
   });
 
@@ -33,12 +32,10 @@ describe("VoiceLocale defaults (HK-ZH)", () => {
       market: "Google Malaysia (gobowtie.com/my)",
       sources_heading: "Sources",
       faq_heading: "Frequently Asked Questions",
-      ui_lang: "en",
     });
     expect(loc.outputLanguage).toBe("English (Malaysia)");
     expect(loc.sourcesHeading).toBe("Sources");
     expect(loc.faqHeading).toBe("Frequently Asked Questions");
-    expect(loc.uiLang).toBe("en");
   });
 
   it("explicit null sources_heading stays null (keeps script auto-detection)", () => {

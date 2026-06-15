@@ -166,8 +166,8 @@ async function defaultPersonaBlock(
     try {
       const persona = await loadPersona(sql, slug);
       // When the caller supplies an unsaved locale (live preview), render the
-      // persona block under that locale's `uiLang` labels instead of the row's
-      // stored locale. Absent ⇒ stored locale, byte-identical to today.
+      // persona block under labels derived from that locale's `outputLanguage`
+      // instead of the row's stored locale. Absent ⇒ stored locale, byte-identical.
       const pack = localeOverride === undefined ? persona : { ...persona, locale: localeOverride };
       return toPromptBlock(pack);
     } catch {
@@ -175,6 +175,23 @@ async function defaultPersonaBlock(
     }
   }
   return "（preview: persona block not configured）";
+}
+
+/**
+ * The voice's stored locale (DB-first, default-voice + HK-ZH fallback) for
+ * preview surfaces. TS mirror of Python `prompts.py::_stored_locale` — the
+ * assembled prompt and the user-prompt reference resolve brand/language/market/
+ * heading tokens to the same values the runtime agents inject.
+ */
+export async function storedLocale(sql: Sql, voice: string): Promise<VoiceLocale> {
+  for (const slug of voice === DEFAULT_PREVIEW_VOICE ? [voice] : [voice, DEFAULT_PREVIEW_VOICE]) {
+    try {
+      return (await loadPersona(sql, slug)).locale;
+    } catch {
+      continue;
+    }
+  }
+  return voiceLocaleFromRaw({});
 }
 
 export async function substitutePreview(
@@ -232,20 +249,18 @@ export async function substitutePreview(
   return out;
 }
 
-/** Allowed `ui_lang` values (mirrors Python `VoiceLocale.ui_lang` Literal). */
-const VALID_UI_LANGS: ReadonlySet<string> = new Set(["zh-Hant", "en"]);
-
 /**
  * Parse an optional preview `locale` override from the request body.
  *
  * - `undefined`/absent ⇒ `{ ok: true, locale: undefined }` (no override; preview
  *   stays byte-identical to today).
- * - a `ui_lang` outside {zh-Hant, en} ⇒ `{ ok: false }` (route → 422). Every
- *   other field is free-form / defaulted via `voiceLocaleFromRaw`.
+ * - a non-object value ⇒ `{ ok: false }` (route → 422). Every field is
+ *   free-form / defaulted via `voiceLocaleFromRaw`.
  *
  * The wire contract is snake_case (`output_language`, `brand_name`, `market`,
- * `sources_heading`, `faq_heading`, `ui_lang`); `voiceLocaleFromRaw` already
- * maps snake → camel.
+ * `sources_heading`, `faq_heading`); `voiceLocaleFromRaw` already maps
+ * snake → camel. The persona-block label set is auto-derived from
+ * `output_language` at render time, so there is no enum field to validate.
  */
 export function parsePreviewLocale(
   raw: unknown,
@@ -254,10 +269,6 @@ export function parsePreviewLocale(
     return { ok: true, locale: undefined };
   }
   if (typeof raw !== "object") {
-    return { ok: false };
-  }
-  const uiLang = (raw as { ui_lang?: unknown }).ui_lang;
-  if (uiLang !== undefined && (typeof uiLang !== "string" || !VALID_UI_LANGS.has(uiLang))) {
     return { ok: false };
   }
   return { ok: true, locale: voiceLocaleFromRaw(raw) };

@@ -33,7 +33,6 @@ const liveLocale: VoiceLocale = {
   market: "Google MY",
   sources_heading: null,
   faq_heading: "FAQ",
-  ui_lang: "en",
 };
 
 function renderInspector(withLocale: boolean) {

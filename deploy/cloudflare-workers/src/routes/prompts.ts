@@ -47,6 +47,7 @@ import {
   partialsReferencedBy,
   substitutePreview,
   parsePreviewLocale,
+  storedLocale,
 } from "../prompts/editor";
 import {
   renderUserPrompt,
@@ -54,6 +55,7 @@ import {
   MissingInputs,
 } from "../prompts/user_example";
 import { referencesFor } from "../prompts/references";
+import { voiceLocaleToRaw } from "../agents/persona";
 
 const DEFAULT_GRAPH_MODE = "refresh";
 
@@ -298,6 +300,12 @@ promptsRouter.get("/templates/:id/schema", async (c) => {
     const partials = partialIds(view);
     const unknownIncludes = foundIncludes.filter((n) => !partials.has(n)).sort();
     const references = referencesFor(templateId);
+    // Resolve the voice's stored locale so the user-prompt reference reflects the
+    // same {market} the runtime injects, and expose it for the editor's locale
+    // panel. Mirrors the preview path (DB-first, default-voice + HK-ZH fallback).
+    const locale = await storedLocale(sql, voice);
+    const userPromptTemplate =
+      references.user_prompt_template?.replaceAll("{market}", locale.market) ?? null;
     return c.json({
       template_id: templateId,
       voice,
@@ -305,7 +313,8 @@ promptsRouter.get("/templates/:id/schema", async (c) => {
       found_placeholders: findPlaceholders(row.body),
       found_includes: foundIncludes,
       unknown_includes: unknownIncludes,
-      user_prompt_template: references.user_prompt_template,
+      user_prompt_template: userPromptTemplate,
+      voice_locale: voiceLocaleToRaw(locale),
       response_json_schema: references.response_json_schema,
     });
   });
@@ -506,7 +515,7 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
   // Absent ⇒ undefined ⇒ preview uses the persona's stored locale (today's path).
   const localeParse = parsePreviewLocale(body.locale);
   if (!localeParse.ok) {
-    return c.json({ detail: "locale.ui_lang must be one of: zh-Hant, en" }, 422);
+    return c.json({ detail: "locale must be an object" }, 422);
   }
   const localeOverride = localeParse.locale;
 
@@ -567,13 +576,18 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
       }
     }
 
+    // Absent an unsaved override (the /voices live-edit path), resolve the
+    // voice's STORED locale so the assembled prompt shows the same
+    // brand/language/market/heading tokens the runtime agents inject — instead
+    // of leaking literal {brand_name}/… placeholders.
+    const effectiveLocale = localeOverride ?? (await storedLocale(sql, voice));
     const resolved = await substitutePreview(
       sql,
       assembled,
       context,
       view,
       voice,
-      localeOverride,
+      effectiveLocale,
     );
     return c.json({ resolved, route: routeId, voice });
   });

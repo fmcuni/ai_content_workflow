@@ -1,6 +1,12 @@
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+# CJK detection (CJK Ext A + Unified Ideographs + Compatibility Ideographs).
+# Mirrors the web heuristic so the persona-block label set is auto-derived from
+# the voice's output language — no separate manual control.
+_CJK_RE = re.compile(r"[㐀-鿿豈-﫿]")
 
 GlossaryStatus = Literal["preferred", "avoid", "forbidden", "do_not_translate"]
 
@@ -19,8 +25,10 @@ class VoiceLocale(BaseModel):
       - ``sources_heading`` — explicit sources ``<h2>`` text; ``None`` keeps
         today's Traditional↔Simplified script auto-detection (safe for zh voices).
       - ``faq_heading``     — FAQ heading used by ``render_html``'s fallback/split.
-      - ``ui_lang``         — selects the persona-block label set (``zh-Hant``
-        default = current strings; ``en`` = English labels).
+
+    The persona-block label set (Traditional-Chinese vs English scaffolding) is
+    **auto-derived** from ``output_language`` — see ``_labels_for``. There is no
+    separate manual control.
     """
 
     output_language: str = "香港繁體中文"
@@ -28,7 +36,6 @@ class VoiceLocale(BaseModel):
     market: str = "Google 香港繁中"
     sources_heading: str | None = None
     faq_heading: str = "常見問題"
-    ui_lang: Literal["zh-Hant", "en"] = "zh-Hant"
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any] | None) -> "VoiceLocale":
@@ -41,8 +48,8 @@ class VoiceLocale(BaseModel):
 class PersonaBlockLabels(BaseModel):
     """Scaffolding labels for ``PersonaPack.to_prompt_block``.
 
-    A label set selected by ``VoiceLocale.ui_lang`` so a non-Chinese voice does
-    not emit Traditional-Chinese scaffolding around its (English) content. The
+    A label set auto-derived from ``VoiceLocale.output_language`` so a non-Chinese
+    voice does not emit Traditional-Chinese scaffolding around its content. The
     ``zh-Hant`` set is byte-identical to the strings hardcoded before this change
     so HK-ZH voices are a no-op.
     """
@@ -118,13 +125,15 @@ _LABELS_EN = PersonaBlockLabels(
 )
 
 
-def _labels_for(ui_lang: str) -> PersonaBlockLabels:
-    """Pick the persona-block label set for ``ui_lang``.
+def _labels_for(output_language: str) -> PersonaBlockLabels:
+    """Pick the persona-block label set from the voice's ``output_language``.
 
-    ``"en"`` → English labels; anything else (incl. ``"zh-Hant"``) → the
-    byte-identical Traditional-Chinese set.
+    Auto-derived: a Chinese output language (any CJK ideograph present) → the
+    byte-identical Traditional-Chinese set; a non-Chinese (Latin-script) output
+    language → English labels. This reproduces the previous explicit ``ui_lang``
+    choice for every existing voice without a manual control.
     """
-    return _LABELS_EN if ui_lang == "en" else _LABELS_ZH_HANT
+    return _LABELS_ZH_HANT if _CJK_RE.search(output_language) else _LABELS_EN
 
 
 class GlossaryEntry(BaseModel):
@@ -164,7 +173,7 @@ class PersonaPack(BaseModel):
         context. Keeps prompts bounded for large termbases while still
         surfacing the entries that matter for the current brief/draft.
         """
-        lbl = _labels_for(self.locale.ui_lang)
+        lbl = _labels_for(self.locale.output_language)
         good = "\n".join(f"  {lbl.tone_good}{x}" for x in self.tone_examples.get("good", []))
         bad = "\n".join(f"  {lbl.tone_bad}{x}" for x in self.tone_examples.get("bad", []))
         glossary_section = self._render_glossary(context_text, lbl)
@@ -182,7 +191,7 @@ class PersonaPack(BaseModel):
         self, context_text: str | None, lbl: PersonaBlockLabels | None = None
     ) -> str:
         if lbl is None:
-            lbl = _labels_for(self.locale.ui_lang)
+            lbl = _labels_for(self.locale.output_language)
         entries = self._filter_glossary(context_text)
         if not entries:
             return ""

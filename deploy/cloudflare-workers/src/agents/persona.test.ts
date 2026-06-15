@@ -219,8 +219,9 @@ describe("toPromptBlock", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Workstream B2 — persona-block label set selected by VoiceLocale.uiLang.
-// zh-Hant (default) must stay byte-identical; "en" emits English scaffolding.
+// Workstream B2 — persona-block label set auto-derived from VoiceLocale
+// .outputLanguage (CJK present → zh-Hant; Latin-script → en).
+// zh-Hant (default) must stay byte-identical; English emits English scaffolding.
 // ---------------------------------------------------------------------------
 
 // Captured BEFORE the label parameterization change (and byte-identical to the
@@ -247,18 +248,18 @@ describe("toPromptBlock — VoiceLocale label sets", () => {
     expect(toPromptBlock(BASE_PACK)).toBe(GOLDEN_ZH_HANT);
   });
 
-  it("explicit zh-Hant uiLang matches the default-locale block", () => {
+  it("Chinese output language matches the default-locale block", () => {
     const pack: PersonaPack = {
       ...BASE_PACK,
-      locale: { ...defaultVoiceLocale(), uiLang: "zh-Hant" },
+      locale: { ...defaultVoiceLocale(), outputLanguage: "香港繁體中文" },
     };
     expect(toPromptBlock(pack)).toBe(GOLDEN_ZH_HANT);
   });
 
-  it('emits English scaffolding when uiLang is "en"', () => {
+  it("emits English scaffolding when output language is non-Chinese", () => {
     const pack: PersonaPack = {
       ...BASE_PACK,
-      locale: { ...defaultVoiceLocale(), uiLang: "en" },
+      locale: { ...defaultVoiceLocale(), outputLanguage: "English" },
     };
     const block = toPromptBlock(pack);
     expect(block).toContain("# Persona\n");
@@ -276,10 +277,10 @@ describe("toPromptBlock — VoiceLocale label sets", () => {
     expect(block).toContain("- Do not translate: AI\n");
   });
 
-  it('emits no Traditional-Chinese scaffolding when uiLang is "en"', () => {
+  it("emits no Traditional-Chinese scaffolding when output language is non-Chinese", () => {
     const pack: PersonaPack = {
       ...BASE_PACK,
-      locale: { ...defaultVoiceLocale(), uiLang: "en" },
+      locale: { ...defaultVoiceLocale(), outputLanguage: "English" },
     };
     const block = toPromptBlock(pack);
     const forbiddenScaffolding = [

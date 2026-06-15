@@ -2,12 +2,9 @@
 
 Pure-function tests (no DB): ``_substitute_placeholders`` with no
 ``locale_override`` is byte-identical to today (brand/lang/market/heading tokens
-fall through); with an override it resolves them. Bad ``ui_lang`` is rejected by
-``VoiceLocale`` validation, which FastAPI surfaces as a 422 on the request body.
+fall through); with an override it resolves them. A legacy retired ``ui_lang``
+key on the request body is silently ignored (labels derive from output_language).
 """
-
-import pytest
-from pydantic import ValidationError
 
 from content_tool.api.routes.prompts import _PreviewRequest, _substitute_placeholders
 from content_tool.models.persona import VoiceLocale
@@ -72,7 +69,6 @@ def test_override_resolves_brand_lang_market_and_headings() -> None:
             "market": "Google Malaysia (gobowtie.com/my)",
             "sources_heading": "Sources",
             "faq_heading": "Frequently Asked Questions",
-            "ui_lang": "en",
         }
     )
     out = _substitute_placeholders(
@@ -92,7 +88,7 @@ def test_override_resolves_brand_lang_market_and_headings() -> None:
 
 
 def test_override_null_sources_heading_substitutes_empty() -> None:
-    locale = VoiceLocale.from_raw({"ui_lang": "en", "brand_name": "Acme"})
+    locale = VoiceLocale.from_raw({"brand_name": "Acme"})
     out = _substitute_placeholders(
         "S={sources_heading}",
         overrides={"persona_block": "PB", "source_policy_block": "SP"},
@@ -102,17 +98,12 @@ def test_override_null_sources_heading_substitutes_empty() -> None:
     assert out == "S="
 
 
-def test_bad_ui_lang_rejected_by_request_model() -> None:
-    # FastAPI maps this body-model ValidationError to HTTP 422.
-    with pytest.raises(ValidationError):
-        _PreviewRequest(template="x", locale={"ui_lang": "fr"})  # type: ignore[arg-type]
-
-
-def test_valid_ui_lang_and_partial_locale_accepted() -> None:
+def test_partial_locale_accepted_and_legacy_ui_lang_ignored() -> None:
+    # A legacy retired ``ui_lang`` key is silently ignored; other fields default.
     req = _PreviewRequest(template="x", locale={"ui_lang": "en", "brand_name": "Bowtie MY"})  # type: ignore[arg-type]
     assert req.locale is not None
-    assert req.locale.ui_lang == "en"
     assert req.locale.brand_name == "Bowtie MY"
+    assert not hasattr(req.locale, "ui_lang")
     # Omitted fields default (mirrors VoiceLocale.from_raw leniency).
     assert req.locale.output_language == "香港繁體中文"
 

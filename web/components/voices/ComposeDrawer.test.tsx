@@ -37,7 +37,6 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
       market: "Google 香港繁中",
       sources_heading: null,
       faq_heading: "常見問題",
-      ui_lang: "zh-Hant",
     },
     publish_target_id: null,
     is_archived: false,
@@ -92,21 +91,12 @@ describe("ComposeDrawer — Locale & Brand section", () => {
     // null sources_heading renders as empty input.
     expect(screen.getByLabelText(/Sources heading/)).toHaveValue("");
     expect(screen.getByLabelText(/FAQ heading/)).toHaveValue("常見問題");
-    expect(screen.getByLabelText("UI language")).toHaveValue("zh-Hant");
-  });
-
-  it("offers zh-Hant and en in the ui_lang select", () => {
-    renderDrawer();
-    const select = screen.getByLabelText("UI language") as HTMLSelectElement;
-    const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["zh-Hant", "en"]);
   });
 
   it("includes the whole locale object in the update patch on save", async () => {
     updateMock.mockReset().mockResolvedValue(makePersona());
     renderDrawer();
     fireEvent.change(screen.getByLabelText(/Brand name/), { target: { value: "Acme" } });
-    fireEvent.change(screen.getByLabelText("UI language"), { target: { value: "en" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
@@ -117,7 +107,6 @@ describe("ComposeDrawer — Locale & Brand section", () => {
       market: "Google 香港繁中",
       sources_heading: null,
       faq_heading: "常見問題",
-      ui_lang: "en",
     });
   });
 
@@ -130,7 +119,6 @@ describe("ComposeDrawer — Locale & Brand section", () => {
         market: "Google MY",
         sources_heading: "Sources",
         faq_heading: "FAQ",
-        ui_lang: "en",
       },
     });
     renderDrawer({ persona });

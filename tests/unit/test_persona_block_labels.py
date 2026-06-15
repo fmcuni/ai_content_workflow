@@ -1,9 +1,10 @@
 """Golden + label-set tests for ``PersonaPack.to_prompt_block`` (workstream B2).
 
-The persona block scaffolding labels are selected by ``VoiceLocale.ui_lang``:
-``"en"`` emits English labels; anything else (incl. the default ``"zh-Hant"``)
-keeps the Traditional-Chinese strings **byte-identical** to before
-parameterization.
+The persona block scaffolding labels are auto-derived from
+``VoiceLocale.output_language``: a non-Chinese (Latin-script) output language
+emits English labels; a Chinese output language (incl. the default
+``"香港繁體中文"``) keeps the Traditional-Chinese strings **byte-identical** to
+before parameterization.
 """
 
 from content_tool.models.persona import (
@@ -66,7 +67,7 @@ def _base_pack(locale: VoiceLocale | None = None) -> PersonaPack:
 
 
 def test_zh_hant_block_is_byte_identical_to_golden() -> None:
-    # Arrange: default locale (ui_lang == "zh-Hant").
+    # Arrange: default locale (Chinese output_language → zh-Hant labels).
     pack = _base_pack()
 
     # Act
@@ -76,16 +77,16 @@ def test_zh_hant_block_is_byte_identical_to_golden() -> None:
     assert block == GOLDEN_ZH_HANT
 
 
-def test_default_locale_matches_explicit_zh_hant() -> None:
-    # The default-factory VoiceLocale and an explicit zh-Hant locale agree.
+def test_default_locale_matches_explicit_chinese_output_language() -> None:
+    # The default-factory VoiceLocale and an explicit Chinese output language agree.
     assert _base_pack().to_prompt_block() == _base_pack(
-        VoiceLocale(ui_lang="zh-Hant")
+        VoiceLocale(output_language="香港繁體中文")
     ).to_prompt_block()
 
 
 def test_en_block_emits_english_scaffolding() -> None:
-    # Arrange
-    pack = _base_pack(VoiceLocale(ui_lang="en"))
+    # Arrange: a non-Chinese output language auto-derives English labels.
+    pack = _base_pack(VoiceLocale(output_language="English"))
 
     # Act
     block = pack.to_prompt_block()
@@ -107,8 +108,8 @@ def test_en_block_emits_english_scaffolding() -> None:
 
 
 def test_en_block_has_no_traditional_chinese_scaffolding() -> None:
-    # Arrange
-    pack = _base_pack(VoiceLocale(ui_lang="en"))
+    # Arrange: a non-Chinese output language auto-derives English labels.
+    pack = _base_pack(VoiceLocale(output_language="English"))
 
     # Act
     block = pack.to_prompt_block()

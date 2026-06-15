@@ -6,7 +6,6 @@ import { toast } from "sonner";
 
 import { personasApi, publishTargetsApi } from "@/lib/api";
 import type { DisclaimerTemplate, Persona, PersonaIn, VoiceLocale } from "@/lib/types";
-import { localeWarnings } from "./locale-warnings";
 
 // HK-ZH defaults — shown as input placeholders so an admin sees what "leave
 // blank" yields. `sources_heading` default is null (follow the article script).
@@ -16,7 +15,6 @@ const HK_ZH_LOCALE: VoiceLocale = {
   market: "Google 香港繁中",
   sources_heading: null,
   faq_heading: "常見問題",
-  ui_lang: "zh-Hant",
 };
 
 interface ComposeDrawerProps {
@@ -367,7 +365,6 @@ export function ComposeDrawer({
   }
 
   const busy = createMut.isPending || updateMut.isPending;
-  const warnings = localeWarnings(localeForm);
 
   return (
     <>
@@ -471,18 +468,6 @@ export function ComposeDrawer({
               <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
                 Locale &amp; Brand · 語系與品牌
               </p>
-              {warnings.length > 0 && (
-                <div
-                  role="status"
-                  className="border border-accent-deep/40 bg-accent/5 px-3 py-2 space-y-1"
-                >
-                  {warnings.map((w) => (
-                    <p key={w} className="text-[12px] text-accent-deep">
-                      ⚠ {w}
-                    </p>
-                  ))}
-                </div>
-              )}
               <LocaleField
                 label="Output language · 輸出語言"
                 value={localeForm.output_language}
@@ -513,22 +498,6 @@ export function ComposeDrawer({
                 placeholder={HK_ZH_LOCALE.faq_heading}
                 onChange={(v) => updateLocale({ ...localeForm, faq_heading: v })}
               />
-              <div>
-                <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint mb-1">
-                  UI language · 介面語言
-                </p>
-                <select
-                  aria-label="UI language"
-                  value={localeForm.ui_lang}
-                  onChange={(e) =>
-                    updateLocale({ ...localeForm, ui_lang: e.target.value as VoiceLocale["ui_lang"] })
-                  }
-                  className="w-full border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
-                >
-                  <option value="zh-Hant">zh-Hant</option>
-                  <option value="en">en</option>
-                </select>
-              </div>
             </section>
           )}
 

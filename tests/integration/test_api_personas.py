@@ -271,7 +271,6 @@ _LOCALE_MY_EN = {
     "market": "Google Malaysia EN",
     "sources_heading": "Sources",
     "faq_heading": "Frequently Asked Questions",
-    "ui_lang": "en",
 }
 
 
@@ -319,7 +318,7 @@ async def test_create_persona_without_locale_defaults_hk_zh(
         r = await api_client.post("/personas", json=payload)
         assert r.status_code == 201, r.text
         loc = r.json()["locale"]
-        assert loc["ui_lang"] == "zh-Hant"
+        assert "ui_lang" not in loc
         assert loc["faq_heading"] == "常見問題"
         assert loc["sources_heading"] is None
     finally:
@@ -357,9 +356,12 @@ async def test_update_persona_locale_round_trips_and_omit_untouched(
 
 
 @pytest.mark.asyncio
-async def test_update_persona_bad_ui_lang_rejected(
+async def test_update_persona_ignores_legacy_ui_lang_key(
     api_client: AsyncClient, pg_session_factory: async_sessionmaker
 ):
+    # Backward-compat: a locale that still carries the retired ``ui_lang`` key is
+    # accepted (200) and the key is dropped from the stored locale; labels now
+    # derive from output_language.
     create = {
         "slug": "locale-bad", "name": "Bad",
         "voice_rules": [], "banned_terms": [], "required_phrasings": [],
@@ -367,9 +369,10 @@ async def test_update_persona_bad_ui_lang_rejected(
     }
     try:
         await api_client.post("/personas", json=create)
-        bad = {**_LOCALE_MY_EN, "ui_lang": "fr"}
-        r = await api_client.put("/personas/locale-bad", json={"locale": bad})
-        assert r.status_code == 422, r.text
+        legacy = {**_LOCALE_MY_EN, "ui_lang": "en"}
+        r = await api_client.put("/personas/locale-bad", json={"locale": legacy})
+        assert r.status_code == 200, r.text
+        assert "ui_lang" not in r.json()["locale"]
     finally:
         async with pg_session_factory() as s:
             await s.execute(delete(Persona).where(Persona.slug == "locale-bad"))

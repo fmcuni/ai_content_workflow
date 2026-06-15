@@ -644,16 +644,15 @@ export interface DisclaimerTemplate {
 // Per-voice locale & brand. Wire casing is snake_case (matches the personas
 // endpoint + the preview override body). HK-ZH defaults are what an admin sees
 // as placeholders; `sources_heading` null = follow the article's script
-// (auto-detected) rather than a fixed string.
-export type UiLang = "zh-Hant" | "en";
-
+// (auto-detected) rather than a fixed string. The persona-block label set
+// (Chinese vs English scaffolding) is auto-derived from `output_language` at
+// render time, so there is no manual UI-language field.
 export interface VoiceLocale {
   output_language: string;
   brand_name: string;
   market: string;
   sources_heading: string | null;
   faq_heading: string;
-  ui_lang: UiLang;
 }
 
 export interface Persona {
@@ -835,6 +834,9 @@ export interface PromptTemplateSchema {
   unknown_includes: string[];
   /** Reference shape of the user prompt sent alongside this system prompt (null for partials). */
   user_prompt_template?: string | null;
+  /** The voice's stored locale — the values the assembled prompt's
+   * {brand_name}/{output_language}/{market}/… tokens resolve to at runtime. */
+  voice_locale?: VoiceLocale | null;
   /** The Gemini responseSchema this agent is called with (null when the agent returns plain text). */
   response_json_schema?: Record<string, unknown> | null;
 }

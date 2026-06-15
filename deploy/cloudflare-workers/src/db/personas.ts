@@ -6,14 +6,13 @@ import { POLICY_ID, SHARED_VOICE } from "../source_policy/store";
 // Per-voice locale / brand identity as accepted on the HTTP boundary and stored
 // raw in the `locale` JSONB column: snake_case keys, mirroring the Python
 // VoiceLocale model and the raw shape `voiceLocaleFromRaw` reads back. Whole-
-// object replace — all six fields are written together.
+// object replace — all five fields are written together.
 export interface RawLocaleInput {
   output_language: string;
   brand_name: string;
   market: string;
   sources_heading: string | null;
   faq_heading: string;
-  ui_lang: string;
 }
 
 // Shape returned to callers — timestamps are already normalised to ISO strings.
