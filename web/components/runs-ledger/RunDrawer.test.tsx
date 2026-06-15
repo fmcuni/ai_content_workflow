@@ -64,7 +64,11 @@ function wrapper() {
   };
 }
 
-function renderDrawer(run: RunSummary, perms: DrawerPerms = ALL_PERMS) {
+function renderDrawer(
+  run: RunSummary,
+  perms: DrawerPerms = ALL_PERMS,
+  themeTitle: string | null = null,
+) {
   const Wrapper = wrapper();
   return render(
     <Wrapper>
@@ -74,6 +78,7 @@ function renderDrawer(run: RunSummary, perms: DrawerPerms = ALL_PERMS) {
         targetById={new Map()}
         editorEmail="op@bowtie.com.hk"
         perms={perms}
+        themeTitle={themeTitle}
         onClose={vi.fn()}
         onStep={vi.fn()}
       />
@@ -120,5 +125,35 @@ describe("RunDrawer mode switch", () => {
 
     // The HITL_2 publish action is present when permitted.
     expect(screen.getByRole("button", { name: /Approve & publish/i })).toBeInTheDocument();
+  });
+});
+
+describe("RunDrawer theme back-link", () => {
+  it("links a promoted run back to its topic batch with the theme title", async () => {
+    const run = makeRun({ topic_batch_id: "batch-xyz-123456" });
+    // The drawer re-fetches via getRun; echo the same run so topic_batch_id survives.
+    mockApi.getRun.mockResolvedValue(run);
+
+    renderDrawer(run, ALL_PERMS, "Summer skincare");
+
+    const link = await screen.findByRole("link", { name: /Summer skincare/ });
+    expect(link).toHaveAttribute("href", "/topic-batches/batch-xyz-123456");
+  });
+
+  it("falls back to the batch id when the theme title is unknown", async () => {
+    const run = makeRun({ topic_batch_id: "batch-xyz-123456" });
+    mockApi.getRun.mockResolvedValue(run);
+
+    renderDrawer(run, ALL_PERMS, null);
+
+    const link = await screen.findByRole("link", { name: /batch-xy/ });
+    expect(link).toHaveAttribute("href", "/topic-batches/batch-xyz-123456");
+  });
+
+  it("omits the theme link for standalone runs", async () => {
+    renderDrawer(makeRun({ topic_batch_id: null }));
+
+    await screen.findByText("Brief");
+    expect(screen.queryByText("Theme")).not.toBeInTheDocument();
   });
 });

@@ -19,8 +19,19 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-/** Drawer's left "Brief" column (spec §4.5) — shared by both drawer modes. */
-export function BriefColumn({ run, voice }: { run: RunSummary; voice: string | null }) {
+/** Drawer's left "Brief" column (spec §4.5) — shared by both drawer modes.
+ *  `themeTitle` is the research theme of the topic batch this run was promoted
+ *  from (resolved by the caller from already-loaded batches); when absent the
+ *  Theme link falls back to the batch id. */
+export function BriefColumn({
+  run,
+  voice,
+  themeTitle,
+}: {
+  run: RunSummary;
+  voice: string | null;
+  themeTitle?: string | null;
+}) {
   const [expanded, setExpanded] = useState(false);
   const keywords = run.keywords ?? [];
   const shown = keywords.slice(0, KEYWORD_CAP);
@@ -35,6 +46,16 @@ export function BriefColumn({ run, voice }: { run: RunSummary; voice: string | n
       <dl className="grid grid-cols-[86px_1fr] gap-x-2.5 gap-y-1 text-[12.5px]">
         {voice && <Row label="Voice">{voice}</Row>}
         <Row label="Kind">{run.start_mode === "create" ? "New article" : "Rewrite"}</Row>
+        {run.topic_batch_id && (
+          <Row label="Theme">
+            <Link
+              href={`/topic-batches/${run.topic_batch_id}`}
+              className="break-words text-info hover:underline"
+            >
+              {themeTitle ? `"${themeTitle}"` : `№${run.topic_batch_id.slice(0, 8)}`} →
+            </Link>
+          </Row>
+        )}
         {run.start_mode !== "create" && run.article_url && (
           <Row label="Source">
             <a

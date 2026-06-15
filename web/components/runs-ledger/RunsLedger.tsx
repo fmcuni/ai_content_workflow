@@ -108,6 +108,11 @@ export function RunsLedger() {
   };
 
   const openRunData = openRun ? (data.runs.find((r) => r.run_id === openRun) ?? null) : null;
+  // Theme title for the open run's parent batch, resolved from already-loaded
+  // batches so the drawer's brief can link back to /topic-batches/{id}.
+  const openRunTheme = openRunData?.topic_batch_id
+    ? (data.batches.find((b) => b.batch_id === openRunData.topic_batch_id)?.research_theme ?? null)
+    : null;
 
   return (
     <div className="pb-20">
@@ -180,6 +185,7 @@ export function RunsLedger() {
           targetById={data.targetById}
           editorEmail={email}
           perms={perms}
+          themeTitle={openRunTheme}
           onClose={() => setOpenRun(null)}
           onStep={stepDrawer}
         />

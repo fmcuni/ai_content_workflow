@@ -43,6 +43,8 @@ interface RunDrawerProps {
   targetById: Map<string, PublishTarget>;
   editorEmail: string;
   perms: DrawerPerms;
+  /** Research theme of the run's parent topic batch, when promoted from one. */
+  themeTitle?: string | null;
   onClose: () => void;
   onStep: (delta: number) => void;
 }
@@ -63,6 +65,7 @@ export function RunDrawer({
   targetById,
   editorEmail,
   perms,
+  themeTitle,
   onClose,
   onStep,
 }: RunDrawerProps) {
@@ -251,7 +254,7 @@ export function RunDrawer({
         <div className="mx-auto grid w-full max-w-[1400px] flex-1 grid-cols-[1fr_1.1fr_1.15fr] overflow-hidden max-[1080px]:grid-cols-[1.1fr_1.15fr] max-md:flex max-md:flex-col max-md:overflow-y-auto">
           {/* Brief — dropped in the 761–1080 band */}
           <div className="overflow-hidden max-[1080px]:hidden max-md:block max-md:overflow-visible">
-            <BriefColumn run={r} voice={voice} />
+            <BriefColumn run={r} voice={voice} themeTitle={themeTitle} />
           </div>
 
           {/* Middle: draft preview / gap analysis */}
