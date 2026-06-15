@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { toPromptBlock } from "./persona";
+import { defaultVoiceLocale, toPromptBlock } from "./persona";
 import type { PersonaPack } from "./persona";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,7 @@ const BASE_PACK: PersonaPack = {
       notes: null,
     },
   ],
+  locale: defaultVoiceLocale(),
 };
 
 // ---------------------------------------------------------------------------
@@ -214,5 +215,93 @@ describe("toPromptBlock", () => {
     const pack: PersonaPack = { ...BASE_PACK, glossary: [] };
     const block = toPromptBlock(pack);
     expect(block).not.toContain("# 詞彙表 · Glossary");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workstream B2 — persona-block label set auto-derived from VoiceLocale
+// .outputLanguage (CJK present → zh-Hant; Latin-script → en).
+// zh-Hant (default) must stay byte-identical; English emits English scaffolding.
+// ---------------------------------------------------------------------------
+
+// Captured BEFORE the label parameterization change (and byte-identical to the
+// Python golden in tests/unit/test_persona_block_labels.py).
+const GOLDEN_ZH_HANT =
+  "# 撰稿人格\n" +
+  "角色：Bowtie 健康顧問\n" +
+  "語氣規則：\n" +
+  "- 親切專業\n" +
+  "- 避免術語堆砌\n" +
+  "避免使用的字詞：便宜, 最平\n" +
+  "必須採用的香港用語：醫療保障, 保費\n" +
+  "語氣示例：\n" +
+  "  好：讓您的家人得到最好的保障\n" +
+  "  壞：最平最抵\n" +
+  "# 詞彙表 · Glossary\n" +
+  "- 用「自願醫保計劃」（避用：VHIS）\n" +
+  "- 禁用：人壽保險（避用：life insurance） — 監管要求統一用法\n" +
+  "- 避用：cheap → 改用「affordable」\n" +
+  "- 保留原文：AI\n";
+
+describe("toPromptBlock — VoiceLocale label sets", () => {
+  it("zh-Hant (default locale) block is byte-identical to golden", () => {
+    expect(toPromptBlock(BASE_PACK)).toBe(GOLDEN_ZH_HANT);
+  });
+
+  it("Chinese output language matches the default-locale block", () => {
+    const pack: PersonaPack = {
+      ...BASE_PACK,
+      locale: { ...defaultVoiceLocale(), outputLanguage: "香港繁體中文" },
+    };
+    expect(toPromptBlock(pack)).toBe(GOLDEN_ZH_HANT);
+  });
+
+  it("emits English scaffolding when output language is non-Chinese", () => {
+    const pack: PersonaPack = {
+      ...BASE_PACK,
+      locale: { ...defaultVoiceLocale(), outputLanguage: "English" },
+    };
+    const block = toPromptBlock(pack);
+    expect(block).toContain("# Persona\n");
+    expect(block).toContain("Role: Bowtie 健康顧問\n");
+    expect(block).toContain("Voice rules:\n");
+    expect(block).toContain("Terms to avoid: 便宜, 最平\n");
+    expect(block).toContain("Required phrasings: 醫療保障, 保費\n");
+    expect(block).toContain("Tone examples:\n");
+    expect(block).toContain("  Good: 讓您的家人得到最好的保障\n");
+    expect(block).toContain("  Bad: 最平最抵\n");
+    expect(block).toContain("# Glossary\n");
+    expect(block).toContain('- Use "自願醫保計劃" (avoid: VHIS)\n');
+    expect(block).toContain('- Forbidden: 人壽保險 (avoid: life insurance) — 監管要求統一用法\n');
+    expect(block).toContain('- Avoid: cheap → use "affordable"\n');
+    expect(block).toContain("- Do not translate: AI\n");
+  });
+
+  it("emits no Traditional-Chinese scaffolding when output language is non-Chinese", () => {
+    const pack: PersonaPack = {
+      ...BASE_PACK,
+      locale: { ...defaultVoiceLocale(), outputLanguage: "English" },
+    };
+    const block = toPromptBlock(pack);
+    const forbiddenScaffolding = [
+      "# 撰稿人格",
+      "角色：",
+      "語氣規則：",
+      "避免使用的字詞：",
+      "必須採用的香港用語：",
+      "語氣示例：",
+      "好：",
+      "壞：",
+      "詞彙表",
+      "禁用：",
+      "避用：",
+      "改用",
+      "保留原文：",
+      "用「",
+      "（避用：",
+    ];
+    for (const token of forbiddenScaffolding) {
+      expect(block).not.toContain(token);
+    }
   });
 });

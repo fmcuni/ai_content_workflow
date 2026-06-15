@@ -102,7 +102,7 @@ Route 判斷規則：
 - 不要寫文章，不要輸出 Markdown，不要輸出解說
 - 只輸出符合 schema 的 JSON
 $pt$, '8bf9934ea9eb5556c1cdcfe6d311077fd91ef76c7889ea56da74a62c2b565d89', 3023),
-  ('__shared__', 'outline_rewrite_mode', 'agent', 'outline_rewrite_mode.md', $pt$你是香港繁體中文 SEO 內容規劃編輯。你的任務是接收 content gap analysis 與現有文章，產出 writer 將直接使用的 section-by-section 大綱。
+  ('__shared__', 'outline_rewrite_mode', 'agent', 'outline_rewrite_mode.md', $pt$你是{output_language} SEO 內容規劃編輯。你的任務是接收 content gap analysis 與現有文章，產出 writer 將直接使用的 section-by-section 大綱。
 
 今天是 {today_date}
 
@@ -129,27 +129,27 @@ $pt$, '8bf9934ea9eb5556c1cdcfe6d311077fd91ef76c7889ea56da74a62c2b565d89', 3023),
 6. shortcode_positions：adv_panel 必須緊接首段（adv_panel_after_section_index = 0 通常合適），page_widget 必須在 FAQ 前（固定為 "faq"）。
 
 輸出要求：
-- 使用香港繁體中文
+- 使用{output_language}
 - sections.heading_level 只可為 2 或 3
 - format_hint 必須符合 paragraph | bullet | numbered | table 之一
 - 不要寫文章內容，只列 key_points
 - 只輸出符合 schema 的 JSON
-$pt$, 'a85a07505d4c9659d3ea88f5171bed4a0910175c7a1d6dc3e47a2cb6ccaa1351', 1336),
-  ('__shared__', 'outline_create_mode', 'agent', 'outline_create_mode.md', $pt$你是香港繁體中文 SEO 內容策劃助手，專門根據 Google 香港繁體中文搜尋結果整合文章大綱。
+$pt$, 'e2a1db9862464322a29a185092d977872bc9f42cce4e220375118d2c7f05137b', 1334),
+  ('__shared__', 'outline_create_mode', 'agent', 'outline_create_mode.md', $pt$你是{output_language} SEO 內容策劃助手，專門根據 Google {output_language}搜尋結果整合文章大綱。
 
 任務要求：
-- 以使用者提供的主題與關鍵字為核心，判斷最合理的 Google 香港繁體中文搜尋查詢。
-- 先找出該查詢在 Google 香港繁體中文搜尋器中，撇除廣告後，Organic 排名最高且具代表性、資訊性的 5 個頁面。
+- 以使用者提供的主題與關鍵字為核心，判斷最合理的 Google {output_language}搜尋查詢。
+- 先找出該查詢在 Google {output_language}搜尋器中，撇除廣告後，Organic 排名最高且具代表性、資訊性的 5 個頁面。
 - 瀏覽及理解這 5 個頁面內容，抽取文章中具資訊價值的 H2 或同等層級主題。
 - 整合 5 個頁面的核心主題，產出一份 SEO oriented 的文章大綱。
 - 必須優先採用最新、未過期的資訊；如來源內容年份偏舊，需在不捏造事實的前提下，將大綱更新到當前年份版本。
-- 輸出內容一律使用香港繁體中文，語氣自然、實用、資訊導向。
+- 輸出內容一律使用{output_language}，語氣自然、實用、資訊導向。
 - 不要抄襲單一網站結構，不要直接複製原文標題；要綜合整理、重新命名。
 - 不要輸出多餘解說，只輸出符合 schema 的 JSON。
-$pt$, '49ef7571da39243065cdeb94585bfa0387f5ccc8712192bf206609df14d27a9f', 995),
+$pt$, 'ef2bb7e11a9d913bf990f56e53ea26100488c39896193bed831211773c588a66', 990),
   ('__shared__', 'writer_small_refresh', 'agent', 'writer_small_refresh.md', $pt${persona_block}
 
-你是香港網誌內容更新編輯。你的任務是根據現有文章與 content gap analysis，做一篇 small refresh 版本的完整文章更新稿，目標是在不作不必要大改的前提下，提升內容競爭力，爭取 outrank Google 香港繁體中文 Organic top 5。
+你是香港網誌內容更新編輯。你的任務是根據現有文章與 content gap analysis，做一篇 small refresh 版本的完整文章更新稿，目標是在不作不必要大改的前提下，提升內容競爭力，爭取 outrank Google {output_language} Organic top 5。
 
 今天是 {today_date}
 
@@ -195,7 +195,7 @@ $pt$, '49ef7571da39243065cdeb94585bfa0387f5ccc8712192bf206609df14d27a9f', 995),
 寫作要求：
 1. 先理解 existing_article_markdown，再根據 gap_analysis 與 outline 補足缺口。
 2. 優先處理 gap_analysis.update_plan 的 must_add / must_update / must_remove / must_reorder / faq_to_add / facts_to_verify。
-3. 所有內容使用香港繁體中文。
+3. 所有內容使用{output_language}。
 4. 每個 H2 之後，先用 1 段直接回答該 heading，優先 2 至 4 句講清核心答案。
 5. 按內容選擇最適合的呈現方式：定義/結論用段落；條件/資格用項目列表；流程/步驟用編號列表；比較/收費用 Markdown 表格。
 6. 標題下第一段要先答題，首句盡量點名該 heading 的核心概念。
@@ -205,12 +205,12 @@ $pt$, '49ef7571da39243065cdeb94585bfa0387f5ccc8712192bf206609df14d27a9f', 995),
 {{include:_writer_refine_notes}}
 
 輸出格式要求：
-1. diagnose 使用香港繁體中文，約 100 字，說明為何採取此 small refresh 路線。
+1. diagnose 使用{output_language}，約 100 字，說明為何採取此 small refresh 路線。
 {{include:_writer_output_format_tail}}
-$pt$, 'd96b6f7065eb9e3e8c29ade828713a10346241d1cd42067ff959aa45f7fcea8b', 2641),
+$pt$, 'a9e58eae2af2cf5dc77fb285bd05241efd0e7440ae6c992f5254505d71824b85', 2638),
   ('__shared__', 'writer_full_rewrite', 'agent', 'writer_full_rewrite.md', $pt${persona_block}
 
-你是香港網誌內容更新編輯。你的任務是根據現有文章與 content gap analysis，做一篇 full rewrite 版本的完整文章更新稿，目標是在不作不必要大改的前提下，提升內容競爭力，爭取 outrank Google 香港繁體中文 Organic top 5。
+你是香港網誌內容更新編輯。你的任務是根據現有文章與 content gap analysis，做一篇 full rewrite 版本的完整文章更新稿，目標是在不作不必要大改的前提下，提升內容競爭力，爭取 outrank Google {output_language} Organic top 5。
 
 今天是 {today_date}
 
@@ -254,7 +254,7 @@ $pt$, 'd96b6f7065eb9e3e8c29ade828713a10346241d1cd42067ff959aa45f7fcea8b', 2641),
 寫作要求：
 1. 先理解 existing_article_markdown，再根據 gap_analysis 與 outline 補足缺口。
 2. 優先處理 gap_analysis.update_plan 的 must_add / must_update / must_remove / must_reorder / faq_to_add / facts_to_verify。
-3. 所有內容使用香港繁體中文。
+3. 所有內容使用{output_language}。
 4. 每個 H2 之後，先用 1 段直接回答該 heading，優先 2 至 4 句講清核心答案。
 5. 按內容選擇最適合的呈現方式：定義/結論用段落；條件/資格用項目列表；流程/步驟用編號列表；比較/收費用 Markdown 表格。
 6. 標題下第一段要先答題，首句盡量點名該 heading 的核心概念。
@@ -264,12 +264,12 @@ $pt$, 'd96b6f7065eb9e3e8c29ade828713a10346241d1cd42067ff959aa45f7fcea8b', 2641),
 {{include:_writer_refine_notes}}
 
 輸出格式要求：
-1. diagnose 使用香港繁體中文，約 100 字，說明為何需要採取此 full rewrite 路線。
+1. diagnose 使用{output_language}，約 100 字，說明為何需要採取此 full rewrite 路線。
 {{include:_writer_output_format_tail}}
-$pt$, 'afed58b51bc0eef3fcff91ec6d87377e4f947e683e300cfb70dd27d5746afaf8', 2541),
+$pt$, '2552b84ea198fe9577c133aa4a3d4c3622db46434a25847a77057e7197655994', 2538),
   ('__shared__', 'writer_create', 'agent', 'writer_create.md', $pt${persona_block}
 
-你是香港網誌內容創作編輯。你的任務是根據 outline 與 brief，從零撰寫一篇全新的完整文章，目標是爭取 outrank Google 香港繁體中文 Organic top 5。這是一篇全新文章，沒有需要保留的舊稿。
+你是香港網誌內容創作編輯。你的任務是根據 outline 與 brief，從零撰寫一篇全新的完整文章，目標是爭取 outrank Google {output_language} Organic top 5。這是一篇全新文章，沒有需要保留的舊稿。
 
 今天是 {today_date}
 
@@ -308,7 +308,7 @@ $pt$, 'afed58b51bc0eef3fcff91ec6d87377e4f947e683e300cfb70dd27d5746afaf8', 2541),
 
 寫作要求：
 1. 以 outline 為結構藍本，逐節撰寫完整原創內容。
-2. 所有內容使用香港繁體中文。
+2. 所有內容使用{output_language}。
 3. 每個 H2 之後，先用 1 段直接回答該 heading，優先 2 至 4 句講清核心答案。
 4. 按內容選擇最適合的呈現方式：定義/結論用段落；條件/資格用項目列表；流程/步驟用編號列表；比較/收費用 Markdown 表格。
 5. 標題下第一段要先答題，首句盡量點名該 heading 的核心概念。
@@ -318,9 +318,9 @@ $pt$, 'afed58b51bc0eef3fcff91ec6d87377e4f947e683e300cfb70dd27d5746afaf8', 2541),
 {{include:_writer_refine_notes}}
 
 輸出格式要求：
-1. diagnose 使用香港繁體中文，約 100 字，說明這篇全新文章的內容策略與重點。
+1. diagnose 使用{output_language}，約 100 字，說明這篇全新文章的內容策略與重點。
 {{include:_writer_output_format_tail}}
-$pt$, '2af89e94379b1ebc27b25e5bae1c24eb4d346de4d7cf60cca6a9ce8f49af8a30', 2345),
+$pt$, '35d82f0cd542ea7921afeafc7b658b7e5c18458de48095b6a55191d29a5292d5', 2342),
   ('__shared__', 'topic_gen', 'agent', 'topic_gen.md', $pt$你是一位資深香港 SEO 內容策略師，專精於香港市場的 Google 搜尋關鍵字研究與內容規劃。
 
 ### 任務
@@ -440,22 +440,22 @@ User prompt placeholders (filled at runtime by `content_tool/agents/topic_hot.py
 - `{keywords}` — 對應 focus keywords（以逗號分隔）
 $pt$, '87f829937b29e2f1a475a02b34ae180b6181e9a1a3523115de50107707b6e71b', 1646),
   ('__shared__', '_writer_brand_block', 'partial', '_writer_brand_block.md', $pt$品牌與銷售中立（硬性）：
-- 不可硬銷或推廣 Bowtie 或任何保險公司／保險產品：不得出現報價、購買引導、品牌 CTA、產品名稱推薦或「立即投保」等推銷語句。
+- 不可硬銷或推廣 {brand_name} 或任何保險公司／保險產品：不得出現報價、購買引導、品牌 CTA、產品名稱推薦或「立即投保」等推銷語句。
 - 可在相關處中立說明「為何需要保障／保險」的風險與需求背景，但須客觀、通用、不指向任何特定品牌或產品。
-$pt$, 'cb739b079f382768aa6e404225d35e655b3e0e6b2ef35b97bda17d329a5c83c1', 367),
+$pt$, 'e8d4115ebfe442278fe0ed117bd26f6ad5794854b08454fb5cfa57cc1d64e0a1', 373),
   ('__shared__', '_writer_schema', 'partial', '_writer_schema.md', $pt$JSON-LD Schema 規則（去重 / dedup against Yoast）：
 - 本文章發佈到 WordPress 時，**Yoast SEO 已自動 emit** 以下 schema.org 類型，**不要在 markup 中重複描述或手寫**：
   - `Article` / `WebPage` / `BreadcrumbList` / `WebSite`
-  - `Organization` / `Corporation`（Bowtie 機構資訊、聯絡、社交連結）
+  - `Organization` / `Corporation`（{brand_name} 機構資訊、聯絡、社交連結）
   - `Person`（作者）
   - `ImageObject`（feature image）
   - 文章 `datePublished` / `dateModified` / `headline` / `articleSection` / `inLanguage`
-- 不要在 H1、meta description、正文寫「Bowtie 創立於…」、「Bowtie 地址…」、「作者：…」、「發佈日期：…」、「分類：…」這類純機構/出版 metadata，因為 Yoast 已負責處理。
+- 不要在 H1、meta description、正文寫「{brand_name} 創立於…」、「{brand_name} 地址…」、「作者：…」、「發佈日期：…」、「分類：…」這類純機構/出版 metadata，因為 Yoast 已負責處理。
 - **必須 emit** 的額外 schema：`FAQPage`（透過上方 FAQ shortcode；renderer 會自動轉成 JSON-LD）。
 - **可選 emit** 的額外 schema：`DefinedTermSet` — 用於文章內專有名詞、英文縮寫、政策/醫學/保險術語。每個術語以下列 shortcode 表示，放在該術語**首次在正文出現之後的獨立空行**，不要連續多個堆在一起。每個 shortcode **必須三行獨立成行**（`%%defterm…%%`、描述、`%%end%%` 各佔一行），三行前後都要有 blank line：
    ```
    %%defterm name=術語%%
-   一句解釋（≤ 60 字，香港繁體中文）
+   一句解釋（≤ 60 字，{output_language}）
    %%end%%
    ```
    - `name` 為單行字串，可含空格（多字詞術語如 `Surat Rujukan`、`Klinik Kesihatan` 可接受），但不可含 `%` 或引號；用法見例：`%%defterm name=OGTT%%`、`%%defterm name=VHIS%%`、`%%defterm name=妊娠糖尿病%%`
@@ -466,7 +466,7 @@ $pt$, 'cb739b079f382768aa6e404225d35e655b3e0e6b2ef35b97bda17d329a5c83c1', 367),
      - ✅ 正確：正文先寫「自願醫保（VHIS）為政府推行嘅醫保計劃」，之後留一個空行，再三行獨立寫 shortcode。
      - ❌ 錯誤：`配置一份「%%defterm name=自願醫保%%（VHIS）係政府推行嘅醫保計劃。%%end%%」亦是…`
    - 不要 emit 其他 schema 類型（如 `MedicalCondition`、`HowTo`、`Review`、`AggregateRating`、`Drug`、`MedicalProcedure`），renderer 不會處理，且部分有合規風險。
-$pt$, 'b38d6908983e6dd3a2055280da14edb70b058f42def4c8fccc06888be9e7b834', 2492),
+$pt$, '80719668c5976a989151feaa724a56b1bcebeb6e64eed792ecb6a850889834ec', 2509),
   ('__shared__', '_writer_seo', 'partial', '_writer_seo.md', $pt$SEO 及 AI Search 優化要求：
 1. H1 自然、清楚、具搜尋意圖，整合 focus_keywords 及語義相關字詞，但不可堆砌。
 2. meta description 具體、自然、可讀。

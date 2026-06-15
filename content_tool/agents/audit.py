@@ -125,12 +125,17 @@ async def run_audit(
         c.was_displayed and c.policy_decision == "denied" for c in citations
     )
 
+    # Resolve the run's voice locale so the sources <h2> gate matches the
+    # heading render_html emitted (English "Sources" for a non-Chinese voice;
+    # None keeps accepting both Chinese scripts for zh voices — byte-identical).
+    audit_locale = (await load_persona(run.persona, session=session)).locale
     det_findings = run_deterministic_checks(
         render.html_body,
         citations_denied_displayed=denied_displayed,
         schema_jsonld=render.schema_jsonld,
         adv_enabled=run.acf_adv_id != 0,
         widget_enabled=run.acf_widget_id != 0,
+        sources_heading=audit_locale.sources_heading,
     )
 
     sys_prompt = await build_system_prompt(

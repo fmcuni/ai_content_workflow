@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from content_tool import source_policy_store
 from content_tool.agents.url_resolver import UrlResolver
 from content_tool.db.models import Citation, Draft, Run
+from content_tool.policy.personas import load_persona
 
 # Simplified- vs Traditional-only character sets used to pick the script of the
 # auto-generated sources heading so it matches the article's voice (e.g. a zh-MY
@@ -19,8 +20,17 @@ _SIMPLIFIED_CHARS = frozenset("这个为与会时国说后应医险来们对现�
 _TRADITIONAL_CHARS = frozenset("這個為與會時國說後應醫險來們對現實樣關開點歲費資訊問題衛營見")
 
 
-def _sources_heading_for(markup: str) -> str:
-    """Pick the sources heading whose Chinese script matches ``markup``."""
+def _sources_heading_for(markup: str, *, configured: str | None = None) -> str:
+    """Pick the sources heading for the article.
+
+    When the voice configures an explicit ``sources_heading`` (``configured``
+    non-None) it wins verbatim — this is how a non-Chinese voice gets an English
+    ``Sources`` heading instead of a Traditional-Chinese ``資訊來源``. Otherwise
+    fall back to the Traditional↔Simplified char-count detection so existing zh
+    voices stay byte-identical.
+    """
+    if configured is not None:
+        return configured
     simplified = sum(ch in _SIMPLIFIED_CHARS for ch in markup)
     traditional = sum(ch in _TRADITIONAL_CHARS for ch in markup)
     return "资讯来源" if simplified > traditional else "資訊來源"
@@ -54,6 +64,10 @@ async def run_resolve_citations(
         )
     ).scalar_one()
     policy = await source_policy_store.get_policy(voice_slug=voice_slug, session=session)
+    # Resolve the voice's configured sources heading (e.g. an English "Sources"
+    # for a non-Chinese voice). None keeps today's script auto-detection.
+    persona = await load_persona(voice_slug, session=session)
+    configured_heading = persona.locale.sources_heading
     resolver = UrlResolver(session=session, client=client)
 
     grounding_chunks: list[Any] = list(draft.grounding_chunks or [])
@@ -126,7 +140,8 @@ async def run_resolve_citations(
 
     markup_raw = draft.markup_raw or ""
     sources_md = _build_sources_md(
-        allowed_for_display, heading=_sources_heading_for(markup_raw)
+        allowed_for_display,
+        heading=_sources_heading_for(markup_raw, configured=configured_heading),
     )
     final_markup = markup_raw.rstrip() + "\n" + sources_md
 

@@ -8,6 +8,7 @@
 import type { Sql } from "postgres";
 import { toJsonb } from "../db/serialize";
 import { getAssembled, substitute } from "../prompts/store";
+import { loadPersona } from "./persona";
 import type { GeminiClient, ThoughtCallback } from "../gemini/types";
 import { OUTLINE_SCHEMA, type Outline } from "./schemas";
 
@@ -68,10 +69,18 @@ async function buildSystemPrompt(
 
   const template = await getAssembled(sql, "outline_rewrite_mode", voiceSlug);
 
+  // Inject the create-mode block FIRST, then interpolate locale/brand tokens
+  // (mirror outline.py / writer.ts). String.replace is first-match-only in JS
+  // but these tokens recur, so use replaceAll. HK-ZH defaults equal the old
+  // literals → byte-identical for bowtie-editor.
+  const { locale: loc } = await loadPersona(sql, voiceSlug);
   return substitute(template, {
     today_date: todayDate,
     create_mode_block: block,
-  });
+  })
+    .replaceAll("{brand_name}", loc.brandName)
+    .replaceAll("{output_language}", loc.outputLanguage)
+    .replaceAll("{market}", loc.market);
 }
 
 // ---------------------------------------------------------------------------

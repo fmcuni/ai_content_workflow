@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import TIMESTAMP, Boolean, String, text
@@ -25,6 +26,12 @@ class Persona(Base):
     tone_examples: Mapped[dict] = mapped_column(JSONB, nullable=False)
     glossary: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # Per-voice locale / brand identity (output language, brand name, market,
+    # sources/FAQ headings, persona-block label set). Empty {} → HK-ZH defaults
+    # (see content_tool.models.persona.VoiceLocale). Migration 20260616000000.
+    locale: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     # CMS publish destination for this voice. NULL → fall back to the legacy
     # WP_* env target (see content_tool/publishers/wp_factory.py).

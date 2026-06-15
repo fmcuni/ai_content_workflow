@@ -1,6 +1,7 @@
 import type { Sql } from "postgres";
 import { SourcePolicy, type Decision } from "../config/source_policy";
 import { getPolicy } from "../source_policy/store";
+import { loadPersona } from "./persona";
 import { resolveUrl } from "./url_resolver";
 
 // Cap on concurrent URL resolutions. Citation resolution runs inside a Workflow
@@ -56,8 +57,16 @@ interface CitationRecord {
 const SIMPLIFIED_CHARS = new Set("这个为与会时国说后应医险来们对现实样关开点岁费资讯问题卫营见");
 const TRADITIONAL_CHARS = new Set("這個為與會時國說後應醫險來們對現實樣關開點歲費資訊問題衛營見");
 
-/** Pick the sources heading whose Chinese script matches `markup`. */
-function sourcesHeadingFor(markup: string): string {
+/**
+ * Pick the sources heading for the article.
+ *
+ * When the voice configures an explicit `sourcesHeading` (`configured` non-null)
+ * it wins verbatim — a non-Chinese voice gets its English "Sources" heading.
+ * Otherwise fall back to the Traditional↔Simplified char-count detection so
+ * existing zh voices stay byte-identical. Mirrors Python `_sources_heading_for`.
+ */
+function sourcesHeadingFor(markup: string, configured: string | null = null): string {
+  if (configured !== null) return configured;
   let simplified = 0;
   let traditional = 0;
   for (const ch of markup) {
@@ -202,6 +211,9 @@ export async function resolveCitations(
   const { draftId, markupRaw, groundingChunks, topicCategory, voiceSlug } = input;
 
   const policy = await getPolicy(sql, voiceSlug);
+  // Resolve the voice's configured sources heading (e.g. an English "Sources"
+  // for a non-Chinese voice). null keeps today's script auto-detection.
+  const { locale } = await loadPersona(sql, voiceSlug);
   const records = await resolveAllChunks(sql, groundingChunks, topicCategory, policy);
 
   const displayed: { domain: string; finalUrl: string }[] = [];
@@ -213,7 +225,10 @@ export async function resolveCitations(
     }
   }
 
-  const sourcesMd = buildSourcesMd(displayed, sourcesHeadingFor(markupRaw));
+  const sourcesMd = buildSourcesMd(
+    displayed,
+    sourcesHeadingFor(markupRaw, locale.sourcesHeading),
+  );
   const finalMarkup = markupRaw.replace(/\s+$/, "") + "\n" + sourcesMd;
 
   return { finalMarkup, displayedCount: displayed.length };

@@ -14,7 +14,7 @@ from content_tool.db.models import (
     SourcePolicyRecord,
     SourcePolicyVersion,
 )
-from content_tool.models.persona import PersonaPack
+from content_tool.models.persona import PersonaPack, VoiceLocale
 from content_tool.source_policy_store import POLICY_ID, SHARED_VOICE
 
 # Editable prompt categories cloned when a voice is duplicated. Judges stay
@@ -31,6 +31,7 @@ _PERSONA_PATCH_KEYS = {
     "disclaimer_templates",
     "tone_examples",
     "glossary",
+    "locale",
     "publish_target_id",
     "is_archived",
 }
@@ -54,6 +55,7 @@ def _row_to_pack(row: Persona) -> PersonaPack:
         "disclaimer_templates": row.disclaimer_templates,
         "tone_examples": row.tone_examples,
         "glossary": row.glossary or [],
+        "locale": VoiceLocale.from_raw(row.locale),
     })
 
 
@@ -97,6 +99,7 @@ async def create_persona(
     disclaimer_templates: dict[str, dict[str, str]],
     tone_examples: dict[str, list[str]],
     glossary: list[dict[str, Any]] | None = None,
+    locale: dict[str, Any] | None = None,
     created_by: str | None = None,
 ) -> Persona:
     row = Persona(
@@ -108,6 +111,7 @@ async def create_persona(
         disclaimer_templates=disclaimer_templates,
         tone_examples=tone_examples,
         glossary=glossary or [],
+        locale=locale or {},
         created_by=created_by,
         updated_by=created_by,
     )
@@ -231,6 +235,7 @@ async def duplicate_persona(
         disclaimer_templates={k: v.model_dump() for k, v in pack.disclaimer_templates.items()},
         tone_examples={k: list(v) for k, v in pack.tone_examples.items()},
         glossary=[g.model_dump() for g in pack.glossary],
+        locale=pack.locale.model_dump(),
         created_by=created_by,
         updated_by=created_by,
     )

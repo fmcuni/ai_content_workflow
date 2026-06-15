@@ -11,6 +11,7 @@ from content_tool.db.models import FetchedArticle, GapAnalysisRow, OutlineRow, R
 from content_tool.gemini.client import GeminiClient
 from content_tool.gemini.prompt_context import PromptMeta, set_prompt_meta
 from content_tool.models.outline import Outline
+from content_tool.policy.personas import load_persona
 
 
 async def build_system_prompt(
@@ -52,8 +53,17 @@ async def build_system_prompt(
         set_prompt_meta(PromptMeta(
             template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256
         ))
-    return template.replace("{today_date}", today.isoformat()).replace(
-        "{create_mode_block}", block
+    # Locale/brand tokens (mirror writer.build_system_prompt). The create-mode
+    # block is injected FIRST so any {output_language}/{brand_name}/{market}
+    # tokens it carries are interpolated by the replaces below. HK-ZH defaults
+    # equal the old literals → byte-identical for bowtie-editor.
+    loc = (await load_persona(voice_slug, session=session)).locale
+    return (
+        template.replace("{today_date}", today.isoformat())
+        .replace("{create_mode_block}", block)
+        .replace("{brand_name}", loc.brand_name)
+        .replace("{output_language}", loc.output_language)
+        .replace("{market}", loc.market)
     )
 
 

@@ -115,10 +115,14 @@ async def build_system_prompt(
         ))
     persona = await load_persona(persona_name, session=session)
     policy = await source_policy_store.get_policy(voice_slug=persona_name, session=session)
+    loc = persona.locale
     return (
         template.replace("{persona_block}", persona.to_prompt_block(context_text))
         .replace("{today_date}", today.isoformat())
         .replace("{source_policy_block}", policy.to_prompt_block())
+        .replace("{brand_name}", loc.brand_name)
+        .replace("{output_language}", loc.output_language)
+        .replace("{market}", loc.market)
     )
 
 

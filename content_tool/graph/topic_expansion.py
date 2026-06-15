@@ -310,12 +310,18 @@ def build_topic_expansion_graph(
                 return await _retry_with_backoff(_call, label="topic_dedup")
 
             async def _do_hot() -> TopicHotOutput:
-                return await _retry_with_backoff(
-                    lambda: run_topic_hot(
-                        gemini=gemini, input=hot_input, voice_slug=voice_slug
-                    ),
-                    label="topic_hot",
-                )
+                # Own (read-only) session so the voice locale can be loaded for
+                # the market token; must not share dedup's concurrent session.
+                async def _call() -> TopicHotOutput:
+                    async with session_factory() as hot_session:
+                        return await run_topic_hot(
+                            gemini=gemini,
+                            input=hot_input,
+                            voice_slug=voice_slug,
+                            session=hot_session,
+                        )
+
+                return await _retry_with_backoff(_call, label="topic_hot")
 
             results = await asyncio.gather(_do_dedup(), _do_hot(), return_exceptions=True)
             dedup_res, hot_res = results

@@ -26,6 +26,75 @@ export interface DisclaimerTemplate {
   disclaimer: string;
 }
 
+/**
+ * Per-voice locale / brand identity — TS mirror of
+ * `content_tool.models.persona.VoiceLocale`. Stored in `personas.locale`
+ * (JSONB). The defaults reproduce `bowtie-editor` (Bowtie HK 繁體中文)
+ * byte-for-byte, so an empty `{}` locale is a no-op.
+ */
+export interface VoiceLocale {
+  outputLanguage: string;
+  brandName: string;
+  market: string;
+  sourcesHeading: string | null;
+  faqHeading: string;
+}
+
+/** HK-ZH defaults (mirror VoiceLocale's Python field defaults). */
+export function defaultVoiceLocale(): VoiceLocale {
+  return {
+    outputLanguage: "香港繁體中文",
+    brandName: "Bowtie",
+    market: "Google 香港繁中",
+    sourcesHeading: null,
+    faqHeading: "常見問題",
+  };
+}
+
+interface RawVoiceLocale {
+  output_language?: string;
+  brand_name?: string;
+  market?: string;
+  sources_heading?: string | null;
+  faq_heading?: string;
+}
+
+/** Build a VoiceLocale from a raw JSONB value. null/{}/non-object → defaults. */
+export function voiceLocaleFromRaw(raw: unknown): VoiceLocale {
+  const d = defaultVoiceLocale();
+  if (raw === null || typeof raw !== "object") {
+    return d;
+  }
+  const r = raw as RawVoiceLocale;
+  return {
+    outputLanguage: r.output_language ?? d.outputLanguage,
+    brandName: r.brand_name ?? d.brandName,
+    market: r.market ?? d.market,
+    sourcesHeading: r.sources_heading ?? d.sourcesHeading,
+    faqHeading: r.faq_heading ?? d.faqHeading,
+  };
+}
+
+/** Raw snake_case shape of a VoiceLocale (wire/JSONB form). */
+export interface RawVoiceLocaleOut {
+  output_language: string;
+  brand_name: string;
+  market: string;
+  sources_heading: string | null;
+  faq_heading: string;
+}
+
+/** Serialize a VoiceLocale back to its snake_case wire shape (camel → snake). */
+export function voiceLocaleToRaw(loc: VoiceLocale): RawVoiceLocaleOut {
+  return {
+    output_language: loc.outputLanguage,
+    brand_name: loc.brandName,
+    market: loc.market,
+    sources_heading: loc.sourcesHeading,
+    faq_heading: loc.faqHeading,
+  };
+}
+
 export interface PersonaPack {
   name: string;
   voiceRules: string[];
@@ -34,6 +103,101 @@ export interface PersonaPack {
   disclaimerTemplates: Record<string, DisclaimerTemplate>;
   toneExamples: { good: string[]; bad: string[] };
   glossary: GlossaryEntry[];
+  locale: VoiceLocale;
+}
+
+// ---------------------------------------------------------------------------
+// Persona-block scaffolding labels (auto-derived from VoiceLocale.outputLanguage)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scaffolding labels for `toPromptBlock` — TS mirror of Python
+ * `PersonaBlockLabels`. The `zh-Hant` set is byte-identical to the strings used
+ * before parameterization so HK-ZH voices are a no-op; the `en` set emits no
+ * Traditional-Chinese scaffolding.
+ */
+interface PersonaBlockLabels {
+  personaHeader: string;
+  role: string;
+  voiceRules: string;
+  bannedTerms: string;
+  requiredPhrasings: string;
+  toneExamples: string;
+  toneGood: string;
+  toneBad: string;
+  glossaryHeader: string;
+  forbidden: string;
+  avoid: string;
+  avoidArrow: string; // between term and target
+  avoidArrowClose: string; // after target
+  avoidNoTarget: string; // placeholder when no preferred target exists
+  doNotTranslate: string;
+  preferredOpen: string; // before preferred/term
+  preferredClose: string; // after preferred/term
+  variantsOpen: string; // wraps variant list (open)
+  variantsClose: string; // wraps variant list (close)
+}
+
+// zh-Hant (default) — byte-identical to the pre-change hardcoded strings.
+// NOTE: requiredPhrasings keeps the exact bytes "必須採用的香港用語：" so the
+// assembled HK-ZH prompt is unchanged; the neutral wording lives only in `en`.
+const LABELS_ZH_HANT: PersonaBlockLabels = {
+  personaHeader: "# 撰稿人格",
+  role: "角色：",
+  voiceRules: "語氣規則：",
+  bannedTerms: "避免使用的字詞：",
+  requiredPhrasings: "必須採用的香港用語：",
+  toneExamples: "語氣示例：",
+  toneGood: "好：",
+  toneBad: "壞：",
+  glossaryHeader: "# 詞彙表 · Glossary",
+  forbidden: "禁用：",
+  avoid: "避用：",
+  avoidArrow: " → 改用「",
+  avoidArrowClose: "」",
+  avoidNoTarget: "(無替代詞)",
+  doNotTranslate: "保留原文：",
+  preferredOpen: "用「",
+  preferredClose: "」",
+  variantsOpen: "（避用：",
+  variantsClose: "）",
+};
+
+// en — English scaffolding; emits NO Traditional-Chinese labels.
+const LABELS_EN: PersonaBlockLabels = {
+  personaHeader: "# Persona",
+  role: "Role: ",
+  voiceRules: "Voice rules:",
+  bannedTerms: "Terms to avoid: ",
+  requiredPhrasings: "Required phrasings: ",
+  toneExamples: "Tone examples:",
+  toneGood: "Good: ",
+  toneBad: "Bad: ",
+  glossaryHeader: "# Glossary",
+  forbidden: "Forbidden: ",
+  avoid: "Avoid: ",
+  avoidArrow: ' → use "',
+  avoidArrowClose: '"',
+  avoidNoTarget: "(no alternative)",
+  doNotTranslate: "Do not translate: ",
+  preferredOpen: 'Use "',
+  preferredClose: '"',
+  variantsOpen: " (avoid: ",
+  variantsClose: ")",
+};
+
+// CJK detection (CJK Ext A + Unified + Compatibility Ideographs) — mirrors the
+// Python `_CJK_RE` so both backends auto-derive the label set identically.
+const CJK_RE = /[㐀-鿿豈-﫿]/;
+
+/**
+ * Pick the persona-block label set from the voice's `outputLanguage`
+ * (mirror of Python `_labels_for`). Auto-derived: a Chinese output language
+ * (any CJK ideograph) → Traditional-Chinese labels; a non-Chinese (Latin-script)
+ * output language → English labels. No separate manual control.
+ */
+function labelsFor(outputLanguage: string): PersonaBlockLabels {
+  return CJK_RE.test(outputLanguage) ? LABELS_ZH_HANT : LABELS_EN;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,25 +225,30 @@ function filterGlossary(glossary: GlossaryEntry[], contextText: string | undefin
 }
 
 /** Render glossary section — mirrors PersonaPack._render_glossary(). */
-function renderGlossary(glossary: GlossaryEntry[], contextText: string | undefined): string {
+function renderGlossary(
+  glossary: GlossaryEntry[],
+  contextText: string | undefined,
+  lbl: PersonaBlockLabels,
+): string {
   const entries = filterGlossary(glossary, contextText);
   if (entries.length === 0) {
     return "";
   }
-  const lines: string[] = ["# 詞彙表 · Glossary"];
+  const lines: string[] = [lbl.glossaryHeader];
   for (const e of entries) {
-    const variants = e.variants.length > 0 ? `（避用：${e.variants.join(", ")}）` : "";
+    const variants =
+      e.variants.length > 0 ? `${lbl.variantsOpen}${e.variants.join(", ")}${lbl.variantsClose}` : "";
     const note = e.notes ? ` — ${e.notes}` : "";
     if (e.status === "forbidden") {
-      lines.push(`- 禁用：${e.term}${variants}${note}`);
+      lines.push(`- ${lbl.forbidden}${e.term}${variants}${note}`);
     } else if (e.status === "avoid") {
-      const target = e.preferred || "(無替代詞)";
-      lines.push(`- 避用：${e.term} → 改用「${target}」${variants}${note}`);
+      const target = e.preferred || lbl.avoidNoTarget;
+      lines.push(`- ${lbl.avoid}${e.term}${lbl.avoidArrow}${target}${lbl.avoidArrowClose}${variants}${note}`);
     } else if (e.status === "do_not_translate") {
-      lines.push(`- 保留原文：${e.term}${note}`);
+      lines.push(`- ${lbl.doNotTranslate}${e.term}${note}`);
     } else {
       // "preferred" (default)
-      lines.push(`- 用「${e.preferred || e.term}」${variants}${note}`);
+      lines.push(`- ${lbl.preferredOpen}${e.preferred || e.term}${lbl.preferredClose}${variants}${note}`);
     }
   }
   return lines.join("\n") + "\n";
@@ -97,19 +266,20 @@ function renderGlossary(glossary: GlossaryEntry[], contextText: string | undefin
  * This mirrors Python's `PersonaPack.to_prompt_block(context_text)` exactly.
  */
 export function toPromptBlock(persona: PersonaPack, contextText?: string): string {
-  const good = persona.toneExamples.good.map((x) => `  好：${x}`).join("\n");
-  const bad = persona.toneExamples.bad.map((x) => `  壞：${x}`).join("\n");
-  const glossarySection = renderGlossary(persona.glossary, contextText);
+  const lbl = labelsFor(persona.locale.outputLanguage);
+  const good = persona.toneExamples.good.map((x) => `  ${lbl.toneGood}${x}`).join("\n");
+  const bad = persona.toneExamples.bad.map((x) => `  ${lbl.toneBad}${x}`).join("\n");
+  const glossarySection = renderGlossary(persona.glossary, contextText, lbl);
 
   return (
-    `# 撰稿人格\n` +
-    `角色：${persona.name}\n` +
-    `語氣規則：\n` +
+    `${lbl.personaHeader}\n` +
+    `${lbl.role}${persona.name}\n` +
+    `${lbl.voiceRules}\n` +
     persona.voiceRules.map((r) => `- ${r}`).join("\n") +
     `\n` +
-    `避免使用的字詞：${persona.bannedTerms.join(", ")}\n` +
-    `必須採用的香港用語：${persona.requiredPhrasings.join(", ")}\n` +
-    `語氣示例：\n${good}\n${bad}\n` +
+    `${lbl.bannedTerms}${persona.bannedTerms.join(", ")}\n` +
+    `${lbl.requiredPhrasings}${persona.requiredPhrasings.join(", ")}\n` +
+    `${lbl.toneExamples}\n${good}\n${bad}\n` +
     glossarySection
   );
 }
@@ -145,6 +315,7 @@ function rowToPack(row: {
   disclaimer_templates: unknown;
   tone_examples: unknown;
   glossary: unknown;
+  locale: unknown;
 }): PersonaPack {
   const voiceRules = row.voice_rules as string[];
   const bannedTerms = row.banned_terms as string[];
@@ -180,6 +351,7 @@ function rowToPack(row: {
       bad: rawTone.bad ?? [],
     },
     glossary,
+    locale: voiceLocaleFromRaw(row.locale),
   };
 }
 
@@ -203,10 +375,11 @@ export async function loadPersona(
       disclaimer_templates: unknown;
       tone_examples: unknown;
       glossary: unknown;
+      locale: unknown;
     }>
   >`
     SELECT name, voice_rules, banned_terms, required_phrasings,
-           disclaimer_templates, tone_examples, glossary
+           disclaimer_templates, tone_examples, glossary, locale
     FROM content_tool.personas
     WHERE slug = ${slug}
       AND is_archived = false

@@ -15,6 +15,7 @@ export interface PersonaRow {
   disclaimer_templates: unknown;
   tone_examples: unknown;
   glossary: unknown;
+  locale: unknown;
   publish_target_id: string | null;
   is_archived: boolean;
   created_at: string;

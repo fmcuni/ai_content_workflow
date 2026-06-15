@@ -5,7 +5,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { personasApi, publishTargetsApi } from "@/lib/api";
-import type { DisclaimerTemplate, Persona, PersonaIn } from "@/lib/types";
+import type { DisclaimerTemplate, Persona, PersonaIn, VoiceLocale } from "@/lib/types";
+
+// HK-ZH defaults — shown as input placeholders so an admin sees what "leave
+// blank" yields. `sources_heading` default is null (follow the article script).
+const HK_ZH_LOCALE: VoiceLocale = {
+  output_language: "香港繁體中文",
+  brand_name: "Bowtie",
+  market: "Google 香港繁中",
+  sources_heading: null,
+  faq_heading: "常見問題",
+};
 
 interface ComposeDrawerProps {
   mode: { kind: "create" } | { kind: "edit"; persona: Persona };
@@ -14,6 +24,12 @@ interface ComposeDrawerProps {
   /** When true, this is the last non-archived voice — archiving is disabled
    * (the app must keep at least one usable voice; the server also returns 409). */
   isLastVoice?: boolean;
+  /** Admin-only: gate the Locale & Brand section. The page only mounts this
+   * drawer for managers, so defaults true. */
+  canManage?: boolean;
+  /** Fired (debounced upstream) as the locale form changes, so a sibling live
+   * preview can reflect the unsaved locale. */
+  onLocaleChange?: (locale: VoiceLocale) => void;
 }
 
 function emptyForm(): PersonaIn {
@@ -85,6 +101,31 @@ function StringList({
       >
         ＋ 加一行
       </button>
+    </div>
+  );
+}
+
+function LocaleField({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div>
+      <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint mb-1">{label}</p>
+      <input
+        aria-label={label}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
+      />
     </div>
   );
 }
@@ -180,11 +221,41 @@ function DisclaimerTemplateList({
   );
 }
 
-export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: ComposeDrawerProps) {
+function fromPersonaLocale(mode: ComposeDrawerProps["mode"]): VoiceLocale {
+  if (mode.kind === "edit" && mode.persona.locale) {
+    return mode.persona.locale;
+  }
+  return { ...HK_ZH_LOCALE };
+}
+
+export function ComposeDrawer({
+  mode,
+  onClose,
+  onSaved,
+  isLastVoice = false,
+  canManage = true,
+  onLocaleChange,
+}: ComposeDrawerProps) {
   const qc = useQueryClient();
   const [form, setForm] = useState<PersonaIn>(
     mode.kind === "create" ? emptyForm() : fromPersona(mode.persona),
   );
+  // Locale & Brand form state. `sources_heading` is held as string|null: the
+  // text input binds to `?? ""`, and a blank string is normalised to null on
+  // both change (so the banner + live preview see null) and submit.
+  const [localeForm, setLocaleForm] = useState<VoiceLocale>(() => fromPersonaLocale(mode));
+
+  function updateLocale(next: VoiceLocale) {
+    const normalised: VoiceLocale = {
+      ...next,
+      sources_heading:
+        next.sources_heading && next.sources_heading.trim() !== ""
+          ? next.sources_heading
+          : null,
+    };
+    setLocaleForm(normalised);
+    onLocaleChange?.(normalised);
+  }
   // CMS publish target for this voice. null = the backend's default (legacy
   // Bowtie WordPress env). Managed separately from `form` because the create
   // payload (PersonaIn) has no target field — it's applied via PATCH.
@@ -254,6 +325,7 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
         required_phrasings: body.required_phrasings,
         disclaimer_templates: body.disclaimer_templates,
         tone_examples: body.tone_examples,
+        locale: body.locale,
         publish_target_id: targetId,
       }),
     onSuccess: (p) => {
@@ -282,7 +354,9 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const cleaned = cleanLists(form);
+    // Attach the whole locale object (all 6 fields) to the submitted body;
+    // `localeForm.sources_heading` is already null when blank.
+    const cleaned: PersonaIn = { ...cleanLists(form), locale: localeForm };
     if (mode.kind === "create") {
       createMut.mutate(cleaned);
     } else {
@@ -388,6 +462,44 @@ export function ComposeDrawer({ mode, onClose, onSaved, isLastVoice = false }: C
               setForm({ ...form, tone_examples: { ...form.tone_examples, bad: next } })
             }
           />
+
+          {canManage && (
+            <section className="space-y-3 pt-4 border-t border-rule" aria-label="Locale & Brand">
+              <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+                Locale &amp; Brand · 語系與品牌
+              </p>
+              <LocaleField
+                label="Output language · 輸出語言"
+                value={localeForm.output_language}
+                placeholder={HK_ZH_LOCALE.output_language}
+                onChange={(v) => updateLocale({ ...localeForm, output_language: v })}
+              />
+              <LocaleField
+                label="Brand name · 品牌名稱"
+                value={localeForm.brand_name}
+                placeholder={HK_ZH_LOCALE.brand_name}
+                onChange={(v) => updateLocale({ ...localeForm, brand_name: v })}
+              />
+              <LocaleField
+                label="Market · 市場"
+                value={localeForm.market}
+                placeholder={HK_ZH_LOCALE.market}
+                onChange={(v) => updateLocale({ ...localeForm, market: v })}
+              />
+              <LocaleField
+                label="Sources heading · 資訊來源標題"
+                value={localeForm.sources_heading ?? ""}
+                placeholder="(blank → follow article script)"
+                onChange={(v) => updateLocale({ ...localeForm, sources_heading: v })}
+              />
+              <LocaleField
+                label="FAQ heading · 常見問題標題"
+                value={localeForm.faq_heading}
+                placeholder={HK_ZH_LOCALE.faq_heading}
+                onChange={(v) => updateLocale({ ...localeForm, faq_heading: v })}
+              />
+            </section>
+          )}
 
           <footer className="space-y-3 pt-4 border-t border-rule">
             <button

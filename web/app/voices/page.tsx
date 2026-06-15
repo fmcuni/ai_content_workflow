@@ -11,7 +11,7 @@ import { StyleCard } from "@/components/voices/StyleCard";
 import { PressWorkflow } from "@/components/voices/PressWorkflow";
 import { PromptInspector } from "@/components/voices/PromptInspector";
 import { personasApi, promptsApi } from "@/lib/api";
-import type { GraphMode } from "@/lib/types";
+import type { GraphMode, VoiceLocale } from "@/lib/types";
 import { useRole } from "@/lib/use-role";
 
 export default function VoicesPage() {
@@ -28,6 +28,9 @@ export default function VoicesPage() {
     | { kind: "duplicate" }
     | { kind: "edit"; slug: string }
   >(null);
+  // In-progress (unsaved) locale from the open edit drawer, fed to the live
+  // PromptInspector preview. Cleared whenever the edit drawer is dismissed.
+  const [liveLocale, setLiveLocale] = useState<VoiceLocale | null>(null);
 
   const personas = useQuery({
     queryKey: ["personas", showArchived],
@@ -100,7 +103,16 @@ export default function VoicesPage() {
             mode={graphMode}
             onModeChange={setGraphMode}
             renderInspector={(node) => (
-              <PromptInspector node={node} mode={graphMode} voice={activeSlug ?? "bowtie-editor"} />
+              <PromptInspector
+                node={node}
+                mode={graphMode}
+                voice={activeSlug ?? "bowtie-editor"}
+                liveLocale={
+                  composeMode?.kind === "edit" && composeMode.slug === activeSlug
+                    ? (liveLocale ?? undefined)
+                    : undefined
+                }
+              />
             )}
           />
         )}
@@ -129,9 +141,15 @@ export default function VoicesPage() {
           <ComposeDrawer
             mode={{ kind: "edit", persona: found }}
             isLastVoice={isLastVoice}
-            onClose={() => setComposeMode(null)}
+            canManage={canManage}
+            onLocaleChange={setLiveLocale}
+            onClose={() => {
+              setComposeMode(null);
+              setLiveLocale(null);
+            }}
             onSaved={(slug) => {
               setComposeMode(null);
+              setLiveLocale(null);
               setSelectedSlug(slug);
             }}
           />

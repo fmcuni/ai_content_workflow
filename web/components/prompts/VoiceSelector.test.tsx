@@ -16,6 +16,13 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     disclaimer_templates: {},
     tone_examples: {},
     glossary: [],
+    locale: {
+      output_language: "香港繁體中文",
+      brand_name: "Bowtie",
+      market: "Google 香港繁中",
+      sources_heading: null,
+      faq_heading: "常見問題",
+    },
     publish_target_id: null,
     is_archived: false,
     created_at: "2026-06-01T00:00:00Z",

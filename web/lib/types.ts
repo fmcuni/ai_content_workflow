@@ -641,6 +641,20 @@ export interface DisclaimerTemplate {
   disclaimer: string;
 }
 
+// Per-voice locale & brand. Wire casing is snake_case (matches the personas
+// endpoint + the preview override body). HK-ZH defaults are what an admin sees
+// as placeholders; `sources_heading` null = follow the article's script
+// (auto-detected) rather than a fixed string. The persona-block label set
+// (Chinese vs English scaffolding) is auto-derived from `output_language` at
+// render time, so there is no manual UI-language field.
+export interface VoiceLocale {
+  output_language: string;
+  brand_name: string;
+  market: string;
+  sources_heading: string | null;
+  faq_heading: string;
+}
+
 export interface Persona {
   persona_id: string;
   slug: string;
@@ -651,6 +665,7 @@ export interface Persona {
   disclaimer_templates: Record<string, DisclaimerTemplate>;
   tone_examples: Record<string, string[]>;
   glossary: GlossaryEntry[];
+  locale: VoiceLocale;
   publish_target_id: string | null;
   is_archived: boolean;
   created_at: string;
@@ -707,6 +722,7 @@ export interface PersonaIn {
   disclaimer_templates: Record<string, DisclaimerTemplate>;
   tone_examples: Record<string, string[]>;
   glossary?: GlossaryEntry[];
+  locale?: VoiceLocale;
 }
 
 export interface PersonaPatch {
@@ -717,6 +733,9 @@ export interface PersonaPatch {
   disclaimer_templates?: Record<string, DisclaimerTemplate>;
   tone_examples?: Record<string, string[]>;
   glossary?: GlossaryEntry[];
+  // Whole-object replace: the form always sends all 6 fields. Omitting `locale`
+  // leaves the stored column untouched server-side.
+  locale?: VoiceLocale;
   // null clears the assignment (→ backend legacy WP default).
   publish_target_id?: string | null;
 }
@@ -815,6 +834,9 @@ export interface PromptTemplateSchema {
   unknown_includes: string[];
   /** Reference shape of the user prompt sent alongside this system prompt (null for partials). */
   user_prompt_template?: string | null;
+  /** The voice's stored locale — the values the assembled prompt's
+   * {brand_name}/{output_language}/{market}/… tokens resolve to at runtime. */
+  voice_locale?: VoiceLocale | null;
   /** The Gemini responseSchema this agent is called with (null when the agent returns plain text). */
   response_json_schema?: Record<string, unknown> | null;
 }
