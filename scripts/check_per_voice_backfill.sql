@@ -1,5 +1,5 @@
 -- Post-migration assertion for the Per-Voice Prompt Library backfill.
--- Spec/Plan: docs/superpowers/{specs,plans}/2026-06-05-per-voice-prompt-library.md
+-- Spec/Plan: docs/design/{specs,plans}/2026-06-05-per-voice-prompt-library.md
 --
 -- Run AFTER `supabase db reset` (i.e. after supabase/seed.sql seeds personas) to
 -- validate the post-seed state — the in-migration DO block only sees personas

@@ -1,6 +1,6 @@
 -- Per-Voice Prompt Library & Source Policy (Phase 1: DB migration only).
--- Spec:  docs/superpowers/specs/2026-06-05-per-voice-prompt-library.md
--- Plan:  docs/superpowers/plans/2026-06-05-per-voice-prompt-library.md
+-- Spec:  docs/design/specs/2026-06-05-per-voice-prompt-library.md
+-- Plan:  docs/design/plans/2026-06-05-per-voice-prompt-library.md
 --
 -- Scopes content_tool.prompt_templates (categories `agent` + `partial`) and
 -- content_tool.source_policy PER VOICE (persona slug). Judges stay global.

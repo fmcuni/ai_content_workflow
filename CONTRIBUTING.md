@@ -94,8 +94,8 @@ migration first, then deploy code that relies on it).
 - Analyze the full commit history (not just the latest commit) when drafting a PR.
 - Include a test plan. Ensure CI is green and the branch is up to date with `main`
   before requesting review.
-- New features get a dated design doc under `docs/superpowers/specs/` and a plan
-  under `docs/superpowers/plans/`.
+- New features get a dated design doc under `docs/design/specs/` and a plan
+  under `docs/design/plans/`.
 
 ## Deployment
 

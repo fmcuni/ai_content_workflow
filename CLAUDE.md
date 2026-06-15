@@ -70,7 +70,7 @@ web/                 Next.js 16 frontend (see web/AGENTS.md before editing)
 deploy/cloudflare-workers/  Production hosting: TypeScript port of the backend as a
                      Cloudflare Worker (Hono + Workflows + Durable Objects, DB via
                      postgres.js over Hyperdrive). See its README + AGENTS notes.
-docs/superpowers/    specs/ and plans/ — design docs per feature, dated
+docs/design/    specs/ and plans/ — design docs per feature, dated
 evals/               LLM-judge evals + fixtures (nightly cron + PR label trigger);
                      prompt_advisor.py = aggregate LLM-as-judge that prescribes
                      prompt fixes (`python -m evals.run_prompt_advisor`)
@@ -208,7 +208,7 @@ node scripts/claude-debug/browse.mjs '[{"goto":"/runs"},{"shotView":"runs.png"}]
 - **Commits:** Conventional Commits with scope: `feat(web):`, `fix(hitl2):`,
   `test(personas):`, etc.
 - **Specs & plans:** new features get a dated design doc under
-  `docs/superpowers/specs/` and a plan under `docs/superpowers/plans/`.
+  `docs/design/specs/` and a plan under `docs/design/plans/`.
 
 ## Ops & Data
 
@@ -309,7 +309,7 @@ dropped from both `package.json`s).
 - **E2E:** `web/playwright.supabase.config.ts` mints a session via the Supabase
   password grant from the gitignored root `.env.test.local` (needs
   `E2E_EMAIL`/`E2E_PASSWORD`, `E2E_SUPABASE_URL`/`E2E_SUPABASE_ANON_KEY`).
-- **Spec/plan:** `docs/superpowers/{specs,plans}/2026-06-10-supabase-auth-migration.md`.
+- **Spec/plan:** `docs/design/{specs,plans}/2026-06-10-supabase-auth-migration.md`.
 
 **Prod cutover runbook (E1–E9):** see [Supabase Cutover Runbook (E1–E9)](https://www.notion.so/36fef2b9861481d39723d884070e30fa) in Notion.
 

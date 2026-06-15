@@ -1,6 +1,6 @@
 -- Per-Voice Locale & Brand Portability (Phase A foundation).
--- Spec:  docs/superpowers/specs/2026-06-15-voice-locale-brand-portability.md
--- Plan:  docs/superpowers/plans/2026-06-15-voice-locale-brand-portability.md
+-- Spec:  docs/design/specs/2026-06-15-voice-locale-brand-portability.md
+-- Plan:  docs/design/plans/2026-06-15-voice-locale-brand-portability.md
 --
 -- Adds a single nullable-shaped JSONB column to the existing voice row so a
 -- voice can carry its own output language, brand name, market, and

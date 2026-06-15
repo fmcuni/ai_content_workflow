@@ -1,5 +1,5 @@
 -- Per-Voice CMS Publish Targets (Phase 1: WordPress-only).
--- Spec: docs/superpowers/specs/2026-06-09-per-voice-cms-publish-targets.md
+-- Spec: docs/design/specs/2026-06-09-per-voice-cms-publish-targets.md
 --
 -- Lets each voice (persona) publish to its own CMS instance. Phase 1 ships
 -- multiple WordPress targets; Ghost lands later behind the same row `kind`.

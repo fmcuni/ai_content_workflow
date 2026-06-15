@@ -10,7 +10,7 @@ import { applySecurityHeaders } from "./lib/security-headers";
 // edge-proxy support. It's edge-safe: it only reads a cookie and redirects.
 //
 // This is an OPTIMISTIC gate only. Real enforcement is the backend Worker's
-// requireAuth middleware. See docs/superpowers/specs/2026-06-01-cloudflare-email-auth.md.
+// requireAuth middleware. See docs/design/specs/2026-06-01-cloudflare-email-auth.md.
 
 const PUBLIC_PATHS = ["/login", "/signup", "/verify"];
 

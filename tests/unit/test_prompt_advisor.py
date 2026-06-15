@@ -2,7 +2,7 @@
 
 No DB / no network: synthetic EvalRows, a fake async body loader, and the
 in-repo FakeGeminiClient. Spec:
-``docs/superpowers/specs/2026-06-07-prompt-improvement-advisor.md``.
+``docs/design/specs/2026-06-07-prompt-improvement-advisor.md``.
 """
 
 from __future__ import annotations

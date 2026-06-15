@@ -8,7 +8,7 @@ diagnosis, ranked directional changes, and a concrete revised-prompt proposal.
 
 Read-only against prompts and Postgres; the only side effects are the Markdown
 report (rendered by :mod:`evals.prompt_advisor_report`) and best-effort Langfuse
-scores. Spec: ``docs/superpowers/specs/2026-06-07-prompt-improvement-advisor.md``.
+scores. Spec: ``docs/design/specs/2026-06-07-prompt-improvement-advisor.md``.
 """
 
 from __future__ import annotations

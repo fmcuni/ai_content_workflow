@@ -2,7 +2,7 @@
 
 Pure: the generation date is passed in (no hidden clock) so the same findings
 always render byte-identically — easy to diff and to test. Spec:
-``docs/superpowers/specs/2026-06-07-prompt-improvement-advisor.md``.
+``docs/design/specs/2026-06-07-prompt-improvement-advisor.md``.
 """
 
 from __future__ import annotations

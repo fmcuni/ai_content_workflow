@@ -1,6 +1,6 @@
 // Ambient typing for the public (NEXT_PUBLIC_*) environment variables added by
 // the Supabase Auth migration. These are build-time-inlined by Next and read via
-// process.env. Spec: docs/superpowers/specs/2026-06-10-supabase-auth-migration.md
+// process.env. Spec: docs/design/specs/2026-06-10-supabase-auth-migration.md
 //
 // Augments (does not replace) the @types/node ProcessEnv index signature, so
 // other NEXT_PUBLIC_* vars keep resolving to `string | undefined`. Wired into the

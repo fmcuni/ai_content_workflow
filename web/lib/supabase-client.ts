@@ -12,7 +12,7 @@
 // localStorage) so the Next proxy/middleware — which only sees cookies, never
 // JS storage — can run its optimistic auth gate by reading one cookie name.
 //
-// Spec: docs/superpowers/specs/2026-06-10-supabase-auth-migration.md
+// Spec: docs/design/specs/2026-06-10-supabase-auth-migration.md
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Single, stable cookie name the middleware also reads. We deliberately do NOT

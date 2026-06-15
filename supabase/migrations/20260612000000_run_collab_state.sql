@@ -1,6 +1,6 @@
 -- Realtime collab: Postgres cold-store / backup for the per-run merged Yjs doc.
--- Spec:  docs/superpowers/specs/2026-06-09-realtime-collab-per-author-attribution.md
--- Plan:  docs/superpowers/plans/2026-06-09-realtime-collab-per-author-attribution.md
+-- Spec:  docs/design/specs/2026-06-09-realtime-collab-per-author-attribution.md
+-- Plan:  docs/design/plans/2026-06-09-realtime-collab-per-author-attribution.md
 --
 -- The RunDoc Durable Object (deploy/cloudflare-workers/src/run-doc.ts) holds the
 -- authoritative Yjs document for one run and debounce-persists it to DO storage.
