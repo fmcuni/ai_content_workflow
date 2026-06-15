@@ -1,0 +1,17 @@
+# Code owners — auto-requested as reviewers on matching PRs.
+# Syntax: https://docs.github.com/articles/about-code-owners
+# Last matching pattern wins.
+
+# Default owner for everything in the repo.
+*                                   @fmcuni
+
+# Production hosting (Workers TS port) + frontend.
+/deploy/cloudflare-workers/         @fmcuni
+/web/                               @fmcuni
+
+# Auth, DB schema, and migrations — deploy-ordering sensitive.
+/supabase/                          @fmcuni
+/deploy/cloudflare-workers/src/auth/ @fmcuni
+
+# CI/CD + repo governance.
+/.github/                           @fmcuni

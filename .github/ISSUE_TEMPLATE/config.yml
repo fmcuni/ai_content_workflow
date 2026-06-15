@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/fmcuni/ai_content_workflow/security/advisories/new
+    about: Do NOT open a public issue. Report security problems privately — see SECURITY.md.
+  - name: Internal Bowtie support
+    about: For IT / AI tooling / compliance questions, raise with the relevant Bowtie Slack team.
+    url: https://github.com/fmcuni/ai_content_workflow/blob/main/CLAUDE.md
