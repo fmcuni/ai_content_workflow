@@ -7,6 +7,7 @@ import { PromptEditor } from "@/components/prompts/PromptEditor";
 import { promptsApi } from "@/lib/api";
 import type { PromptNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { VoiceConfigInspector, type VoiceConfigTab } from "./VoiceConfigInspector";
 
 // Agents whose user prompt the backend can rebuild from a real run
 // (GET /user-example). Others (topic_*, deterministic) take per-batch /
@@ -16,7 +17,8 @@ const RUN_SAMPLED_AGENTS = new Set(["gap_analysis", "outline", "writer", "audit"
 export type StudioSelection =
   | { kind: "agent"; node: PromptNode }
   | { kind: "partial"; templateId: string }
-  | { kind: "gate"; label: string; description: string };
+  | { kind: "gate"; label: string; description: string }
+  | { kind: "voice-config"; tab: VoiceConfigTab };
 
 interface StudioInspectorProps {
   selection: StudioSelection;
@@ -177,13 +179,17 @@ export function StudioInspector({ selection, voice, runId, onClose }: StudioInsp
       ? selection.node.id
       : selection.kind === "partial"
         ? selection.templateId
-        : selection.label;
+        : selection.kind === "gate"
+          ? selection.label
+          : voice;
   const kicker =
     selection.kind === "agent"
       ? "Agent"
       : selection.kind === "partial"
         ? "Partial · shared include"
-        : "Human-in-the-loop gate";
+        : selection.kind === "gate"
+          ? "Human-in-the-loop gate"
+          : "Voice context";
 
   return (
     <div className="flex h-full flex-col bg-paper border-l border-rule">
@@ -211,6 +217,9 @@ export function StudioInspector({ selection, voice, runId, onClose }: StudioInsp
         )}
         {selection.kind === "gate" && (
           <p className="text-ink-soft text-[13px] leading-relaxed">{selection.description}</p>
+        )}
+        {selection.kind === "voice-config" && (
+          <VoiceConfigInspector voice={voice} initialTab={selection.tab} />
         )}
       </div>
     </div>

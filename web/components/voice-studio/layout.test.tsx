@@ -133,4 +133,29 @@ describe("buildStudioGraph", () => {
       "inc:persona_block->writer",
     ]);
   });
+
+  it("renders voice-context inputs that inject into persona-using agents", () => {
+    const { nodes, edges } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP);
+    const contextNodes = nodes.filter((n) => n.type === "context");
+    expect(contextNodes.map((n) => n.id).sort()).toEqual([
+      "context:locale",
+      "context:source_policy",
+    ]);
+    // 3 persona-using agents in the fixture: gap_analysis, outline, writer.
+    expect((contextNodes[0].data as { injectCount: number }).injectCount).toBe(3);
+    const injectEdges = edges.filter((e) => e.id.startsWith("inject:"));
+    expect(injectEdges).toHaveLength(6); // 2 inputs × 3 agents
+    expect(injectEdges.some((e) => e.id === "inject:context:locale->writer")).toBe(true);
+    // never wired to the persona-less audit node, always via the inject handle.
+    expect(injectEdges.some((e) => e.target === "audit")).toBe(false);
+    expect(injectEdges.every((e) => e.targetHandle === "inject")).toBe(true);
+  });
+
+  it("omits voice-context inputs when no agent uses the persona", () => {
+    const g = makeGraph();
+    const noPersona = { ...g, nodes: g.nodes.map((n) => ({ ...n, uses_persona: false })) };
+    const { nodes, edges } = buildStudioGraph(noPersona, PARTIALS, OWNERSHIP);
+    expect(nodes.some((n) => n.type === "context")).toBe(false);
+    expect(edges.some((e) => e.id.startsWith("inject:"))).toBe(false);
+  });
 });

@@ -20,11 +20,21 @@ export interface GateNodeData extends Record<string, unknown> {
   label: string;
   description: string;
 }
+// Voice-level context (locale, source policy) that is substituted into the
+// assembled prompt of every persona-using agent. Rendered as input nodes with
+// inject-edges so the edit blast-radius is visible.
+export type ContextKind = "locale" | "source_policy";
+export interface ContextNodeData extends Record<string, unknown> {
+  kind: ContextKind;
+  label: string;
+  injectCount: number;
+}
 
 export type StudioNode =
   | Node<AgentNodeData, "agent">
   | Node<PartialNodeData, "partial">
-  | Node<GateNodeData, "gate">;
+  | Node<GateNodeData, "gate">
+  | Node<ContextNodeData, "context">;
 
 // A partial template plus the agent template ids that {{include:}} it (reversed
 // from GET /templates/:id/consumers). Drives the dotted include-edges.
@@ -48,6 +58,14 @@ const SPINE_Y = 0;
 const GATE_Y = -160;
 const PARTIAL_Y = 230;
 const PARTIAL_X_GAP = 260;
+// Voice-context inputs sit at the top, above the gate band, and inject down
+// into every persona-using agent.
+const CONTEXT_Y = -360;
+const CONTEXT_X_GAP = 230;
+const CONTEXT_DEFS: { kind: ContextKind; id: string; label: string }[] = [
+  { kind: "locale", id: "context:locale", label: "Locale" },
+  { kind: "source_policy", id: "context:source_policy", label: "Source policy" },
+];
 
 function rankNode(n: PromptNode): [number, number] {
   return [SUB_GRAPH_RANK[n.sub_graph] ?? 99, n.order];
@@ -182,8 +200,37 @@ export function buildStudioGraph(
       })),
   );
 
+  // Voice-context inputs (locale, source policy) inject into every
+  // persona-using agent. Rendered only when there is at least one such agent in
+  // this mode — otherwise the inputs would dangle. Dashed neutral edges keep
+  // them distinct from the dotted include-edges and the rust loop-back.
+  const personaAgents = agents.filter((n) => n.uses_persona);
+  const contextNodes: StudioNode[] = [];
+  const injectEdges: Edge[] = [];
+  if (personaAgents.length > 0) {
+    const baseX = (seqIndex.get(personaAgents[0].id) ?? 0) * X_GAP;
+    for (const [i, def] of CONTEXT_DEFS.entries()) {
+      contextNodes.push({
+        id: def.id,
+        type: "context",
+        position: { x: baseX + i * CONTEXT_X_GAP, y: CONTEXT_Y },
+        data: { kind: def.kind, label: def.label, injectCount: personaAgents.length },
+      });
+      for (const a of personaAgents) {
+        injectEdges.push({
+          id: `inject:${def.id}->${a.id}`,
+          source: def.id,
+          sourceHandle: "ctx-out",
+          target: a.id,
+          targetHandle: "inject",
+          style: { stroke: "var(--color-ink-faint)", strokeDasharray: "6 3", opacity: 0.65 },
+        });
+      }
+    }
+  }
+
   return {
-    nodes: [...agentNodes, ...gateNodes, ...partialNodes],
-    edges: [...spineEdges, ...gateEdges, ...includeEdges],
+    nodes: [...agentNodes, ...gateNodes, ...partialNodes, ...contextNodes],
+    edges: [...spineEdges, ...gateEdges, ...includeEdges, ...injectEdges],
   };
 }

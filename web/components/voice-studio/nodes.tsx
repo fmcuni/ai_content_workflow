@@ -3,7 +3,13 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
 import { cn } from "@/lib/utils";
-import type { AgentNodeData, GateNodeData, Ownership, PartialNodeData } from "./layout";
+import type {
+  AgentNodeData,
+  ContextNodeData,
+  GateNodeData,
+  Ownership,
+  PartialNodeData,
+} from "./layout";
 
 // Fixed card width keeps the deterministic layout stable when labels vary.
 const CARD_W = 220;
@@ -53,6 +59,13 @@ export function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData, "age
       <Handle id="in" type="target" position={Position.Left} className="!bg-ink-faint" />
       <Handle id="out" type="source" position={Position.Right} className="!bg-ink-faint" />
       <Handle id="gate" type="target" position={Position.Top} className="!bg-transparent !border-0" />
+      <Handle
+        id="inject"
+        type="target"
+        position={Position.Top}
+        style={{ left: "28%" }}
+        className="!bg-transparent !border-0"
+      />
       <Handle id="inc" type="target" position={Position.Bottom} className="!bg-transparent !border-0" />
 
       <div className="flex items-center justify-between gap-2 mb-1">
@@ -137,8 +150,39 @@ export function GateNode({ data, selected }: NodeProps<Node<GateNodeData, "gate"
   );
 }
 
+export function ContextNode({ data, selected }: NodeProps<Node<ContextNodeData, "context">>) {
+  const { label, injectCount } = data;
+  return (
+    <div
+      style={{ width: 168 }}
+      className={cn(
+        "bg-paper border rounded-sm px-3 py-2 transition-colors",
+        selected ? "border-accent ring-1 ring-accent" : "border-rule hover:border-ink-faint",
+      )}
+      title={`Voice ${label.toLowerCase()} — injected into ${injectCount} persona-using ${
+        injectCount === 1 ? "agent" : "agents"
+      }`}
+    >
+      <Handle id="ctx-out" type="source" position={Position.Bottom} className="!bg-ink-faint" />
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span aria-hidden className="text-ink-faint text-[11px]">
+          ⬡
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint">
+          voice context
+        </span>
+      </div>
+      <p className="font-display text-[14px] leading-tight text-ink">{label}</p>
+      <p className="font-mono text-[10px] text-ink-faint mt-0.5">
+        injects → {injectCount} {injectCount === 1 ? "agent" : "agents"}
+      </p>
+    </div>
+  );
+}
+
 export const STUDIO_NODE_TYPES = {
   agent: AgentNode,
   partial: PartialNode,
   gate: GateNode,
+  context: ContextNode,
 };

@@ -120,7 +120,14 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
 
   // Resolve the clicked canvas node id into a typed inspector selection.
   const selection = useMemo<StudioSelection | null>(() => {
-    if (!selectedId || !graphQ.data) return null;
+    if (!selectedId) return null;
+    // Voice-config selections don't depend on the graph.
+    if (selectedId === "voice:settings") return { kind: "voice-config", tab: "locale" };
+    if (selectedId === "context:source_policy") {
+      return { kind: "voice-config", tab: "source_policy" };
+    }
+    if (selectedId === "context:locale") return { kind: "voice-config", tab: "locale" };
+    if (!graphQ.data) return null;
     if (selectedId.startsWith("partial:")) {
       return { kind: "partial", templateId: selectedId.slice("partial:".length) };
     }
@@ -188,6 +195,19 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
                 ))}
               </select>
             </label>
+            <button
+              type="button"
+              aria-pressed={selection?.kind === "voice-config"}
+              onClick={() => setSelectedId("voice:settings")}
+              className={cn(
+                "font-mono text-[11px] tracking-[0.14em] uppercase px-3 py-1.5 border border-rule transition-colors",
+                selection?.kind === "voice-config"
+                  ? "bg-ink text-paper"
+                  : "text-ink-faint hover:text-ink hover:bg-paper-deep/40",
+              )}
+            >
+              ⬡ Voice settings
+            </button>
           </div>
         </div>
       </header>
