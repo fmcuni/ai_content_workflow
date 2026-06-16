@@ -77,20 +77,26 @@ function CanvasInner({ graph, partials, ownershipById, overlay, onSelect }: Voic
       onNodeClick={handleNodeClick}
       onPaneClick={() => onSelect(null)}
       fitView
-      fitViewOptions={{ padding: 0.2 }}
-      minZoom={0.3}
-      maxZoom={1.5}
+      // Tighter padding + a higher floor zoom land the initial view larger, so
+      // node labels stay legible instead of shrinking to fit the whole spread.
+      fitViewOptions={{ padding: 0.12, minZoom: 0.55, maxZoom: 1 }}
+      minZoom={0.45}
+      maxZoom={1.6}
       nodesConnectable={false}
       proOptions={{ hideAttribution: false }}
-      className="bg-paper"
+      // Deeper pane tone so the cream agent cards read as raised surfaces against
+      // the canvas instead of blending into a same-coloured background.
+      className="bg-paper-deep"
     >
-      <Background variant={BackgroundVariant.Lines} gap={28} color="var(--color-rule)" />
+      {/* Sparse dots read as quiet texture; the old hairline grid competed with
+          the cards and edges for attention. */}
+      <Background variant={BackgroundVariant.Dots} gap={26} size={1.5} color="var(--color-rule)" />
       <MiniMap
         pannable
         zoomable
-        nodeColor="var(--color-rule)"
-        maskColor="rgba(26,23,20,0.06)"
-        className="!bg-paper-deep/40 !border !border-rule"
+        nodeColor="var(--color-ink-faint)"
+        maskColor="rgba(26,23,20,0.08)"
+        className="!bg-paper/70 !border !border-rule"
       />
       <Controls showInteractive={false} className="!border !border-rule" />
     </ReactFlow>

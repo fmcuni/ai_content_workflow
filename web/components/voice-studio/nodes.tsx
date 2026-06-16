@@ -17,14 +17,14 @@ const CARD_W = 220;
 function OwnershipChip({ ownership, templateId }: { ownership: Ownership; templateId: string }) {
   if (ownership === "none") {
     return (
-      <span className="font-mono text-[9.5px] uppercase tracking-wider text-ink-faint">
+      <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink-soft">
         no prompt
       </span>
     );
   }
   return (
     <span
-      className="font-mono text-[9.5px] truncate"
+      className="font-mono text-[10.5px] truncate"
       title={
         ownership === "overridden"
           ? `${templateId} — this voice has its own copy`
@@ -48,7 +48,7 @@ function RunChip({ status }: { status: NonNullable<AgentNodeData["runStatus"]> }
   if (status.kind === "did-not-run") {
     return (
       <span
-        className="font-mono text-[9px] uppercase tracking-wider text-ink-faint"
+        className="font-mono text-[10px] uppercase tracking-wider text-ink-soft"
         title="This node did not run in the anchored run"
       >
         ○ did not run
@@ -57,7 +57,7 @@ function RunChip({ status }: { status: NonNullable<AgentNodeData["runStatus"]> }
   }
   return (
     <span
-      className="font-mono text-[9px] uppercase tracking-wider text-accent"
+      className="font-mono text-[10px] uppercase tracking-wider text-accent"
       title={
         status.executions >= 2
           ? `Ran ${status.executions}× in the anchored run (refine loop)`
@@ -96,15 +96,15 @@ export function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData, "age
       <div className="flex items-center justify-between gap-2 mb-1">
         <span
           className={cn(
-            "font-mono text-[9px] uppercase tracking-[0.14em] px-1 py-px rounded-sm",
-            isLlm ? "bg-ink text-paper" : "bg-paper-deep/60 text-ink-faint border border-rule",
+            "font-mono text-[10px] uppercase tracking-[0.14em] px-1.5 py-0.5 rounded-sm",
+            isLlm ? "bg-ink text-paper" : "bg-paper-deep text-ink-soft border border-rule",
           )}
         >
           {isLlm ? "LLM" : "deterministic"}
         </span>
         {node.uses_persona && (
           <span
-            className="font-mono text-[9px] uppercase tracking-wider text-accent"
+            className="font-mono text-[10px] uppercase tracking-wider text-accent"
             title="Persona / voice tokens injected into this prompt"
           >
             ◆ persona
@@ -112,11 +112,11 @@ export function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData, "age
         )}
       </div>
 
-      <p className="font-display text-[14px] leading-tight text-ink truncate" title={node.id}>
+      <p className="font-display text-[16px] leading-tight text-ink truncate" title={node.id}>
         {node.id}
       </p>
       {node.description && (
-        <p className="text-[11px] text-ink-soft leading-snug mt-0.5 line-clamp-2">
+        <p className="text-[12px] text-ink-soft leading-snug mt-1 line-clamp-2">
           {node.description}
         </p>
       )}
@@ -142,18 +142,25 @@ export function PartialNode({ data, selected }: NodeProps<Node<PartialNodeData, 
     >
       <Handle id="p-out" type="source" position={Position.Top} className="!bg-rule" />
       <div className="flex items-center justify-between gap-2 mb-0.5">
-        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint border border-rule rounded-sm px-1 py-px">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft border border-rule rounded-sm px-1.5 py-0.5">
           partial
         </span>
         {ownership === "overridden" && (
-          <span className="font-mono text-[9px] uppercase tracking-wider text-accent">voice</span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-accent">voice</span>
         )}
       </div>
-      <p className="font-mono text-[12px] text-ink truncate" title={templateId}>
+      <p className="font-mono text-[13px] text-ink truncate" title={templateId}>
         {templateId}
       </p>
-      <p className="font-mono text-[10px] text-ink-faint mt-0.5">
-        included by {consumerCount} {consumerCount === 1 ? "agent" : "agents"}
+      <p
+        className={cn(
+          "font-mono text-[10.5px] mt-0.5",
+          consumerCount === 0 ? "text-ink-faint" : "text-ink-soft",
+        )}
+      >
+        {consumerCount === 0
+          ? "shared · not included here"
+          : `included by ${consumerCount} ${consumerCount === 1 ? "agent" : "agents"}`}
       </p>
     </div>
   );
@@ -170,8 +177,8 @@ export function GateNode({ data, selected }: NodeProps<Node<GateNodeData, "gate"
       title={data.description}
     >
       <Handle id="g-out" type="source" position={Position.Bottom} className="!bg-ink" />
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink">{data.label}</p>
-      <p className="font-mono text-[9px] uppercase tracking-wider text-ink-faint mt-0.5">
+      <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink">{data.label}</p>
+      <p className="font-mono text-[10px] uppercase tracking-wider text-ink-soft mt-0.5">
         human review
       </p>
     </div>
@@ -193,15 +200,15 @@ export function ContextNode({ data, selected }: NodeProps<Node<ContextNodeData, 
     >
       <Handle id="ctx-out" type="source" position={Position.Bottom} className="!bg-ink-faint" />
       <div className="flex items-center gap-1.5 mb-0.5">
-        <span aria-hidden className="text-ink-faint text-[11px]">
+        <span aria-hidden className="text-ink-soft text-[12px]">
           ⬡
         </span>
-        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft">
           voice context
         </span>
       </div>
-      <p className="font-display text-[14px] leading-tight text-ink">{label}</p>
-      <p className="font-mono text-[10px] text-ink-faint mt-0.5">
+      <p className="font-display text-[15px] leading-tight text-ink">{label}</p>
+      <p className="font-mono text-[10.5px] text-ink-soft mt-0.5">
         injects → {injectCount} {injectCount === 1 ? "agent" : "agents"}
       </p>
     </div>

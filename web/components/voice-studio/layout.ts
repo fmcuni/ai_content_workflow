@@ -59,7 +59,9 @@ const SUB_GRAPH_RANK: Record<string, number> = {
   analyse: 1,
 };
 
-const X_GAP = 300;
+// Cards are 220px wide; a 260px column gap keeps a clear lane between them while
+// compressing the overall spread so the initial fit-view zoom stays readable.
+const X_GAP = 260;
 const SPINE_Y = 0;
 const GATE_Y = -160;
 const PARTIAL_Y = 230;
@@ -156,12 +158,12 @@ export function buildStudioGraph(
     });
   }
 
-  // Partials sit in a row below the spine; only those whose consumers are in
-  // this mode's graph are shown (an unused partial would dangle).
-  const visiblePartials = partials.filter((p) =>
-    p.consumers.some((c) => nodeIds.has(c)),
-  );
-  const partialNodes: StudioNode[] = visiblePartials.map((p, i) => ({
+  // Partials sit in a row below the spine. Every shared partial the voice
+  // owns/inherits is shown as a library node — even one this mode's agents
+  // don't currently include (e.g. a voice whose prompt drifted off the shared
+  // `{{include}}`). Include-edges below are drawn only to in-graph consumers,
+  // so an unwired partial simply renders without edges instead of vanishing.
+  const partialNodes: StudioNode[] = partials.map((p, i) => ({
     id: partialId(p.templateId),
     type: "partial",
     position: { x: i * PARTIAL_X_GAP, y: PARTIAL_Y },
@@ -198,7 +200,7 @@ export function buildStudioGraph(
     });
 
   // Dotted hairline include-edges: partial → each consumer agent in this mode.
-  const includeEdges: Edge[] = visiblePartials.flatMap((p) =>
+  const includeEdges: Edge[] = partials.flatMap((p) =>
     p.consumers
       .filter((c) => nodeIds.has(c))
       .map((c) => ({

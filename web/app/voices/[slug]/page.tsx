@@ -275,7 +275,7 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
         </div>
 
         {selection && (
-          <aside className="w-[460px] shrink-0 max-w-[46vw]">
+          <aside className="w-[50vw] min-w-[460px] max-w-[860px] shrink-0">
             <StudioInspector
               selection={selection}
               voice={slug}

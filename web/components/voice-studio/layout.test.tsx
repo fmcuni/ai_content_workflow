@@ -123,11 +123,22 @@ describe("buildStudioGraph", () => {
     expect(edges.some((e) => e.id === "gate-edge:HITL_T1")).toBe(false);
   });
 
-  it("shows only partials with an in-graph consumer and draws include-edges", () => {
+  it("renders every shared partial and draws include-edges only to in-graph consumers", () => {
     const { nodes, edges } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP);
     const partialNodes = nodes.filter((n) => n.type === "partial");
-    expect(partialNodes.map((n) => n.id)).toEqual(["partial:persona_block"]);
-    expect((partialNodes[0].data as { consumerCount: number }).consumerCount).toBe(2);
+    const consumerCountById = Object.fromEntries(
+      partialNodes.map((n) => [n.id, (n.data as { consumerCount: number }).consumerCount]),
+    );
+    // Both partials show — including orphan_partial, whose only consumer is not
+    // in this mode's graph (e.g. a voice whose prompt drifted off the include).
+    expect(partialNodes.map((n) => n.id).sort()).toEqual([
+      "partial:orphan_partial",
+      "partial:persona_block",
+    ]);
+    expect(consumerCountById["partial:persona_block"]).toBe(2);
+    expect(consumerCountById["partial:orphan_partial"]).toBe(0);
+    // Edges are drawn only to consumers that exist in this mode's graph; the
+    // unwired partial dangles without edges rather than disappearing.
     const includeEdges = edges.filter((e) => e.id.startsWith("inc:"));
     expect(includeEdges.map((e) => e.id).sort()).toEqual([
       "inc:persona_block->outline",
