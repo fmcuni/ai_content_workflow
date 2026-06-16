@@ -10,6 +10,11 @@ import {
   type StudioSelection,
 } from "@/components/voice-studio/StudioInspector";
 import type { Ownership, PartialInfo } from "@/components/voice-studio/layout";
+import {
+  buildRunOverlay,
+  graphModeForRun,
+  type RunOverlay,
+} from "@/components/voice-studio/run-overlay";
 import { api, promptsApi } from "@/lib/api";
 import type { GraphMode, RunSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -118,6 +123,24 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
     [runsQ.data, slug],
   );
 
+  // Run-chip execution overlay (PR3): pull the anchored run's event log and
+  // derive a per-node "ran / did-not-run / ×N" summary. Read-only reuse of the
+  // existing /runs/{id}/logs endpoint — no telemetry rebuild.
+  const anchoredRun = useMemo(
+    () => voiceRuns.find((r) => r.run_id === runId) ?? null,
+    [voiceRuns, runId],
+  );
+  const logsQ = useQuery({
+    enabled: runId !== null,
+    queryKey: ["run-logs", runId],
+    queryFn: () => api.getRunLogs(runId!),
+    retry: false,
+  });
+  const overlay = useMemo<RunOverlay | undefined>(() => {
+    if (!anchoredRun || !logsQ.data) return undefined;
+    return buildRunOverlay(logsQ.data, anchoredRun, mode);
+  }, [anchoredRun, logsQ.data, mode]);
+
   // Resolve the clicked canvas node id into a typed inspector selection.
   const selection = useMemo<StudioSelection | null>(() => {
     if (!selectedId) return null;
@@ -225,8 +248,18 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
               graph={graphQ.data}
               partials={partials}
               ownershipById={ownershipById}
+              overlay={overlay}
               onSelect={setSelectedId}
             />
+          )}
+          {anchoredRun && overlay && !overlay.modeMatches && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center px-4 pt-3">
+              <p className="pointer-events-auto bg-paper border border-rule rounded-sm px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint shadow-sm">
+                Anchored run ran in{" "}
+                <span className="text-ink">{graphModeForRun(anchoredRun)}</span> mode — switch the
+                mode tab to overlay its execution
+              </p>
+            </div>
           )}
         </div>
 

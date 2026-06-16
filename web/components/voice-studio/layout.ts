@@ -1,6 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
 
 import type { PromptGraph, PromptNode } from "@/lib/types";
+import type { NodeRunStatus, RunOverlay } from "./run-overlay";
 
 // How a template resolves for the selected voice: the voice has its own row
 // (`overridden`), it inherits the `__shared__` seed, or the node has no
@@ -10,6 +11,10 @@ export type Ownership = "overridden" | "shared" | "none";
 export interface AgentNodeData extends Record<string, unknown> {
   node: PromptNode;
   ownership: Ownership;
+  // Execution status from the anchored run (PR3 run-chip overlay). Undefined
+  // when no run is anchored or the run ran in a different mode — the card then
+  // shows no chip.
+  runStatus?: NodeRunStatus;
 }
 export interface PartialNodeData extends Record<string, unknown> {
   templateId: string;
@@ -94,8 +99,13 @@ export function buildStudioGraph(
   graph: PromptGraph,
   partials: PartialInfo[],
   ownershipById: Record<string, Ownership>,
+  overlay?: RunOverlay,
 ): StudioGraph {
   const agents = sortedAgents(graph);
+  // Per-node run chip only when the anchored run traversed *this* mode's
+  // pipeline; a mode mismatch is surfaced by the caller, not per node.
+  const runStatusFor = (id: string): NodeRunStatus | undefined =>
+    overlay?.modeMatches ? (overlay.byNode[id] ?? { ran: false, executions: 0 }) : undefined;
   const nodeIds = new Set(agents.map((n) => n.id));
   // Sequence index per agent — used to spot backward (loop-back) edges.
   const seqIndex = new Map<string, number>(agents.map((n, i) => [n.id, i]));
@@ -109,7 +119,7 @@ export function buildStudioGraph(
     id: n.id,
     type: "agent",
     position: { x: i * X_GAP, y: SPINE_Y },
-    data: { node: n, ownership: ownershipFor(n) },
+    data: { node: n, ownership: ownershipFor(n), runStatus: runStatusFor(n.id) },
   }));
 
   // Gates: those anchored to a node in this graph float above that node; gates

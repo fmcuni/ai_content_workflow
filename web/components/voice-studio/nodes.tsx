@@ -44,8 +44,33 @@ function OwnershipChip({ ownership, templateId }: { ownership: Ownership; templa
   );
 }
 
+function RunChip({ status }: { status: NonNullable<AgentNodeData["runStatus"]> }) {
+  if (!status.ran) {
+    return (
+      <span
+        className="font-mono text-[9px] uppercase tracking-wider text-ink-faint"
+        title="This node did not run in the anchored run"
+      >
+        ○ did not run
+      </span>
+    );
+  }
+  return (
+    <span
+      className="font-mono text-[9px] uppercase tracking-wider text-accent"
+      title={
+        status.executions >= 2
+          ? `Ran ${status.executions}× in the anchored run (refine loop)`
+          : "Ran in the anchored run"
+      }
+    >
+      ● ran{status.executions >= 2 ? ` ·${status.executions}×` : ""}
+    </span>
+  );
+}
+
 export function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData, "agent">>) {
-  const { node, ownership } = data;
+  const { node, ownership, runStatus } = data;
   const isLlm = node.kind === "llm";
   const templateId = node.system_prompt_template_id;
   return (
@@ -95,8 +120,11 @@ export function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData, "age
           {node.description}
         </p>
       )}
-      <div className="mt-1.5 truncate">
-        <OwnershipChip ownership={ownership} templateId={templateId ?? node.id} />
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate">
+          <OwnershipChip ownership={ownership} templateId={templateId ?? node.id} />
+        </span>
+        {runStatus && <RunChip status={runStatus} />}
       </div>
     </div>
   );

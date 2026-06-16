@@ -2,14 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { RoleButton } from "@/components/RoleGate";
 import { SourcePolicyEditor } from "@/components/SourcePolicyEditor";
 import { GlossaryTable, emptyEntry } from "@/components/voices/GlossaryTable";
 import { HK_ZH_LOCALE, LocaleFields } from "@/components/voices/LocaleFields";
 import { personasApi, publishTargetsApi } from "@/lib/api";
-import type { GlossaryEntry, VoiceLocale } from "@/lib/types";
+import type { GlossaryEntry, Persona, VoiceLocale } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export type VoiceConfigTab = "locale" | "source_policy" | "glossary" | "publish_target";
@@ -33,8 +33,13 @@ interface VoiceConfigInspectorProps {
 export function VoiceConfigInspector({ voice, initialTab }: VoiceConfigInspectorProps) {
   const [tab, setTab] = useState<VoiceConfigTab>(initialTab);
   // Re-sync when the operator clicks a different context node while the
-  // inspector is already open.
-  useEffect(() => setTab(initialTab), [initialTab]);
+  // inspector is already open. Store-previous-prop pattern (set during render,
+  // not in an effect) so there's no extra commit + cascading render.
+  const [syncedInitial, setSyncedInitial] = useState(initialTab);
+  if (initialTab !== syncedInitial) {
+    setSyncedInitial(initialTab);
+    setTab(initialTab);
+  }
 
   return (
     <div>
@@ -69,10 +74,13 @@ function LocalePanel({ voice }: { voice: string }) {
   const qc = useQueryClient();
   const personaQ = useQuery({ queryKey: ["persona", voice], queryFn: () => personasApi.get(voice) });
   const [draft, setDraft] = useState<VoiceLocale | null>(null);
-
-  useEffect(() => {
-    if (personaQ.data) setDraft(personaQ.data.locale);
-  }, [personaQ.data]);
+  // Seed/re-seed the draft from the fetched persona without an effect: track the
+  // locale object's identity (fresh per fetch) and sync during render.
+  const [syncedLocale, setSyncedLocale] = useState<VoiceLocale | null>(null);
+  if (personaQ.data && personaQ.data.locale !== syncedLocale) {
+    setSyncedLocale(personaQ.data.locale);
+    setDraft(personaQ.data.locale);
+  }
 
   const saveMut = useMutation({
     mutationFn: (locale: VoiceLocale) => personasApi.update(voice, { locale }),
@@ -115,9 +123,13 @@ function GlossaryPanel({ voice }: { voice: string }) {
   const personaQ = useQuery({ queryKey: ["persona", voice], queryFn: () => personasApi.get(voice) });
   const [draft, setDraft] = useState<GlossaryEntry[] | null>(null);
 
-  useEffect(() => {
-    if (personaQ.data) setDraft(personaQ.data.glossary);
-  }, [personaQ.data]);
+  // Sync the editable glossary draft from the fetched persona during render
+  // (the array ref is fresh per fetch) instead of in an effect.
+  const [syncedGlossary, setSyncedGlossary] = useState<GlossaryEntry[] | null>(null);
+  if (personaQ.data && personaQ.data.glossary !== syncedGlossary) {
+    setSyncedGlossary(personaQ.data.glossary);
+    setDraft(personaQ.data.glossary);
+  }
 
   const saveMut = useMutation({
     mutationFn: (glossary: GlossaryEntry[]) => personasApi.update(voice, { glossary }),
@@ -174,9 +186,13 @@ function PublishTargetPanel({ voice }: { voice: string }) {
   });
   const [selected, setSelected] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (personaQ.data) setSelected(personaQ.data.publish_target_id);
-  }, [personaQ.data]);
+  // Sync the selected target from the fetched persona during render (track the
+  // persona object's identity, since publish_target_id can legitimately be null).
+  const [syncedPersona, setSyncedPersona] = useState<Persona | null>(null);
+  if (personaQ.data && personaQ.data !== syncedPersona) {
+    setSyncedPersona(personaQ.data);
+    setSelected(personaQ.data.publish_target_id);
+  }
 
   const saveMut = useMutation({
     mutationFn: (publish_target_id: string | null) => personasApi.update(voice, { publish_target_id }),

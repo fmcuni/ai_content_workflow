@@ -19,20 +19,24 @@ import "@xyflow/react/dist/style.css";
 import type { PromptGraph } from "@/lib/types";
 import { buildStudioGraph, type Ownership, type PartialInfo } from "./layout";
 import { STUDIO_NODE_TYPES } from "./nodes";
+import type { RunOverlay } from "./run-overlay";
 
 interface VoiceStudioCanvasProps {
   graph: PromptGraph;
   partials: PartialInfo[];
   ownershipById: Record<string, Ownership>;
+  /** Per-node execution overlay from the anchored run (PR3). Undefined = no chips. */
+  overlay?: RunOverlay;
   onSelect: (nodeId: string | null) => void;
 }
 
-function CanvasInner({ graph, partials, ownershipById, onSelect }: VoiceStudioCanvasProps) {
-  // Deterministic layout — recomputed whenever the mode (graph), partials, or
-  // ownership change. React Flow owns drag + selection from this seed.
+function CanvasInner({ graph, partials, ownershipById, overlay, onSelect }: VoiceStudioCanvasProps) {
+  // Deterministic layout — recomputed whenever the mode (graph), partials,
+  // ownership, or the anchored-run overlay change. React Flow owns drag +
+  // selection from this seed.
   const built = useMemo(
-    () => buildStudioGraph(graph, partials, ownershipById),
-    [graph, partials, ownershipById],
+    () => buildStudioGraph(graph, partials, ownershipById, overlay),
+    [graph, partials, ownershipById, overlay],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(built.nodes);
