@@ -172,6 +172,7 @@ function GlossaryPanel({ voice }: { voice: string }) {
           {saveMut.isPending ? "Saving…" : "Save glossary"}
         </RoleButton>
         {dirty && <span className="font-mono text-[10px] uppercase tracking-wider text-accent">unsaved</span>}
+        {saveMut.isError && <span className="text-accent-deep text-[11px]">Save failed.</span>}
       </div>
     </div>
   );
@@ -224,6 +225,11 @@ function PublishTargetPanel({ voice }: { voice: string }) {
         </Link>{" "}
         page.
       </p>
+      {targetsQ.isError && (
+        <p className="text-accent-deep text-[11px]">
+          Failed to load publish targets — only the default Bowtie WP option is shown.
+        </p>
+      )}
       <select
         value={selected ?? ""}
         onChange={(e) => setSelected(e.target.value || null)}
@@ -265,6 +271,7 @@ function PublishTargetPanel({ voice }: { voice: string }) {
           {saveMut.isPending ? "Saving…" : "Save target"}
         </RoleButton>
         {dirty && <span className="font-mono text-[10px] uppercase tracking-wider text-accent">unsaved</span>}
+        {saveMut.isError && <span className="text-accent-deep text-[11px]">Save failed.</span>}
       </div>
     </div>
   );

@@ -41,9 +41,9 @@ describe("buildRunOverlay", () => {
     const overlay = buildRunOverlay(logs, { start_mode: "refresh" }, "refresh");
 
     expect(overlay.ranAtAll).toBe(true);
-    expect(overlay.byNode.gap_analysis).toEqual({ ran: true, executions: 1 });
-    expect(overlay.byNode.writer).toEqual({ ran: true, executions: 2 });
-    expect(overlay.byNode.audit).toEqual({ ran: true, executions: 1 });
+    expect(overlay.byNode.gap_analysis).toEqual({ kind: "ran", executions: 1 });
+    expect(overlay.byNode.writer).toEqual({ kind: "ran", executions: 2 });
+    expect(overlay.byNode.audit).toEqual({ kind: "ran", executions: 1 });
     // A node that never appears in the log is simply absent from byNode.
     expect(overlay.byNode.outline).toBeUndefined();
   });
@@ -54,7 +54,7 @@ describe("buildRunOverlay", () => {
       { start_mode: "refresh" },
       "refresh",
     );
-    expect(overlay.byNode.render_html).toEqual({ ran: true, executions: 0 });
+    expect(overlay.byNode.render_html).toEqual({ kind: "ran", executions: 0 });
   });
 
   it("ignores rows with no step and reports ranAtAll false for an empty log", () => {

@@ -4,12 +4,23 @@ import type { GraphMode, RunEventLog, RunSummary } from "@/lib/types";
 // telemetry-free (no tokens, no latency — those live in /runs and /costs): just
 // "did this node run, and how many passes". The pass count comes from `.start`
 // events, so the writer's refine-loop iterations surface as ×N on the card.
-export interface NodeRunStatus {
-  ran: boolean;
-  // Number of `.start` events for this step. 1 = single pass; ≥2 = re-entered
-  // (the writer/audit refine loop). 0 when the step only logged a `.done`.
-  executions: number;
-}
+//
+// A node only appears in the overlay's `byNode` map if it ran; the layout maps
+// absence (for an in-mode node) to the `did-not-run` variant, and "no overlay"
+// (mode mismatch / no run) to `undefined`. Encoding the three card states as a
+// discriminated union keeps them mutually exclusive — no boolean+count combo
+// can express an impossible state like "did not run, 3 executions".
+export type NodeRunStatus =
+  | {
+      kind: "ran";
+      // Number of `.start` events for this step. 1 = single pass; ≥2 = re-entered
+      // (the writer/audit refine loop). 0 only if the step logged a lone `.done`.
+      executions: number;
+    }
+  | { kind: "did-not-run" };
+
+// Nodes present in `byNode` always ran; narrow to that variant for the map.
+type RanStatus = Extract<NodeRunStatus, { kind: "ran" }>;
 
 export interface RunOverlay {
   // The anchored run's pipeline matches the mode tab currently on the canvas.
@@ -19,7 +30,7 @@ export interface RunOverlay {
   // Any step executed at all — distinguishes "did not run" nodes from a run that
   // simply has no logs yet.
   ranAtAll: boolean;
-  byNode: Record<string, NodeRunStatus>;
+  byNode: Record<string, RanStatus>;
 }
 
 /**
@@ -43,14 +54,16 @@ export function buildRunOverlay(
   run: Pick<RunSummary, "start_mode">,
   displayMode: GraphMode,
 ): RunOverlay {
-  const byNode: Record<string, NodeRunStatus> = {};
+  const byNode: Record<string, RanStatus> = {};
   for (const row of logs) {
+    // Lifecycle/non-node events have no derived step — intentionally skipped,
+    // not a swallowed error (deriveStep returns null for run-level events).
     if (!row.step) continue;
-    const prev = byNode[row.step] ?? { ran: true, executions: 0 };
+    const prev = byNode[row.step];
     const isStart = row.event.endsWith(".start");
     byNode[row.step] = {
-      ran: true,
-      executions: prev.executions + (isStart ? 1 : 0),
+      kind: "ran",
+      executions: (prev?.executions ?? 0) + (isStart ? 1 : 0),
     };
   }
   return {

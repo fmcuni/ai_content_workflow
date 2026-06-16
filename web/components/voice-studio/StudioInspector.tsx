@@ -210,7 +210,7 @@ export function StudioInspector({ selection, voice, runId, onClose }: StudioInsp
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {selection.kind === "agent" && (
-          <AgentInspector node={selection.node} voice={voice} runId={runId} />
+          <AgentInspector key={selection.node.id} node={selection.node} voice={voice} runId={runId} />
         )}
         {selection.kind === "partial" && (
           <PromptEditor templateId={selection.templateId} voice={voice} compact />

@@ -1,6 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
 
 import type { PromptGraph, PromptNode } from "@/lib/types";
+import { contextId, gateId, partialId } from "./node-id";
 import type { NodeRunStatus, RunOverlay } from "./run-overlay";
 
 // How a template resolves for the selected voice: the voice has its own row
@@ -68,8 +69,8 @@ const PARTIAL_X_GAP = 260;
 const CONTEXT_Y = -360;
 const CONTEXT_X_GAP = 230;
 const CONTEXT_DEFS: { kind: ContextKind; id: string; label: string }[] = [
-  { kind: "locale", id: "context:locale", label: "Locale" },
-  { kind: "source_policy", id: "context:source_policy", label: "Source policy" },
+  { kind: "locale", id: contextId("locale"), label: "Locale" },
+  { kind: "source_policy", id: contextId("source_policy"), label: "Source policy" },
 ];
 
 function rankNode(n: PromptNode): [number, number] {
@@ -105,7 +106,7 @@ export function buildStudioGraph(
   // Per-node run chip only when the anchored run traversed *this* mode's
   // pipeline; a mode mismatch is surfaced by the caller, not per node.
   const runStatusFor = (id: string): NodeRunStatus | undefined =>
-    overlay?.modeMatches ? (overlay.byNode[id] ?? { ran: false, executions: 0 }) : undefined;
+    overlay?.modeMatches ? (overlay.byNode[id] ?? { kind: "did-not-run" }) : undefined;
   const nodeIds = new Set(agents.map((n) => n.id));
   // Sequence index per agent — used to spot backward (loop-back) edges.
   const seqIndex = new Map<string, number>(agents.map((n, i) => [n.id, i]));
@@ -131,7 +132,7 @@ export function buildStudioGraph(
     const anchorIndex = seqIndex.get(g.before);
     if (anchorIndex === undefined) {
       gateNodes.push({
-        id: `gate:${g.id}`,
+        id: gateId(g.id),
         type: "gate",
         position: { x: (agents.length + trailing) * X_GAP, y: SPINE_Y },
         data: { label: g.label, description: g.description },
@@ -140,14 +141,14 @@ export function buildStudioGraph(
       continue;
     }
     gateNodes.push({
-      id: `gate:${g.id}`,
+      id: gateId(g.id),
       type: "gate",
       position: { x: anchorIndex * X_GAP, y: GATE_Y },
       data: { label: g.label, description: g.description },
     });
     gateEdges.push({
       id: `gate-edge:${g.id}`,
-      source: `gate:${g.id}`,
+      source: gateId(g.id),
       sourceHandle: "g-out",
       target: g.before,
       targetHandle: "gate",
@@ -161,7 +162,7 @@ export function buildStudioGraph(
     p.consumers.some((c) => nodeIds.has(c)),
   );
   const partialNodes: StudioNode[] = visiblePartials.map((p, i) => ({
-    id: `partial:${p.templateId}`,
+    id: partialId(p.templateId),
     type: "partial",
     position: { x: i * PARTIAL_X_GAP, y: PARTIAL_Y },
     data: {
@@ -202,7 +203,7 @@ export function buildStudioGraph(
       .filter((c) => nodeIds.has(c))
       .map((c) => ({
         id: `inc:${p.templateId}->${c}`,
-        source: `partial:${p.templateId}`,
+        source: partialId(p.templateId),
         sourceHandle: "p-out",
         target: c,
         targetHandle: "inc",

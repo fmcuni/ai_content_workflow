@@ -45,7 +45,7 @@ function OwnershipChip({ ownership, templateId }: { ownership: Ownership; templa
 }
 
 function RunChip({ status }: { status: NonNullable<AgentNodeData["runStatus"]> }) {
-  if (!status.ran) {
+  if (status.kind === "did-not-run") {
     return (
       <span
         className="font-mono text-[9px] uppercase tracking-wider text-ink-faint"

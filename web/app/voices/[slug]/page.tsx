@@ -10,6 +10,7 @@ import {
   type StudioSelection,
 } from "@/components/voice-studio/StudioInspector";
 import type { Ownership, PartialInfo } from "@/components/voice-studio/layout";
+import { classifyNodeId, VOICE_SETTINGS_ID } from "@/components/voice-studio/node-id";
 import {
   buildRunOverlay,
   graphModeForRun,
@@ -144,25 +145,28 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
   // Resolve the clicked canvas node id into a typed inspector selection.
   const selection = useMemo<StudioSelection | null>(() => {
     if (!selectedId) return null;
-    // Voice-config selections don't depend on the graph.
-    if (selectedId === "voice:settings") return { kind: "voice-config", tab: "locale" };
-    if (selectedId === "context:source_policy") {
-      return { kind: "voice-config", tab: "source_policy" };
+    const c = classifyNodeId(selectedId);
+    switch (c.kind) {
+      // Voice-config + partial selections don't depend on the graph.
+      case "voice-settings":
+        return { kind: "voice-config", tab: "locale" };
+      case "context":
+        return { kind: "voice-config", tab: c.tab };
+      case "partial":
+        return { kind: "partial", templateId: c.templateId };
+      case "gate": {
+        if (!graphQ.data) return null;
+        const gate = graphQ.data.gates.find((g) => g.id === c.id);
+        return gate
+          ? { kind: "gate", label: gate.label, description: gate.description }
+          : null;
+      }
+      case "agent": {
+        if (!graphQ.data) return null;
+        const node = graphQ.data.nodes.find((n) => n.id === c.id);
+        return node ? { kind: "agent", node } : null;
+      }
     }
-    if (selectedId === "context:locale") return { kind: "voice-config", tab: "locale" };
-    if (!graphQ.data) return null;
-    if (selectedId.startsWith("partial:")) {
-      return { kind: "partial", templateId: selectedId.slice("partial:".length) };
-    }
-    if (selectedId.startsWith("gate:")) {
-      const gid = selectedId.slice("gate:".length);
-      const gate = graphQ.data.gates.find((g) => g.id === gid);
-      return gate
-        ? { kind: "gate", label: gate.label, description: gate.description }
-        : null;
-    }
-    const node = graphQ.data.nodes.find((n) => n.id === selectedId);
-    return node ? { kind: "agent", node } : null;
   }, [selectedId, graphQ.data]);
 
   return (
@@ -221,7 +225,7 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
             <button
               type="button"
               aria-pressed={selection?.kind === "voice-config"}
-              onClick={() => setSelectedId("voice:settings")}
+              onClick={() => setSelectedId(VOICE_SETTINGS_ID)}
               className={cn(
                 "font-mono text-[11px] tracking-[0.14em] uppercase px-3 py-1.5 border border-rule transition-colors",
                 selection?.kind === "voice-config"
@@ -258,6 +262,13 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
                 Anchored run ran in{" "}
                 <span className="text-ink">{graphModeForRun(anchoredRun)}</span> mode — switch the
                 mode tab to overlay its execution
+              </p>
+            </div>
+          )}
+          {runId !== null && logsQ.isError && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center px-4 pt-3">
+              <p className="pointer-events-auto bg-paper border border-accent-deep/40 rounded-sm px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-accent-deep shadow-sm">
+                Failed to load run logs — execution overlay unavailable
               </p>
             </div>
           )}

@@ -156,6 +156,10 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
   });
 
   // Auto-preview on route change or after buffer settles (600 ms debounce).
+  // previewMut is intentionally excluded from deps: its object identity changes
+  // every render, so including it would re-fire the effect each render. The
+  // route/buffer changes are the real triggers, and each run captures a fresh
+  // previewMut closure, so there's no stale-mutation risk.
   useEffect(() => {
     if (!activeRoute || !buffer) return;
     const t = setTimeout(() => previewMut.mutate(), 600);

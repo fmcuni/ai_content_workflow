@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PromptGraph } from "@/lib/types";
 import { buildStudioGraph, type Ownership, type PartialInfo } from "./layout";
+import type { NodeRunStatus, RunOverlay } from "./run-overlay";
 
 function makeGraph(): PromptGraph {
   return {
@@ -157,5 +158,35 @@ describe("buildStudioGraph", () => {
     const { nodes, edges } = buildStudioGraph(noPersona, PARTIALS, OWNERSHIP);
     expect(nodes.some((n) => n.type === "context")).toBe(false);
     expect(edges.some((e) => e.id.startsWith("inject:"))).toBe(false);
+  });
+
+  it("leaves every agent runStatus undefined when the overlay's mode doesn't match", () => {
+    const overlay: RunOverlay = {
+      modeMatches: false,
+      ranAtAll: true,
+      byNode: { writer: { kind: "ran", executions: 2 } },
+    };
+    const { nodes } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP, overlay);
+    const agents = nodes.filter((n) => n.type === "agent");
+    const statuses = agents.map((n) => (n.data as { runStatus?: NodeRunStatus }).runStatus);
+    expect(statuses.every((s) => s === undefined)).toBe(true);
+  });
+
+  it("tags ran nodes and marks in-mode absentees as did-not-run when the mode matches", () => {
+    const overlay: RunOverlay = {
+      modeMatches: true,
+      ranAtAll: true,
+      byNode: {
+        gap_analysis: { kind: "ran", executions: 1 },
+        writer: { kind: "ran", executions: 2 },
+      },
+    };
+    const { nodes } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP, overlay);
+    const runStatusOf = (id: string) =>
+      (nodes.find((n) => n.id === id)?.data as { runStatus?: NodeRunStatus }).runStatus;
+    expect(runStatusOf("gap_analysis")).toEqual({ kind: "ran", executions: 1 });
+    expect(runStatusOf("writer")).toEqual({ kind: "ran", executions: 2 });
+    // outline lives in this mode's graph but is absent from the log → did-not-run.
+    expect(runStatusOf("outline")).toEqual({ kind: "did-not-run" });
   });
 });
