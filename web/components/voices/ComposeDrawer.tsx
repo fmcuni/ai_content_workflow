@@ -6,16 +6,7 @@ import { toast } from "sonner";
 
 import { personasApi, publishTargetsApi } from "@/lib/api";
 import type { DisclaimerTemplate, Persona, PersonaIn, VoiceLocale } from "@/lib/types";
-
-// HK-ZH defaults — shown as input placeholders so an admin sees what "leave
-// blank" yields. `sources_heading` default is null (follow the article script).
-const HK_ZH_LOCALE: VoiceLocale = {
-  output_language: "香港繁體中文",
-  brand_name: "Bowtie",
-  market: "Google 香港繁中",
-  sources_heading: null,
-  faq_heading: "常見問題",
-};
+import { HK_ZH_LOCALE, LocaleField } from "./LocaleFields";
 
 interface ComposeDrawerProps {
   mode: { kind: "create" } | { kind: "edit"; persona: Persona };
@@ -101,31 +92,6 @@ function StringList({
       >
         ＋ 加一行
       </button>
-    </div>
-  );
-}
-
-function LocaleField({
-  label,
-  value,
-  placeholder,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  placeholder?: string;
-  onChange: (next: string) => void;
-}) {
-  return (
-    <div>
-      <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint mb-1">{label}</p>
-      <input
-        aria-label={label}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border-b border-rule bg-transparent py-1 text-[14px] focus:outline-none focus:border-ink"
-      />
     </div>
   );
 }

@@ -44,6 +44,12 @@ export function StyleCard({ persona, onEdit, canManage = true }: StyleCardProps)
         </div>
         <div className="flex items-center gap-4">
           <Link
+            href={`/voices/${persona.slug}`}
+            className="inline-flex items-center gap-1.5 rounded-sm bg-ink px-3 py-1.5 font-mono text-[11px] tracking-[0.14em] uppercase text-paper hover:bg-accent transition-colors"
+          >
+            ⬡ Open Studio →
+          </Link>
+          <Link
             href={`/voices/${persona.slug}/glossary`}
             className="text-[12px] tracking-wider uppercase text-ink-soft hover:text-accent transition-colors"
           >

@@ -275,7 +275,11 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
   const versions = historyQ.data?.versions ?? [];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
+    // Container-query layout: two columns on the wide standalone page, but
+    // stacked single-column when embedded in the narrow studio inspector — so
+    // the rendered block reads top-to-bottom instead of forcing a sideways peek.
+    <div className="@container">
+      <div className="grid grid-cols-1 @[820px]:grid-cols-[1fr_360px] gap-8">
       <div>
         <p className="font-mono text-[11px] text-ink-soft tracking-[0.02em] mb-4">
           {doc.deny.domains.length + doc.prefer.domains.length} domains ·{" "}
@@ -521,6 +525,7 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
           )}
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }
