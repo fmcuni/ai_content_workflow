@@ -38,14 +38,28 @@ function CanvasInner({ graph, partials, ownershipById, onSelect }: VoiceStudioCa
   const [nodes, setNodes, onNodesChange] = useNodesState(built.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(built.edges);
 
-  // Re-seed on layout change (mode switch). Selection clears with the reset.
+  // `built` recomputes on every render (its `partials` input is fed by
+  // useQueries, which returns a fresh array each render). Re-seed only when the
+  // layout *content* actually changes — keyed off a stable string signature, so
+  // node positions aren't snapped back every render and clicks aren't dropped.
+  const signature = useMemo(
+    () =>
+      JSON.stringify({
+        n: built.nodes.map((n) => [n.id, n.type, n.position.x, n.position.y, n.data]),
+        e: built.edges.map((e) => e.id),
+      }),
+    [built],
+  );
+  // Selection is owned by the parent and cleared there on mode change; the
+  // canvas must NOT reset it here, or the re-seed would wipe every click.
+  // `built` is keyed by `signature`: it changes identity every render, but the
+  // effect only fires when the content signature changes, at which point the
+  // closed-over `built` is the current render's value.
   useEffect(() => {
     setNodes(built.nodes);
     setEdges(built.edges);
-    onSelect(null);
-    // onSelect is stable from the parent; excluded to avoid a reset loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [built, setNodes, setEdges]);
+  }, [signature, setNodes, setEdges]);
 
   const handleNodeClick: NodeMouseHandler<Node> = (_e, node) => onSelect(node.id);
 
