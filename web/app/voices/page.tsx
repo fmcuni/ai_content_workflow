@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -97,6 +98,16 @@ export default function VoicesPage() {
 
       {/* Movement 3+4: Press Workflow */}
       <section aria-label="press-workflow">
+        {activeSlug && (
+          <div className="flex justify-end pb-2">
+            <Link
+              href={`/voices/${encodeURIComponent(activeSlug)}`}
+              className="font-mono text-[11px] uppercase tracking-[0.14em] text-accent hover:underline"
+            >
+              Open in Studio →
+            </Link>
+          </div>
+        )}
         {graph.data && (
           <PressWorkflow
             graph={graph.data}
