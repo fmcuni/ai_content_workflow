@@ -54,7 +54,7 @@ enforced by the drift guard (below).
 - **Required:** `AUTH_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `GEMINI_API_KEY`,
   `POSTGRES_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `WP_TARGET`, `WP_BASE_URL`,
   `WP_USERNAME`, `WP_APP_PASSWORD`
-- **Optional:** `LANGFUSE_*`, `VHIS101_WP_*`
+- **Optional:** `LANGFUSE_*`, `VHIS101_WP_*`, `HKVHIS_WP_*`
 
 The frontend Worker (`bowtie-content-tool-web` / `-dev`) has **no** runtime
 secrets — everything is build-time `NEXT_PUBLIC_*`.
