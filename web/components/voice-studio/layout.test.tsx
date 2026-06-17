@@ -13,7 +13,8 @@ function makeGraph(): PromptGraph {
         sub_graph: "strategy",
         order: 1,
         kind: "llm",
-        uses_persona: true,
+        // LLM but no persona block — locale tokens still reach it, source policy does not.
+        uses_persona: false,
         system_prompt_template_id: "gap_analysis",
         description: "Find content gaps",
       },
@@ -22,7 +23,7 @@ function makeGraph(): PromptGraph {
         sub_graph: "strategy",
         order: 2,
         kind: "llm",
-        uses_persona: true,
+        uses_persona: false,
         system_prompt_template_id: "outline_rewrite_mode",
         alt_template_ids: ["outline_create_mode"],
         description: "Plan the rewrite",
@@ -41,7 +42,7 @@ function makeGraph(): PromptGraph {
         sub_graph: "production",
         order: 2,
         kind: "llm",
-        uses_persona: false,
+        uses_persona: true,
         system_prompt_template_id: "audit",
         description: "Review the draft",
       },
@@ -77,9 +78,12 @@ const OWNERSHIP: Record<string, Ownership> = {
 };
 
 const PARTIALS: PartialInfo[] = [
-  { templateId: "persona_block", consumers: ["writer", "outline"], ownership: "shared" },
-  // consumer not in this mode's graph → must be filtered out
-  { templateId: "orphan_partial", consumers: ["nonexistent_node"], ownership: "shared" },
+  // Consumers come from the API as *template ids*: "writer" is the writer
+  // node's system template; "outline_create_mode" is the outline node's alt
+  // template. Both must resolve back to their node ids.
+  { templateId: "persona_block", consumers: ["writer", "outline_create_mode"], ownership: "shared" },
+  // consumer template not in this mode's graph → must be filtered out
+  { templateId: "orphan_partial", consumers: ["nonexistent_template"], ownership: "shared" },
 ];
 
 describe("buildStudioGraph", () => {
@@ -102,25 +106,45 @@ describe("buildStudioGraph", () => {
     expect((byId.render_html.data as { ownership: Ownership }).ownership).toBe("none");
   });
 
-  it("styles a backward edge as the rust refine loop", () => {
+  it("routes a backward edge under the spine via bottom handles as the rust refine loop", () => {
     const { edges } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP);
     const loop = edges.find((e) => e.id === "spine:audit->writer");
     expect(loop).toBeDefined();
     expect(loop?.animated).toBe(true);
     expect(loop?.label).toBe("refine loop");
+    // Loop-backs leave/enter via the card bottoms (so they bow below the spine
+    // instead of cutting straight across it) and use orthogonal routing.
+    expect(loop?.sourceHandle).toBe("loop-out");
+    expect(loop?.targetHandle).toBe("loop-in");
+    expect(loop?.type).toBe("smoothstep");
     const forward = edges.find((e) => e.id === "spine:outline->writer");
     expect(forward?.animated).toBe(false);
+    // Forward edges stay on the left/right spine handles.
+    expect(forward?.sourceHandle).toBe("out");
   });
 
-  it("anchors an in-graph gate above its node and trails an __end__ gate", () => {
+  it("places an in-graph gate inline on the spine and wires it into the flow", () => {
     const { nodes, edges } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP);
     const anchored = nodes.find((n) => n.id === "gate:HITL_1");
     const trailing = nodes.find((n) => n.id === "gate:HITL_T1");
-    expect(anchored?.position.y).toBeLessThan(0); // floats above the spine
-    expect(trailing?.position.y).toBe(0); // trails on the spine
-    // The anchored gate gets a connector edge; the trailing one does not.
-    expect(edges.some((e) => e.id === "gate-edge:HITL_1")).toBe(true);
-    expect(edges.some((e) => e.id === "gate-edge:HITL_T1")).toBe(false);
+    const writer = nodes.find((n) => n.id === "writer");
+    const outline = nodes.find((n) => n.id === "outline");
+    expect(anchored).toBeDefined();
+    expect(trailing).toBeDefined();
+    // The gate takes its own column between the node it guards (writer) and that
+    // node's predecessor (outline): outline.x < gate.x < writer.x.
+    expect(outline!.position.x).toBeLessThan(anchored!.position.x);
+    expect(anchored!.position.x).toBeLessThan(writer!.position.x);
+    // The forward edge into the guarded node routes through the gate, and the
+    // gate continues to the node — both solid spine edges.
+    expect(edges.find((e) => e.id === "spine:outline->writer")?.target).toBe("gate:HITL_1");
+    expect(edges.find((e) => e.id === "gate-out:HITL_1")?.target).toBe("writer");
+    // The loop-back edge bypasses the gate (no re-review on internal refine).
+    expect(edges.find((e) => e.id === "spine:audit->writer")?.target).toBe("writer");
+    // The trailing gate is wired from the last agent; no legacy floating
+    // dashed connector survives.
+    expect(edges.some((e) => e.id === "gate-in:HITL_T1")).toBe(true);
+    expect(edges.some((e) => e.id.startsWith("gate-edge:"))).toBe(false);
   });
 
   it("renders every shared partial and draws include-edges only to in-graph consumers", () => {
@@ -146,29 +170,70 @@ describe("buildStudioGraph", () => {
     ]);
   });
 
-  it("renders voice-context inputs that inject into persona-using agents", () => {
+  it("injects locale into every LLM agent and source-policy into persona agents", () => {
     const { nodes, edges } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP);
     const contextNodes = nodes.filter((n) => n.type === "context");
     expect(contextNodes.map((n) => n.id).sort()).toEqual([
       "context:locale",
       "context:source_policy",
     ]);
-    // 3 persona-using agents in the fixture: gap_analysis, outline, writer.
-    expect((contextNodes[0].data as { injectCount: number }).injectCount).toBe(3);
+    const targetsFor = (prefix: string) =>
+      edges
+        .filter((e) => e.id.startsWith(prefix))
+        .map((e) => e.target)
+        .sort();
+    // Locale reaches every LLM prompt — including the non-persona gap_analysis +
+    // outline (the connection this adds) — but not the deterministic render_html.
+    expect(targetsFor("inject:context:locale->")).toEqual([
+      "audit",
+      "gap_analysis",
+      "outline",
+      "writer",
+    ]);
+    // Source policy only lands in the persona/citation agents.
+    expect(targetsFor("inject:context:source_policy->")).toEqual(["audit", "writer"]);
+    const localeNode = contextNodes.find((n) => n.id === "context:locale");
+    expect((localeNode!.data as { injectCount: number }).injectCount).toBe(4);
     const injectEdges = edges.filter((e) => e.id.startsWith("inject:"));
-    expect(injectEdges).toHaveLength(6); // 2 inputs × 3 agents
-    expect(injectEdges.some((e) => e.id === "inject:context:locale->writer")).toBe(true);
-    // never wired to the persona-less audit node, always via the inject handle.
-    expect(injectEdges.some((e) => e.target === "audit")).toBe(false);
     expect(injectEdges.every((e) => e.targetHandle === "inject")).toBe(true);
   });
 
-  it("omits voice-context inputs when no agent uses the persona", () => {
+  it("drops a context input that has no target agent in this mode", () => {
     const g = makeGraph();
-    const noPersona = { ...g, nodes: g.nodes.map((n) => ({ ...n, uses_persona: false })) };
-    const { nodes, edges } = buildStudioGraph(noPersona, PARTIALS, OWNERSHIP);
-    expect(nodes.some((n) => n.type === "context")).toBe(false);
-    expect(edges.some((e) => e.id.startsWith("inject:"))).toBe(false);
+    // No persona anywhere → source policy has no target and is dropped; locale
+    // still wires to the LLM agents.
+    const noPersona: PromptGraph = {
+      ...g,
+      nodes: g.nodes.map((n) => ({ ...n, uses_persona: false })),
+    };
+    const np = buildStudioGraph(noPersona, PARTIALS, OWNERSHIP);
+    expect(np.nodes.some((n) => n.id === "context:source_policy")).toBe(false);
+    expect(np.nodes.some((n) => n.id === "context:locale")).toBe(true);
+    // No LLM agents either → both context inputs dropped, no inject edge dangles.
+    const allDeterministic: PromptGraph = {
+      ...g,
+      nodes: g.nodes.map((n) => ({ ...n, uses_persona: false, kind: "deterministic" })),
+    };
+    const det = buildStudioGraph(allDeterministic, PARTIALS, OWNERSHIP);
+    expect(det.nodes.some((n) => n.type === "context")).toBe(false);
+    expect(det.edges.some((e) => e.id.startsWith("inject:"))).toBe(false);
+  });
+
+  it("hides the partial library in topic-expansion mode", () => {
+    const g: PromptGraph = { ...makeGraph(), mode: "topic_expansion" };
+    const { nodes, edges } = buildStudioGraph(g, PARTIALS, OWNERSHIP);
+    expect(nodes.some((n) => n.type === "partial")).toBe(false);
+    expect(edges.some((e) => e.id.startsWith("inc:"))).toBe(false);
+  });
+
+  it("stacks a consumed partial under the agent that includes it", () => {
+    const { nodes } = buildStudioGraph(makeGraph(), PARTIALS, OWNERSHIP);
+    const writer = nodes.find((n) => n.id === "writer")!;
+    const persona = nodes.find((n) => n.id === "partial:persona_block")!;
+    // persona_block's primary consumer is writer → it sits in writer's column,
+    // below the spine, so its include-edge is a short near-vertical line.
+    expect(Math.abs(persona.position.x - writer.position.x)).toBeLessThan(40);
+    expect(persona.position.y).toBeGreaterThan(writer.position.y);
   });
 
   it("leaves every agent runStatus undefined when the overlay's mode doesn't match", () => {

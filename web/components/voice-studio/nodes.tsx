@@ -83,15 +83,24 @@ export function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData, "age
     >
       <Handle id="in" type="target" position={Position.Left} className="!bg-ink-faint" />
       <Handle id="out" type="source" position={Position.Right} className="!bg-ink-faint" />
-      <Handle id="gate" type="target" position={Position.Top} className="!bg-transparent !border-0" />
-      <Handle
-        id="inject"
-        type="target"
-        position={Position.Top}
-        style={{ left: "28%" }}
-        className="!bg-transparent !border-0"
-      />
+      <Handle id="inject" type="target" position={Position.Top} className="!bg-transparent !border-0" />
       <Handle id="inc" type="target" position={Position.Bottom} className="!bg-transparent !border-0" />
+      {/* Loop-back edges (refine loop / gate "request changes") leave and re-enter
+          via the card bottom so they bow under the spine instead of cutting across it. */}
+      <Handle
+        id="loop-out"
+        type="source"
+        position={Position.Bottom}
+        className="!bg-transparent !border-0"
+        style={{ left: "66%" }}
+      />
+      <Handle
+        id="loop-in"
+        type="target"
+        position={Position.Bottom}
+        className="!bg-transparent !border-0"
+        style={{ left: "34%" }}
+      />
 
       <div className="flex items-center justify-between gap-2 mb-1">
         <span
@@ -176,7 +185,8 @@ export function GateNode({ data, selected }: NodeProps<Node<GateNodeData, "gate"
       )}
       title={data.description}
     >
-      <Handle id="g-out" type="source" position={Position.Bottom} className="!bg-ink" />
+      <Handle id="in" type="target" position={Position.Left} className="!bg-ink" />
+      <Handle id="g-out" type="source" position={Position.Right} className="!bg-ink" />
       <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink">{data.label}</p>
       <p className="font-mono text-[10px] uppercase tracking-wider text-ink-soft mt-0.5">
         human review
