@@ -90,14 +90,19 @@ pre-flight guards above are **code-only (no new migration)** and not yet redeplo
 
 ---
 
-## Prod rollout checklist (when greenlit)
+## Prod rollout — DONE (2026-06-18, code + schema)
 
-1. **Migrations first (split-migration rule — additive cols before code):** push in order to prod
+Branch merged + deployed to prod. WordPress unaffected; Ghost path stays dormant
+until the **owner steps** below are completed.
+
+1. ✅ **Migrations (split-migration rule — additive cols before code):** all 4 pushed to prod via `supabase db push`:
+   - `20260618000000_publish_targets_ghost.sql` (kind IN wordpress|ghost; CMS-agnostic post id)
    - `20260618010000_runs_ghost_meta.sql`
    - `20260618020000_hitl2_snapshots_ghost_meta.sql`
    - `20260618030000_fetched_articles_cms_post_id.sql`
-   via `supabase db push` (already applied to dev).
-2. **Merge** the `feat/ghost-publisher` PR → `deploy-workers.yml` CI deploys both prod Workers.
-3. **Prod secrets:** confirm `HCHK_GT_API_URL` + `HCHK_GT_ADMIN_API_KEY` are set on the prod backend Worker (Admin key — id:secret — not a Content key).
-4. **Prod publish target row:** create the `content_tool.publish_targets` Ghost row (kind=`ghost`, auth_ref=`HCHK_GT`) on prod, and point the intended voice's `personas.publish_target_id` at it. (claude-debug is DEV-ONLY → the user creates this via prod `/settings/publish-targets`.)
-5. **Live publish:** any real Ghost publish hits **production healthycheckhk** (shared/prod). Needs explicit go-ahead; prefer status=draft for the first verification, then read back via the Ghost Admin dashboard.
+2. ✅ **Merged** PR [#16](https://github.com/bowtie-ins/ai_content_workflow/pull/16) (squash → `main` commit `7b938f6`). CI green. Deploy fires from the **fmcuni** fork only (`deploy-workers.yml` `if: repository_owner == 'fmcuni'`; bowtie-ins mirror has no `CLOUDFLARE_*` secrets → its run skips). fmcuni run `27737069717` = success, both Workers. Prod smoke: backend `/health` 200, `/runs` 401, web `/` 307.
+
+### OWED (owner — Ghost activation; not blocking, WordPress unaffected)
+3. **Prod secrets:** set `HCHK_GT_API_URL` + `HCHK_GT_ADMIN_API_KEY` on the prod backend Worker (`bowtie-content-tool-poc`) via `wrangler secret put` — **Admin key (id:secret), not a Content key**. _(Confirmed NOT present on prod as of 2026-06-18.)_
+4. **Prod publish target row:** create the `content_tool.publish_targets` Ghost row (kind=`ghost`, auth_ref=`HCHK_GT`) on prod and point the intended voice's `personas.publish_target_id` at it — via prod `/settings/publish-targets` (claude-debug is DEV-ONLY → the user does this).
+5. **Live publish verification:** any real Ghost publish hits **production healthycheckhk** (shared/prod). Needs explicit go-ahead; prefer status=draft first, then read back via the Ghost Admin dashboard. Covers the not-yet-live-verified items above (URL pull-back, slug PUT→POST flip, JSON-LD in public `<head>`).
