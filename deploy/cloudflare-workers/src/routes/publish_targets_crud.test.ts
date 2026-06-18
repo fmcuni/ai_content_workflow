@@ -79,13 +79,13 @@ function makeFakeSql(): unknown {
     }
 
     if (lower.startsWith("insert")) {
-      // createPublishTarget: params = [name, auth_ref, status].
+      // createPublishTarget: params = [name, kind, auth_ref, status].
       const row: TargetRow = {
         publish_target_id: "00000000-0000-0000-0000-0000000000aa",
         name: String(params[0]),
-        kind: "wordpress",
-        auth_ref: String(params[1]),
-        status: String(params[2]),
+        kind: String(params[1]),
+        auth_ref: String(params[2]),
+        status: String(params[3]),
         is_archived: false,
       };
       state.target = row;
@@ -198,6 +198,27 @@ describe("publish-targets CRUD", () => {
     expect(json.kind).toBe("wordpress");
     expect(json.auth_ref).toBe("VHIS101_WP");
     expect(json.status).toBe("active");
+  });
+
+  it("creates a ghost target when kind='ghost' → 201", async () => {
+    const res = await req("/publish-targets", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ name: "HealthyCheckHK", auth_ref: "HCHK_GT", kind: "ghost" }),
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as TargetRow;
+    expect(json.kind).toBe("ghost");
+    expect(json.auth_ref).toBe("HCHK_GT");
+  });
+
+  it("422 on an unsupported kind", async () => {
+    const res = await req("/publish-targets", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ name: "X", auth_ref: "X_REF", kind: "drupal" }),
+    });
+    expect(res.status).toBe(422);
   });
 
   it("rejects a non-admin with 403", async () => {

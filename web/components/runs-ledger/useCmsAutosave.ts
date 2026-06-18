@@ -21,6 +21,11 @@ export interface CmsFormValues {
   slug: string;
   pubStatus: "" | "draft" | "publish" | "future";
   pubDate: string; // yyyy-mm-dd (input[type=date]); "" = unset
+  // Ghost-destination metadata (kind='ghost' runs) — ride the PATCH path.
+  ghostAuthorIds: string[] | null;
+  ghostTags: string[] | null;
+  // Feature image URL (Ghost) — rides the PATCH path; "" serializes to null.
+  featureImageUrl: string | null;
 }
 
 type FieldKey = keyof CmsFormValues;
@@ -47,6 +52,9 @@ function initialFrom(run: RunSummary): CmsFormValues {
     slug: run.wp_slug ?? "",
     pubStatus: (run.wp_publish_status as CmsFormValues["pubStatus"]) ?? "",
     pubDate: run.wp_publish_at ? run.wp_publish_at.slice(0, 10) : "",
+    ghostAuthorIds: run.ghost_author_ids ?? null,
+    ghostTags: run.ghost_tags ?? null,
+    featureImageUrl: run.feature_image_url ?? null,
   };
 }
 
@@ -159,6 +167,12 @@ export function useCmsAutosave(
     wp_slug: v.slug || null,
     wp_publish_status: v.pubStatus || null,
     wp_publish_at: v.pubStatus === "future" && v.pubDate ? `${v.pubDate}T00:00:00Z` : null,
+    // ALWAYS send an array (never null) so the drawer can clear Ghost tags: the
+    // backend COALESCE treats `[]` as "clear" and a populated array as "set".
+    ghost_author_ids: v.ghostAuthorIds ?? [],
+    ghost_tags: v.ghostTags ?? [],
+    // Empty string ⇒ null (mirrors the edit page's `value || null` treatment).
+    feature_image_url: v.featureImageUrl || null,
   }), []);
 
   const setField = useCallback(

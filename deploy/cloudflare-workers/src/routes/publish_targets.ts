@@ -17,6 +17,7 @@ const publishTargetsRouter = new Hono<{ Bindings: Env }>();
 // valid shell-style identifier. Mirrors the Python _AUTH_REF_PATTERN.
 const AUTH_REF_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const STATUSES = new Set(["active", "inactive"]);
+const KINDS = new Set(["wordpress", "ghost"]);
 
 // GET /publish-targets
 // Bare JSON array of CMS publish targets ordered by created_at ASC. Mirrors the
@@ -59,16 +60,23 @@ publishTargetsRouter.get("/:id/readiness", async (c) => {
   }
   const ref = target.auth_ref;
   const env = c.env as unknown as Record<string, string | undefined>;
-  const baseUrl = Boolean(env[`${ref}_BASE_URL`]);
-  const username = Boolean(env[`${ref}_USERNAME`]);
-  const appPassword = Boolean(env[`${ref}_APP_PASSWORD`]);
+  // Which env vars a target needs depends on its kind (wordpress vs ghost).
+  const names =
+    target.kind === "ghost"
+      ? [`${ref}_API_URL`, `${ref}_ADMIN_API_KEY`]
+      : [`${ref}_BASE_URL`, `${ref}_USERNAME`, `${ref}_APP_PASSWORD`];
+  const secrets = names.map((name) => ({ name, present: Boolean(env[name]) }));
+  const ready = secrets.every((s) => s.present);
   return c.json({
     publish_target_id: id,
     auth_ref: ref,
-    base_url: baseUrl,
-    username,
-    app_password: appPassword,
-    ready: baseUrl && username && appPassword,
+    kind: target.kind,
+    secrets,
+    // Legacy WordPress-shaped fields, kept for back-compat (false for ghost).
+    base_url: Boolean(env[`${ref}_BASE_URL`]),
+    username: Boolean(env[`${ref}_USERNAME`]),
+    app_password: Boolean(env[`${ref}_APP_PASSWORD`]),
+    ready,
   });
 });
 
@@ -76,7 +84,7 @@ publishTargetsRouter.get("/:id/readiness", async (c) => {
 // name/auth_ref/status; 409 when the auth_ref is already in use; 201 on success.
 publishTargetsRouter.post("/", async (c) => {
   const body = await c.req
-    .json<{ name?: unknown; auth_ref?: unknown; status?: unknown }>()
+    .json<{ name?: unknown; auth_ref?: unknown; status?: unknown; kind?: unknown }>()
     .catch(() => null);
   if (body === null) {
     return c.json({ detail: "invalid JSON body" }, 422);
@@ -84,6 +92,7 @@ publishTargetsRouter.post("/", async (c) => {
   const name = typeof body.name === "string" ? body.name : "";
   const authRef = typeof body.auth_ref === "string" ? body.auth_ref : "";
   const status = typeof body.status === "string" ? body.status : "active";
+  const kind = typeof body.kind === "string" ? body.kind : "wordpress";
   if (name.length < 1 || name.length > 128) {
     return c.json({ detail: "name must be 1–128 characters" }, 422);
   }
@@ -96,13 +105,16 @@ publishTargetsRouter.post("/", async (c) => {
   if (!STATUSES.has(status)) {
     return c.json({ detail: "status must be 'active' or 'inactive'" }, 422);
   }
+  if (!KINDS.has(kind)) {
+    return c.json({ detail: "kind must be 'wordpress' or 'ghost'" }, 422);
+  }
 
   const ctx = c.executionCtx as ExecutionContext;
   const result = await withDb(c.env, ctx, async (sql) => {
     if (await authRefExists(sql, authRef)) {
       return { kind: "dup" as const };
     }
-    const row = await createPublishTarget(sql, { name, auth_ref: authRef, status });
+    const row = await createPublishTarget(sql, { name, auth_ref: authRef, status, kind });
     return { kind: "ok" as const, row };
   });
   if (result.kind === "dup") {

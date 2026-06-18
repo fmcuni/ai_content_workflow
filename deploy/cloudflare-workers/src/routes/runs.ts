@@ -15,8 +15,12 @@ import {
 import type { PublishPayload, SeoPlugin } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
 import { stripAnchorSpans } from "../util/strip_anchors";
+import { resolvePostIdForSlug } from "../util/url_slug";
 import { canonicalizeSlug } from "../wordpress/slug";
 import { resolvePublishTarget, buildTargetEnv } from "../publishers/wp_factory";
+import { buildGhostCreds, ghostAdminBase, buildGhostSchemaHead } from "../publishers/ghost";
+import { wrapNonNativeHtmlForGhost } from "../publishers/ghost_html";
+import { checkPublishGuards } from "../util/publish_guards";
 import { restartGuard } from "./run_guards";
 import type { AuthVars } from "../auth/middleware";
 import { resolveActorIdentity } from "./identity";
@@ -132,6 +136,11 @@ interface Hitl2Body {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  // Ghost-specific metadata (kind='ghost' runs). Author = staff-user ids,
+  // tags = names, feature image = URL. Ignored for WordPress runs.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 interface DryPublishBody {
@@ -146,6 +155,9 @@ interface DryPublishBody {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +195,10 @@ interface RunSummary {
   wp_pushed_post_id: number | null;
   wp_pushed_at: string | null;
   wp_push_error: unknown;
+  // Ghost destination (kind='ghost' runs) — parsed jsonb arrays + image URL.
+  ghost_author_ids: string[] | null;
+  ghost_tags: string[] | null;
+  feature_image_url: string | null;
   start_mode: string;
   topic_candidate_id: string | null;
   target_audience: string | null;
@@ -227,6 +243,12 @@ interface RunListRow {
   wp_publish_status: string | null;
   wp_publish_at: string | null;
   wp_pushed_post_id: number | null;
+  // Ghost destination — author ids + tag names (jsonb arrays) + feature image
+  // URL. jsonb arrives as a RAW STRING under Hyperdrive fetch_types:false, so
+  // it must be pgJson-parsed in the row→payload mapping (like wp_category_ids).
+  ghost_author_ids: unknown;
+  ghost_tags: unknown;
+  feature_image_url: string | null;
   // Latest render per run (renders ⟕ drafts, newest iteration). NULL until a
   // draft is rendered — the ledger reads these for the row SEO snippet,
   // drawer preview, and CMS form prefill.
@@ -253,6 +275,16 @@ interface RunHitl2StateRow {
   hitl_2_iteration: number;
 }
 
+// Stored publish metadata read on the approve path to validate the EFFECTIVE
+// publish settings (this submission falling back to what is already on the run)
+// against the resolved CMS before the gate is claimed.
+interface RunPublishMetaRow {
+  persona: string | null;
+  wp_publish_status: string | null;
+  wp_publish_at: string | null;
+  wp_category_ids: unknown;
+}
+
 interface RunDryPublishRow {
   start_mode: string;
   persona: string;
@@ -265,6 +297,8 @@ interface RunDryPublishRow {
   wp_featured_media_id: number | null;
   wp_publish_at: string | null;
   wp_pushed_post_id: number | null;
+  cms_post_id: string | null;
+  article_url: string | null;
 }
 
 interface RenderDryPublishRow {
@@ -312,6 +346,11 @@ function toRunSummary(row: RunDetailRow): RunSummary {
     wp_pushed_post_id: row.wp_pushed_post_id,
     wp_pushed_at: pgTimestampToIso(row.wp_pushed_at),
     wp_push_error: pgJson(row.wp_push_error),
+    // Ghost destination — jsonb arrays parsed (RAW STRING under Hyperdrive),
+    // feature image is plain text. Drawer prefills the Ghost author + tags.
+    ghost_author_ids: pgJson<string[] | null>(row.ghost_author_ids),
+    ghost_tags: pgJson<string[] | null>(row.ghost_tags),
+    feature_image_url: row.feature_image_url,
     start_mode: row.start_mode,
     topic_candidate_id: row.topic_candidate_id,
     target_audience: row.target_audience,
@@ -449,6 +488,7 @@ runsRouter.get("/", async (c) => {
         runs.wp_featured_media_id,
         runs.wp_slug, runs.wp_excerpt, runs.wp_publish_status, runs.wp_publish_at,
         runs.wp_pushed_post_id,
+        runs.ghost_author_ids, runs.ghost_tags, runs.feature_image_url,
         lr.seo_title, lr.meta_description
       FROM content_tool.runs
       LEFT JOIN content_tool.topic_candidates tc
@@ -498,6 +538,11 @@ runsRouter.get("/", async (c) => {
       wp_publish_status: r.wp_publish_status,
       wp_publish_at: pgTimestampToIso(r.wp_publish_at),
       wp_pushed_post_id: r.wp_pushed_post_id,
+      // Ghost destination — jsonb arrays parsed (RAW STRING under Hyperdrive),
+      // feature image is plain text. Drawer prefills the Ghost author + tags.
+      ghost_author_ids: pgJson<string[] | null>(r.ghost_author_ids),
+      ghost_tags: pgJson<string[] | null>(r.ghost_tags),
+      feature_image_url: r.feature_image_url,
       // Latest render per run (§6.1) — ledger row SEO snippet + drawer prefill.
       seo_title: r.seo_title,
       meta_description: r.meta_description,
@@ -520,7 +565,8 @@ runsRouter.get("/:id", async (c) => {
         hitl_2_decision, hitl_2_notes, hitl_2_iteration, wp_publish_status,
         wp_author_id, wp_category_ids, wp_tag_ids, wp_featured_media_id,
         wp_slug, wp_excerpt,
-        wp_pushed_post_id, wp_pushed_at, wp_push_error, start_mode,
+        wp_pushed_post_id, wp_pushed_at, wp_push_error,
+        ghost_author_ids, ghost_tags, feature_image_url, start_mode,
         topic_candidate_id, target_audience, auto_accept_hitl1, error
       FROM content_tool.runs
       WHERE run_id = ${runId}
@@ -724,6 +770,33 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
       return { error: "not_found" as const };
     }
 
+    // Pre-flight publish validation (approve AT the gate only). Reject BEFORE
+    // the atomic claim so an invalid approve never mutates run state — the
+    // operator gets a clear 422 instead of a raw CMS 4xx mid-publish. Validates
+    // the EFFECTIVE settings: this submission falling back to what is already
+    // stored on the run, checked against the voice's resolved CMS (Ghost vs
+    // WordPress). A run NOT paused at the gate skips this and falls through to
+    // the claim, which returns not_at_gate (409).
+    if (decision === "approve" && current.status === HITL_2_GATE_STATUS) {
+      const metaRows = await sql<RunPublishMetaRow[]>`
+        SELECT persona, wp_publish_status, wp_publish_at, wp_category_ids
+        FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+      `;
+      const meta = metaRows[0];
+      if (meta !== undefined) {
+        const target = await resolvePublishTarget(sql, meta.persona ?? "", c.env.WP_TARGET ?? "");
+        const detail = checkPublishGuards({
+          kind: target.kind,
+          status: body.wp_publish_status ?? meta.wp_publish_status,
+          publishAt: body.wp_publish_at ?? meta.wp_publish_at,
+          categoryIds: body.wp_category_ids ?? pgJson<number[] | null>(meta.wp_category_ids),
+        });
+        if (detail !== null) {
+          return { error: "invalid_publish" as const, detail };
+        }
+      }
+    }
+
     // Atomic claim of the HITL_2 decision (optimistic-concurrency, matches the
     // PUT /article + /outline version-guard style). Two guards are folded into
     // the WHERE clause so the read-then-write TOCTOU windows close:
@@ -769,7 +842,10 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
         wp_featured_media_id = ${body.wp_featured_media_id ?? null},
         wp_slug = ${body.wp_slug ?? null},
         wp_excerpt = ${body.wp_excerpt ?? null},
-        wp_publish_at = ${body.wp_publish_at ?? null}
+        wp_publish_at = ${body.wp_publish_at ?? null},
+        ghost_author_ids = ${body.ghost_author_ids == null ? null : toJsonb(sql, body.ghost_author_ids)},
+        ghost_tags = ${body.ghost_tags == null ? null : toJsonb(sql, body.ghost_tags)},
+        feature_image_url = ${body.feature_image_url ?? null}
       WHERE run_id = ${runId}
         AND status = ${HITL_2_GATE_STATUS} ${capGuard}
     `;
@@ -820,6 +896,11 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
     }
     if (guard.error === "cap_reached") {
       return c.json({ detail: "request_changes cap reached" }, 409);
+    }
+    if (guard.error === "invalid_publish") {
+      // Pre-flight publish validation failed (scheduled-without-date, or
+      // categories on a Ghost target). The gate was NOT claimed.
+      return c.json({ detail: guard.detail }, 422);
     }
     // not_at_gate — the run is not paused at HITL_2 (already decided, or a
     // concurrent request already claimed the gate).
@@ -943,7 +1024,8 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
     const runRows = await sql<RunDryPublishRow[]>`
       SELECT
         start_mode, persona, wp_publish_status, wp_category_ids, wp_tag_ids, wp_excerpt,
-        wp_slug, wp_author_id, wp_featured_media_id, wp_publish_at, wp_pushed_post_id
+        wp_slug, wp_author_id, wp_featured_media_id, wp_publish_at, wp_pushed_post_id,
+        cms_post_id, article_url
       FROM content_tool.runs
       WHERE run_id = ${runId}
       LIMIT 1
@@ -993,14 +1075,96 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
   }
 
   const { run, render, fetchedPostId, target } = data;
+
+  // Ghost target: preview the Ghost Admin API call (POST/PUT /posts/?source=html)
+  // instead of the WordPress REST call, so the operator verifies the real Ghost
+  // request before approving HITL_2. Mirrors publishToGhost's field mapping.
+  if (target.kind === "ghost") {
+    let apiBase: string | null = null;
+    try {
+      const creds = buildGhostCreds(
+        c.env as unknown as Record<string, string | undefined>,
+        target.authRef,
+      );
+      apiBase = ghostAdminBase(creds.apiUrl);
+    } catch {
+      apiBase = null; // creds unprovisioned — the readiness badge surfaces this
+    }
+    const gTitle = ov.edited_seo_title ?? render.seo_title;
+    const gHtml = wrapNonNativeHtmlForGhost(
+      stripAnchorSpans(ov.edited_html_body ?? render.html_body),
+    );
+    const gExcerpt = ov.wp_excerpt ?? run.wp_excerpt ?? render.excerpt_suggestion;
+    const gSlug = ov.wp_slug ?? run.wp_slug;
+    const gAuthors = ov.ghost_author_ids ?? [];
+    const gTags = ov.ghost_tags ?? [];
+    const gFeature = ov.feature_image_url ?? null;
+    const gMetaDesc = ov.edited_meta_description ?? render.meta_description;
+    const gPublishAt = ov.wp_publish_at ?? run.wp_publish_at;
+    const wpStatus = resolvePublishStatus(ov.wp_publish_status ?? run.wp_publish_status);
+    const gStatus =
+      wpStatus === "publish" ? "published" : wpStatus === "future" ? "scheduled" : "draft";
+
+    const post: Record<string, unknown> = { title: gTitle, html: gHtml, status: gStatus };
+    if (gSlug) post.slug = gSlug;
+    if (gExcerpt) post.custom_excerpt = gExcerpt;
+    if (gAuthors.length > 0) post.authors = gAuthors.map((id) => ({ id }));
+    if (gTags.length > 0) post.tags = gTags.map((name) => ({ name }));
+    if (gFeature) post.feature_image = gFeature;
+    // No meta_title: production intentionally drops it so Ghost falls back to the
+    // post title. The preview must match what publishToGhost actually sends.
+    if (gMetaDesc) post.meta_description = gMetaDesc;
+    if (gPublishAt) post.published_at = pgTimestampToIso(gPublishAt) ?? gPublishAt;
+    // FAQ JSON-LD: publishToGhost ships render.schema_jsonld in codeinjection_head;
+    // the preview must include it so the operator sees the structured data that
+    // will actually publish.
+    const gSchemaHead = buildGhostSchemaHead(
+      render.schema_jsonld !== null && render.schema_jsonld !== undefined
+        ? pgJson<object[]>(render.schema_jsonld)
+        : null,
+    );
+    if (gSchemaHead) post.codeinjection_head = gSchemaHead;
+
+    // If the operator changed the slug of an already-published Ghost post, the
+    // real publish creates a NEW post — preview that (POST create, not PUT update).
+    const ghostPostId = resolvePostIdForSlug(run.cms_post_id, run.article_url, gSlug);
+    // Surface pre-flight metadata problems (scheduled-without-date, categories on
+    // a Ghost target) so the operator sees them before approving — not as a raw
+    // Ghost 422 at publish time. Non-fatal here: the preview still renders.
+    const gValidationError = checkPublishGuards({
+      kind: "ghost",
+      status: wpStatus,
+      publishAt: gPublishAt,
+      categoryIds: ov.wp_category_ids ?? pgJson<number[] | null>(run.wp_category_ids),
+    });
+    return c.json({
+      target_base_url: apiBase,
+      target_label: target.label,
+      kind: "ghost",
+      request_method: ghostPostId ? "PUT" : "POST",
+      request_url: apiBase
+        ? ghostPostId
+          ? `${apiBase}/posts/${ghostPostId}/`
+          : `${apiBase}/posts/?source=html`
+        : "",
+      request_headers: {
+        authorization: "Ghost <redacted>",
+        "content-type": "application/json",
+        "accept-version": "v6.0",
+      },
+      request_body: { posts: [post] },
+      validation_error: gValidationError,
+    });
+  }
+
   // Credentials for the resolved target, read in the running Worker (never
   // persisted). For the default target this returns c.env unchanged. Throws
   // when a non-default target's credential env vars are absent (matches the
   // Python factory's EnvironmentError).
   const targetEnv = buildTargetEnv(c.env, target);
-  // Effective WP post id: a prior push wins, else the refresh fetched-post id
+  // Base WP post id: a prior push wins, else the refresh fetched-post id
   // (null for an un-pushed create → POST a new draft).
-  const effectivePostId = run.wp_pushed_post_id ?? fetchedPostId;
+  const baseWpPostId = run.wp_pushed_post_id ?? fetchedPostId;
 
   // Merge optional reviewer edits over the persisted render + run WP options.
   const title = ov.edited_seo_title ?? render.seo_title;
@@ -1013,6 +1177,9 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
   const tags = ov.wp_tag_ids ?? pgJson<number[] | null>(run.wp_tag_ids) ?? [];
   const excerpt = ov.wp_excerpt ?? run.wp_excerpt ?? render.excerpt_suggestion;
   const slug = ov.wp_slug ?? run.wp_slug;
+  // If the operator changed the slug of an already-published post, the real
+  // publish creates a NEW post — preview that (POST create, not PUT update).
+  const effectivePostId = resolvePostIdForSlug(baseWpPostId, run.article_url, slug);
   const author = ov.wp_author_id ?? run.wp_author_id;
   const featuredMedia = ov.wp_featured_media_id ?? run.wp_featured_media_id;
   const publishAt = ov.wp_publish_at ?? run.wp_publish_at;
@@ -1066,9 +1233,19 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
     ? `${baseTrimmed}/wp-json/wp/v2/posts/${effectivePostId}`
     : `${baseTrimmed}/wp-json/wp/v2/posts`;
 
+  // Same pre-flight guard as the Ghost branch (scheduled-without-date applies to
+  // both CMSes). Non-fatal: the preview still renders so the operator sees both.
+  const wpValidationError = checkPublishGuards({
+    kind: "wordpress",
+    status,
+    publishAt,
+    categoryIds: categories,
+  });
+
   return c.json({
     target_base_url: targetEnv.WP_BASE_URL ?? null,
     target_label: target.label,
+    kind: "wordpress",
     request_method: method,
     request_url: url,
     request_headers: {
@@ -1076,6 +1253,7 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
       "content-type": "application/json",
     },
     request_body: requestBody,
+    validation_error: wpValidationError,
   });
 });
 
@@ -1273,6 +1451,10 @@ interface Hitl2SnapshotBody {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  // Ghost destination metadata (kind='ghost' runs), parallel to wp_* above.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 interface Hitl2SnapshotRow {
@@ -1295,6 +1477,10 @@ interface Hitl2SnapshotRow {
   wp_slug: string | null;
   wp_excerpt: string | null;
   wp_publish_at: string | null;
+  // Ghost destination metadata (jsonb arrays parsed via pgJson; image is text).
+  ghost_author_ids: unknown;
+  ghost_tags: unknown;
+  feature_image_url: string | null;
 }
 
 interface OutlineEditBody {
@@ -1331,6 +1517,12 @@ interface RunWpMetaPatchBody {
   wp_slug?: string | null;
   wp_publish_status?: string | null;
   wp_publish_at?: string | null;
+  // Ghost-specific destination metadata (kind='ghost' runs). Authors are
+  // staff-user id strings, tags are names, feature image is a URL. Same
+  // COALESCE semantics as the wp_* fields: null = leave unchanged, [] = clear.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
   expected_version?: number | null;
 }
 
@@ -1393,6 +1585,9 @@ function toSnapshotOut(
     wp_slug: row.wp_slug,
     wp_excerpt: row.wp_excerpt,
     wp_publish_at: pgTimestampToIso(row.wp_publish_at),
+    ghost_author_ids: pgJson<string[] | null>(row.ghost_author_ids),
+    ghost_tags: pgJson<string[] | null>(row.ghost_tags),
+    feature_image_url: row.feature_image_url,
     version_number: extra?.version_number ?? null,
     is_current: extra?.is_current ?? false,
   };
@@ -1682,7 +1877,7 @@ runsRouter.post("/:id/hitl2-snapshots", requireRole("author"), async (c) => {
         snapshot_id, run_id, created_by, trigger, html_body, committed_html_body,
         seo_title, meta_description, notes, comments, wp_publish_status, wp_author_id,
         wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt,
-        wp_publish_at
+        wp_publish_at, ghost_author_ids, ghost_tags, feature_image_url
       ) VALUES (
         ${snapshotId}, ${runId}, ${editorEmail}, ${body.trigger ?? "manual"},
         ${body.html_body ?? ""}, ${body.committed_html_body ?? null},
@@ -1692,13 +1887,17 @@ runsRouter.post("/:id/hitl2-snapshots", requireRole("author"), async (c) => {
         ${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)},
         ${body.wp_tag_ids == null ? null : toJsonb(sql, body.wp_tag_ids)},
         ${body.wp_featured_media_id ?? null}, ${body.wp_slug ?? null},
-        ${body.wp_excerpt ?? null}, ${body.wp_publish_at ?? null}
+        ${body.wp_excerpt ?? null}, ${body.wp_publish_at ?? null},
+        ${body.ghost_author_ids == null ? null : toJsonb(sql, body.ghost_author_ids)},
+        ${body.ghost_tags == null ? null : toJsonb(sql, body.ghost_tags)},
+        ${body.feature_image_url ?? null}
       )
       RETURNING
         snapshot_id, run_id, created_at, created_by, trigger, html_body,
         committed_html_body, seo_title, meta_description, notes, comments,
         wp_publish_status, wp_author_id, wp_category_ids, wp_tag_ids,
-        wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at
+        wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at,
+        ghost_author_ids, ghost_tags, feature_image_url
     `;
 
     // Prune to the newest HITL2_SNAPSHOT_KEEP rows so history stays bounded.
@@ -1747,7 +1946,8 @@ runsRouter.get("/:id/hitl2-snapshots", async (c) => {
         snapshot_id, run_id, created_at, created_by, trigger, html_body,
         committed_html_body, seo_title, meta_description, notes, comments,
         wp_publish_status, wp_author_id, wp_category_ids, wp_tag_ids,
-        wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at
+        wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at,
+        ghost_author_ids, ghost_tags, feature_image_url
       FROM content_tool.hitl2_snapshots
       WHERE run_id = ${runId}
       ORDER BY created_at DESC
@@ -2048,7 +2248,10 @@ runsRouter.patch("/:id", requireRole("reviewer"), async (c) => {
         wp_category_ids = COALESCE(${body.wp_category_ids == null ? null : toJsonb(sql, body.wp_category_ids)}, wp_category_ids),
         wp_slug = COALESCE(${slug}, wp_slug),
         wp_publish_status = COALESCE(${body.wp_publish_status ?? null}, wp_publish_status),
-        wp_publish_at = COALESCE(${body.wp_publish_at ?? null}, wp_publish_at)
+        wp_publish_at = COALESCE(${body.wp_publish_at ?? null}, wp_publish_at),
+        ghost_author_ids = COALESCE(${body.ghost_author_ids == null ? null : toJsonb(sql, body.ghost_author_ids)}, ghost_author_ids),
+        ghost_tags = COALESCE(${body.ghost_tags == null ? null : toJsonb(sql, body.ghost_tags)}, ghost_tags),
+        feature_image_url = COALESCE(${body.feature_image_url ?? null}, feature_image_url)
       WHERE run_id = ${runId}
     `;
     return { kind: "ok" as const, version: newVersion };

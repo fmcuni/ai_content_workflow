@@ -24,6 +24,8 @@ import { useArticleComments } from "@/lib/useArticleComments";
 import { useReviewThreads } from "@/lib/useReviewThreads";
 import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
+import { cmsKindAbbrev, cmsKindName } from "@/lib/cms-kind-helpers";
+import { useRunCmsKind } from "@/lib/use-run-cms-kind";
 import { buildDryRequest, buildSnapshotIn, snapshotKey } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
@@ -56,6 +58,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const render = useQuery({ queryKey: ["render", runId], queryFn: () => api.getLatestRender(runId) });
   const audit = useQuery({ queryKey: ["audit", runId], queryFn: () => api.getLatestAudit(runId) });
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.getRun(runId) });
+  const cmsKind = useRunCmsKind(runId);
 
   const qc = useQueryClient();
 
@@ -152,7 +155,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       }));
       qc.setQueryData(["existing-post", runId], fresh);
     },
-    onError: () => toast.error("Couldn't re-read from WordPress"),
+    onError: () => toast.error(`Couldn't re-read from ${cmsKindName(cmsKind)}`),
   });
 
   function getDirtyFields(): ("Author" | "Category" | "Slug")[] {
@@ -447,7 +450,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 href={existingPost.data.link ?? "#"}
                 className="text-accent hover:underline"
               >
-                WP #{existingPost.data.wp_post_id} ↗
+                {cmsKindAbbrev(cmsKind)} #{existingPost.data.wp_post_id} ↗
               </ExternalLink>
               <button
                 type="button"
@@ -455,14 +458,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 disabled={refresh.isPending}
                 className="ml-2 font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
               >
-                {refresh.isPending ? "↻ Reading…" : "↻ Re-read from WP"}
+                {refresh.isPending ? "↻ Reading…" : `↻ Re-read from ${cmsKindAbbrev(cmsKind)}`}
               </button>
             </>
           )}
         </>
       }
       hed="Editor's review"
-      dek="Final pass on the draft. Approve and push to WordPress as draft, request changes, or reject."
+      dek={`Final pass on the draft. Approve and push to ${cmsKindName(cmsKind)} as draft, request changes, or reject.`}
       headerActions={
         <RunEditorHeaderActions
           saveStatusLabel={saveStatusLabel}
@@ -508,8 +511,8 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               onClick={() => submit.mutate("approve")}
             >
               {submit.isPending && submit.variables === "approve"
-                ? "↻ Pushing to WP…"
-                : "Approve & push to WP ↪"}
+                ? `↻ Pushing to ${cmsKindAbbrev(cmsKind)}…`
+                : `Approve & push to ${cmsKindAbbrev(cmsKind)} ↪`}
             </RoleButton>
           </>
         )
@@ -530,7 +533,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               <TabsTrigger value="diff">Diff vs render</TabsTrigger>
               <TabsTrigger value="audit">Audit findings</TabsTrigger>
               <TabsTrigger value="raw">Raw HTML</TabsTrigger>
-              <TabsTrigger value="payload">WP payload</TabsTrigger>
+              <TabsTrigger value="payload">{cmsKindAbbrev(cmsKind)} payload</TabsTrigger>
             </TabsList>
             <TabsContent value="edit" className="pt-6">
               {render.isPending && (
@@ -624,6 +627,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
                 errorMessage={wpPayload.error?.message}
                 onRefresh={wpPayload.build}
                 canRefresh={renderReady}
+                kind={cmsKind}
               />
             </TabsContent>
           </Tabs>
@@ -665,7 +669,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Re-read from WordPress?</DialogTitle>
+            <DialogTitle>Re-read from {cmsKindName(cmsKind)}?</DialogTitle>
             <DialogDescription>
               This will overwrite your edits to: {dirtyFields.join(", ")}.
             </DialogDescription>

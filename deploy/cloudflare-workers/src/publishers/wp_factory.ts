@@ -3,9 +3,9 @@ import type { getSql } from "../db/client";
 import type { PublishTargetRow } from "../db/schema";
 import { getPublishTargetForVoice } from "../db/publish_targets";
 
-// Phase 1 ships WordPress only; widen when Ghost lands (mirrors the DB CHECK and
-// the Python content_tool/publishers/wp_factory.py).
-const SUPPORTED_KINDS = new Set(["wordpress"]);
+// Supported publish-target kinds (mirrors the DB CHECK in
+// 20260618000000_publish_targets_ghost.sql and Python wp_factory.py).
+const SUPPORTED_KINDS = new Set(["wordpress", "ghost"]);
 
 export interface ResolvedTarget {
   // Env-var prefix for the target's credentials, or null for the default.
@@ -13,6 +13,8 @@ export interface ResolvedTarget {
   authRef: string | null;
   label: string;
   isDefault: boolean;
+  // "wordpress" (default) or "ghost" — selects the publisher at publish time.
+  kind: string;
 }
 
 /**
@@ -25,7 +27,7 @@ export function targetFromRow(
   defaultLabel: string,
 ): ResolvedTarget {
   if (row === null) {
-    return { authRef: null, label: defaultLabel, isDefault: true };
+    return { authRef: null, label: defaultLabel, isDefault: true, kind: "wordpress" };
   }
   if (row.is_archived) {
     throw new Error(`publish target '${row.name}' is archived and cannot be used`);
@@ -33,7 +35,7 @@ export function targetFromRow(
   if (!SUPPORTED_KINDS.has(row.kind)) {
     throw new Error(`unsupported publish target kind '${row.kind}'`);
   }
-  return { authRef: row.auth_ref, label: row.name, isDefault: false };
+  return { authRef: row.auth_ref, label: row.name, isDefault: false, kind: row.kind };
 }
 
 /**
@@ -58,7 +60,9 @@ export async function resolvePublishTarget(
  * Throws when a required credential env var is absent.
  */
 export function buildTargetEnv(env: Env, target: ResolvedTarget): Env {
-  if (target.isDefault || target.authRef === null) {
+  // Ghost targets carry no WP_* creds; the GhostPublisher reads its own
+  // ({ref}_API_URL / {ref}_ADMIN_API_KEY) via buildGhostCreds at publish time.
+  if (target.isDefault || target.authRef === null || target.kind !== "wordpress") {
     return env;
   }
   const ref = target.authRef;

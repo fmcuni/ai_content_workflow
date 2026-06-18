@@ -28,6 +28,8 @@ import {
   buildSnapshotIn,
   snapshotKey,
 } from "@/lib/run-editor/form";
+import { cmsKindAbbrev, cmsKindName } from "@/lib/cms-kind-helpers";
+import { useRunCmsKind } from "@/lib/use-run-cms-kind";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
 import { useCollabDoc } from "@/lib/run-editor/useCollabDoc";
@@ -67,6 +69,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     queryFn: () => api.getExistingPost(runId),
     retry: false, // 404 is expected on the create / new-post path
   });
+  const cmsKind = useRunCmsKind(runId);
 
   const [tab, setTab] = useState<EditTab>("article");
   const [outline, setOutline] = useState<Outline | null>(null);
@@ -381,7 +384,12 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     onSuccess: (res) => {
       submittedRef.current = true; // re-push already persisted; skip the exit-flush
       setConfirmOpen(false);
-      toast.success(`Re-pushed to WordPress (post #${res.wp_post_id})`);
+      const postRef = res.wp_post_id != null ? ` (post #${res.wp_post_id})` : "";
+      toast.success(
+        cmsKind === "ghost"
+          ? `Published to ${cmsKindName(cmsKind)}${postRef}`
+          : `Re-pushed to ${cmsKindName(cmsKind)}${postRef}`,
+      );
       qc.invalidateQueries({ queryKey: ["run", runId] });
       router.push(`/runs/${runId}`);
     },
@@ -419,7 +427,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       run={run.data}
       kicker={<>Edit · <span className="text-accent">{shortId}</span></>}
       hed="Edit outline & article"
-      dek="Revise a finished run's outline and article, then save — or save and re-push the article to WordPress."
+      dek={`Revise a finished run's outline and article, then save — or save and re-push the article to ${cmsKindName(cmsKind)}.`}
       headerActions={
         <RunEditorHeaderActions
           saveStatusLabel={saveStatusLabel}
@@ -444,12 +452,12 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
           </RoleButton>
           <RoleButton
             need="publish"
-            deniedHint="Reviewer role required to re-push to WordPress."
+            deniedHint={`Reviewer role required to re-push to ${cmsKindName(cmsKind)}.`}
             variant="primary"
             disabled={isBusy || renderMissing}
             onClick={() => prepublish.mutate()}
           >
-            {prepublish.isPending ? "Preparing…" : "Save & re-push to WordPress ↪"}
+            {prepublish.isPending ? "Preparing…" : `Save & re-push to ${cmsKindName(cmsKind)} ↪`}
           </RoleButton>
         </>
       }
@@ -460,7 +468,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
               <TabsTrigger value="article">Article</TabsTrigger>
               <TabsTrigger value="outline">Outline</TabsTrigger>
               <TabsTrigger value="raw">Raw HTML</TabsTrigger>
-              <TabsTrigger value="payload">WP payload</TabsTrigger>
+              <TabsTrigger value="payload">{cmsKindAbbrev(cmsKind)} payload</TabsTrigger>
             </TabsList>
             <TabsContent value="article" className="pt-6">
               {render.isPending && (
@@ -527,6 +535,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
                 errorMessage={wpPayload.error?.message}
                 onRefresh={wpPayload.build}
                 canRefresh={renderReady}
+                kind={cmsKind}
               />
             </TabsContent>
           </Tabs>
@@ -570,7 +579,7 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Re-push to WordPress?</DialogTitle>
+            <DialogTitle>Re-push to {cmsKindName(cmsKind)}?</DialogTitle>
             <DialogDescription>
               {wpPayload.payload ? (
                 <>

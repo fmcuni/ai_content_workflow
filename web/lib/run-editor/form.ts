@@ -64,6 +64,9 @@ export function buildSnapshotIn(
     wp_slug: form.wp_slug ?? null,
     wp_excerpt: form.wp_excerpt ?? null,
     wp_publish_at: form.wp_publish_at ?? null,
+    ghost_author_ids: form.ghost_author_ids ?? null,
+    ghost_tags: form.ghost_tags ?? null,
+    feature_image_url: form.feature_image_url ?? null,
   };
 }
 
@@ -81,6 +84,9 @@ export function buildDryRequest(html: string, form: Hitl2Request): DryPublishReq
     wp_slug: form.wp_slug ?? null,
     wp_excerpt: form.wp_excerpt ?? null,
     wp_publish_at: form.wp_publish_at ?? null,
+    ghost_author_ids: form.ghost_author_ids ?? null,
+    ghost_tags: form.ghost_tags ?? null,
+    feature_image_url: form.feature_image_url ?? null,
   };
 }
 
@@ -118,6 +124,9 @@ export function snapshotKey(s: Hitl2SnapshotIn): string {
     s.wp_slug ?? null,
     s.wp_excerpt ?? null,
     s.wp_publish_at ?? null,
+    s.ghost_author_ids ?? null,
+    s.ghost_tags ?? null,
+    s.feature_image_url ?? null,
   ]);
 }
 
@@ -142,6 +151,9 @@ export function snapshotInFromSaved(s: Hitl2Snapshot): Hitl2SnapshotIn {
     wp_slug: s.wp_slug ?? null,
     wp_excerpt: s.wp_excerpt ?? null,
     wp_publish_at: s.wp_publish_at ?? null,
+    ghost_author_ids: s.ghost_author_ids ?? null,
+    ghost_tags: s.ghost_tags ?? null,
+    feature_image_url: s.feature_image_url ?? null,
   };
 }
 
@@ -167,5 +179,10 @@ export function applySnapshotToForm(form: Hitl2Request, s: Hitl2Snapshot): Hitl2
     wp_slug: s.wp_slug ?? form.wp_slug ?? null,
     wp_excerpt: s.wp_excerpt ?? null,
     wp_publish_at: s.wp_publish_at ?? null,
+    // Fall back to the current form when the snapshot omits these, so hydrating
+    // never clears a known Ghost author / tags / feature image.
+    ghost_author_ids: s.ghost_author_ids ?? form.ghost_author_ids ?? null,
+    ghost_tags: s.ghost_tags ?? form.ghost_tags ?? null,
+    feature_image_url: s.feature_image_url ?? form.feature_image_url ?? null,
   };
 }

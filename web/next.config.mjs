@@ -73,6 +73,10 @@ const nextConfig = {
       { source: "/api/refresh", destination: `${apiBase}/refresh` },
       { source: "/api/refresh/:path*", destination: `${apiBase}/refresh/:path*` },
       { source: "/api/wp-options/:path*", destination: `${apiBase}/wp-options/:path*` },
+      // Ghost-target option lists (HITL_2 author/tag pickers) + kind-aware media
+      // upload (WordPress + Ghost feature image). Mirror wp-options' proxying.
+      { source: "/api/ghost-options/:path*", destination: `${apiBase}/ghost-options/:path*` },
+      { source: "/api/media/:path*", destination: `${apiBase}/media/:path*` },
       { source: "/api/personas", destination: `${apiBase}/personas` },
       { source: "/api/personas/:path*", destination: `${apiBase}/personas/:path*` },
       { source: "/api/publish-targets", destination: `${apiBase}/publish-targets` },

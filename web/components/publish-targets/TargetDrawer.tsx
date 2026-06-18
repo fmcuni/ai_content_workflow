@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ReadinessPanel } from "@/components/publish-targets/ReadinessPanel";
 import { publishTargetsApi } from "@/lib/api";
-import type { PublishTarget } from "@/lib/types";
+import type { PublishTarget, PublishTargetKind } from "@/lib/types";
 
 type Mode = { kind: "create" } | { kind: "edit"; target: PublishTarget };
 
@@ -30,9 +30,11 @@ interface TargetDrawerProps {
 const AUTH_REF_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The env vars an operator must provision for a target's auth_ref prefix. */
-function secretNames(authRef: string): string[] {
+function secretNames(authRef: string, kind: PublishTargetKind): string[] {
   const ref = authRef || "{AUTH_REF}";
-  return [`${ref}_BASE_URL`, `${ref}_USERNAME`, `${ref}_APP_PASSWORD`];
+  return kind === "ghost"
+    ? [`${ref}_API_URL`, `${ref}_ADMIN_API_KEY`]
+    : [`${ref}_BASE_URL`, `${ref}_USERNAME`, `${ref}_APP_PASSWORD`];
 }
 
 export function TargetDrawer({ mode, onClose, onSaved }: TargetDrawerProps) {
@@ -42,6 +44,11 @@ export function TargetDrawer({ mode, onClose, onSaved }: TargetDrawerProps) {
   const [authRef, setAuthRef] = useState(isEdit ? mode.target.auth_ref : "");
   const [status, setStatus] = useState<"active" | "inactive">(
     isEdit ? (mode.target.status === "inactive" ? "inactive" : "active") : "active",
+  );
+  // CMS type — immutable after create (it selects the publisher + which env-var
+  // credentials the auth_ref resolves), so it is locked in edit mode.
+  const [kind, setKind] = useState<PublishTargetKind>(
+    isEdit && mode.target.kind === "ghost" ? "ghost" : "wordpress",
   );
 
   // Assigned-voice count powers the archive confirmation warning.
@@ -58,7 +65,7 @@ export function TargetDrawer({ mode, onClose, onSaved }: TargetDrawerProps) {
   const save = useMutation({
     mutationFn: async () => {
       if (mode.kind === "create") {
-        return publishTargetsApi.create({ name, auth_ref: authRef, status });
+        return publishTargetsApi.create({ name, auth_ref: authRef, status, kind });
       }
       return publishTargetsApi.update(mode.target.publish_target_id, { name, status });
     },
@@ -109,9 +116,28 @@ export function TargetDrawer({ mode, onClose, onSaved }: TargetDrawerProps) {
               id="pt-name"
               value={name}
               maxLength={128}
-              placeholder="e.g. VHIS101 WordPress"
+              placeholder={kind === "ghost" ? "e.g. HealthyCheckHK" : "e.g. VHIS101 WordPress"}
               onChange={(e) => setName(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="pt-kind">CMS type</Label>
+            <select
+              id="pt-kind"
+              value={kind}
+              disabled={isEdit}
+              onChange={(e) => setKind(e.target.value === "ghost" ? "ghost" : "wordpress")}
+              className="w-full rounded-[2px] border border-rule bg-paper px-2.5 py-1.5 text-[13px] disabled:opacity-60"
+            >
+              <option value="wordpress">WordPress</option>
+              <option value="ghost">Ghost (Pro)</option>
+            </select>
+            <p className="text-[11px] text-ink-faint">
+              {isEdit
+                ? "Locked — CMS type is fixed once a target is created."
+                : "Selects the publisher and which credential env vars the auth ref resolves."}
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -121,7 +147,7 @@ export function TargetDrawer({ mode, onClose, onSaved }: TargetDrawerProps) {
               value={authRef}
               maxLength={64}
               disabled={isEdit}
-              placeholder="e.g. VHIS101_WP"
+              placeholder={kind === "ghost" ? "e.g. HCHK_GT" : "e.g. VHIS101_WP"}
               onChange={(e) => setAuthRef(e.target.value)}
               aria-invalid={!authRefValid}
             />
@@ -155,7 +181,7 @@ export function TargetDrawer({ mode, onClose, onSaved }: TargetDrawerProps) {
               Required secrets
             </p>
             <ul className="space-y-0.5 font-mono text-[11px] text-ink-soft">
-              {secretNames(authRef).map((n) => (
+              {secretNames(authRef, kind).map((n) => (
                 <li key={n}>{n}</li>
               ))}
             </ul>

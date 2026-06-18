@@ -1,7 +1,8 @@
 "use client";
 import { toast } from "sonner";
 
-import type { DryPublishResponse } from "@/lib/types";
+import { cmsKindName } from "@/lib/cms-kind-helpers";
+import type { DryPublishResponse, PublishTargetKind } from "@/lib/types";
 
 interface WpPayloadViewProps {
   /** The dry-publish preview, or null before the first build. */
@@ -13,6 +14,8 @@ interface WpPayloadViewProps {
   onRefresh: () => void;
   /** False while there is nothing to preview (e.g. no render yet). */
   canRefresh: boolean;
+  /** CMS kind for the heading label; defaults to WordPress. */
+  kind?: PublishTargetKind;
 }
 
 /**
@@ -27,11 +30,12 @@ export function WpPayloadView({
   errorMessage,
   onRefresh,
   canRefresh,
+  kind,
 }: WpPayloadViewProps) {
   return (
     <>
       <div className="flex items-center justify-between mb-2">
-        <p className="kicker">WordPress REST payload</p>
+        <p className="kicker">{cmsKindName(kind ?? "wordpress")} REST payload</p>
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -67,6 +71,14 @@ export function WpPayloadView({
       )}
       {payload && (
         <div className="space-y-4">
+          {payload.validation_error && (
+            <p
+              role="alert"
+              className="border border-accent-deep/40 bg-accent-deep/5 text-accent-deep rounded p-3 text-[12px]"
+            >
+              ⚠ {payload.validation_error}
+            </p>
+          )}
           <div className="space-y-1 text-[13px]">
             <p>
               <span className="font-mono text-[11px] text-ink-faint uppercase tracking-wider">

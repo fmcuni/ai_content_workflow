@@ -6,14 +6,16 @@ import { Combobox } from "@base-ui/react/combobox"
 import { cn } from "@/lib/utils"
 
 export interface SearchableSelectOption {
-  id: number
+  // Ghost staff-user ids are strings; WordPress author/category ids are numbers.
+  // The combobox stays id-type-agnostic so both CMS kinds can reuse it.
+  id: string | number
   name: string
   slug: string
 }
 
 interface Props {
-  value: number | null
-  onChange: (v: number | null) => void
+  value: string | number | null
+  onChange: (v: string | number | null) => void
   options: SearchableSelectOption[]
   placeholder?: string
   loading?: boolean
@@ -44,7 +46,7 @@ export function SearchableSelect({
     for (const opt of options) {
       nameCounts.set(opt.name, (nameCounts.get(opt.name) ?? 0) + 1)
     }
-    const map = new Map<number, string>()
+    const map = new Map<string | number, string>()
     for (const opt of options) {
       const needsDisambiguation = (nameCounts.get(opt.name) ?? 0) > 1
       map.set(opt.id, needsDisambiguation ? `${opt.name} · ${opt.slug}` : opt.name)

@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-import type { RunSummary } from "@/lib/types";
+import type { Persona, PublishTarget, RunSummary } from "@/lib/types";
 
 // Mock the whole API layer so the drawer's queries (run detail, WP options,
 // gap/outline/existing-post, snapshots + latest render driven by useCmsAutosave)
@@ -15,6 +15,8 @@ const mockApi = vi.hoisted(() => ({
   getGapAnalysis: vi.fn(),
   getOutline: vi.fn(),
   getExistingPost: vi.fn(),
+  listGhostAuthors: vi.fn(),
+  listGhostTags: vi.fn(),
   listHitl2Snapshots: vi.fn(),
   getLatestRender: vi.fn(),
   saveHitl2Snapshot: vi.fn(),
@@ -68,14 +70,15 @@ function renderDrawer(
   run: RunSummary,
   perms: DrawerPerms = ALL_PERMS,
   themeTitle: string | null = null,
+  maps?: { personaBySlug: Map<string, Persona>; targetById: Map<string, PublishTarget> },
 ) {
   const Wrapper = wrapper();
   return render(
     <Wrapper>
       <RunDrawer
         run={run}
-        personaBySlug={new Map()}
-        targetById={new Map()}
+        personaBySlug={maps?.personaBySlug ?? new Map()}
+        targetById={maps?.targetById ?? new Map()}
         editorEmail="op@bowtie.com.hk"
         perms={perms}
         themeTitle={themeTitle}
@@ -86,6 +89,16 @@ function renderDrawer(
   );
 }
 
+// Persona + target maps that resolve a run to a Ghost CMS destination (tag "GT").
+function ghostMaps(): { personaBySlug: Map<string, Persona>; targetById: Map<string, PublishTarget> } {
+  const target = { publish_target_id: "t-ghost", name: "Healthy Check", kind: "ghost" } as PublishTarget;
+  const persona = { slug: "hc", name: "Healthy Check", publish_target_id: "t-ghost" } as Persona;
+  return {
+    personaBySlug: new Map([[persona.slug, persona]]),
+    targetById: new Map([[target.publish_target_id, target]]),
+  };
+}
+
 beforeEach(() => {
   Object.values(mockApi).forEach((fn) => fn.mockReset());
   mockApi.getRun.mockImplementation((id: string) => Promise.resolve(makeRun({ run_id: id })));
@@ -94,6 +107,8 @@ beforeEach(() => {
   mockApi.getGapAnalysis.mockResolvedValue(null);
   mockApi.getOutline.mockResolvedValue({ payload: { h1: "H", sections: [] } });
   mockApi.getExistingPost.mockResolvedValue(null);
+  mockApi.listGhostAuthors.mockResolvedValue([{ id: "ga1", name: "Ghostwriter", slug: "gw" }]);
+  mockApi.listGhostTags.mockResolvedValue([{ name: "Wellness", slug: "wellness" }]);
   mockApi.listHitl2Snapshots.mockResolvedValue([]);
   mockApi.getLatestRender.mockResolvedValue(null);
 });
@@ -155,5 +170,43 @@ describe("RunDrawer theme back-link", () => {
 
     await screen.findByText("Brief");
     expect(screen.queryByText("Theme")).not.toBeInTheDocument();
+  });
+});
+
+describe("RunDrawer Ghost CMS fields", () => {
+  it("renders an author combobox and a tags input for a Ghost run", async () => {
+    const run = makeRun({ status: "hitl_2", persona: "hc" });
+    mockApi.getRun.mockResolvedValue(run);
+
+    renderDrawer(run, ALL_PERMS, null, ghostMaps());
+
+    // The Ghost author is now a searchable combobox (parity with WordPress),
+    // not the old "set in the review screen" hint.
+    expect(await screen.findByPlaceholderText("Search author by name…")).toBeInTheDocument();
+    // Tags are editable inline via the tag picker input.
+    expect(screen.getByPlaceholderText("Type a tag, press Enter…")).toBeInTheDocument();
+    // The feature image field is now available inline for Ghost runs.
+    expect(screen.getByText("Feature image")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("or paste an image URL")).toBeInTheDocument();
+    // The retired hint must be gone.
+    expect(screen.queryByText(/set in the review screen/i)).not.toBeInTheDocument();
+
+    // Draft Preview still renders for a Ghost run.
+    expect(screen.getByText("Draft preview")).toBeInTheDocument();
+  });
+
+  it("renders the WordPress author and category comboboxes for a WP run", async () => {
+    const run = makeRun({ status: "hitl_2" });
+    mockApi.getRun.mockResolvedValue(run);
+    mockApi.listWpUsers.mockResolvedValue([{ id: 1, name: "Editor", slug: "editor" }]);
+    mockApi.listWpCategories.mockResolvedValue([{ id: 2, name: "Health", slug: "health" }]);
+
+    renderDrawer(run);
+
+    // Default target (no persona) → WordPress (tag "WP"): author + category fields.
+    expect(await screen.findByText("Author")).toBeInTheDocument();
+    expect(screen.getByText("Category")).toBeInTheDocument();
+    // No Ghost-only tag input on a WordPress run.
+    expect(screen.queryByPlaceholderText("Type a tag, press Enter…")).not.toBeInTheDocument();
   });
 });

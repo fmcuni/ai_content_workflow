@@ -4,10 +4,11 @@ import { Sparkles } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { WordPressMetaForm } from "@/components/WordPressMetaForm";
+import { CmsMetaForm } from "@/components/cms/CmsMetaForm";
 import { CommentsSidebar } from "@/components/CommentsSidebar";
 import { NotesToAi } from "@/components/run-editor/NotesToAi";
 import type { Hitl2Comment, Hitl2Request } from "@/lib/types";
+import { useRunCmsKind } from "@/lib/use-run-cms-kind";
 
 export type EditorRailTab = "wp" | "comments" | "review";
 
@@ -68,12 +69,14 @@ export function EditorRail({
   reviewCount,
 }: EditorRailProps) {
   const hasComments = comments.some((c) => c.body.trim().length > 0);
+  const cmsKind = useRunCmsKind(runId);
+  const metaTabLabel = cmsKind === "ghost" ? "Ghost metadata" : "WP metadata";
 
   return (
     <aside className="lg:sticky lg:top-0 self-start lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto">
       <Tabs value={tab} onValueChange={(v) => onTabChange(v as EditorRailTab)}>
         <TabsList className="border-b border-rule">
-          <TabsTrigger value="wp">WP metadata</TabsTrigger>
+          <TabsTrigger value="wp">{metaTabLabel}</TabsTrigger>
           <TabsTrigger value="comments">
             AI to edit
             {comments.length > 0 && <span className="ml-1 text-accent">({comments.length})</span>}
@@ -85,9 +88,10 @@ export function EditorRail({
         </TabsList>
         <TabsContent value="wp" className="pt-4">
           <Card variant="editorial" className="px-5 py-5">
-            <WordPressMetaForm
+            <CmsMetaForm
               form={form}
               onChange={onFormChange}
+              kind={cmsKind}
               runId={runId}
               existingAuthorName={existingAuthorName}
               existingCategoryName={existingCategoryName}

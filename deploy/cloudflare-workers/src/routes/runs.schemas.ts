@@ -52,6 +52,15 @@ const wpMetaFields = {
   wp_excerpt: z.string().nullish(),
 };
 
+/** Ghost destination metadata (kind='ghost' runs), all optional. Authors are
+ * staff-user id strings, tags are names (matched/auto-created), feature image
+ * is a URL. Bounded to cap payload abuse; empty url allowed (cleared field). */
+const ghostMetaFields = {
+  ghost_author_ids: z.array(z.string()).max(20).nullish(),
+  ghost_tags: z.array(z.string()).max(50).nullish(),
+  feature_image_url: z.string().url().or(z.literal("")).nullish(),
+};
+
 // ---------------------------------------------------------------------------
 // POST /runs — run creation
 // ---------------------------------------------------------------------------
@@ -103,6 +112,7 @@ export const hitl2Schema = z
     edited_seo_title: z.string().nullish(),
     edited_meta_description: z.string().nullish(),
     ...wpMetaFields,
+    ...ghostMetaFields,
   })
   .passthrough();
 
@@ -115,6 +125,7 @@ export const dryPublishSchema = z
     edited_seo_title: z.string().nullish(),
     edited_meta_description: z.string().nullish(),
     ...wpMetaFields,
+    ...ghostMetaFields,
   })
   .passthrough();
 
@@ -128,6 +139,7 @@ export const articleEditSchema = z
     meta_description: z.string().optional(),
     expected_version: z.number().int().nullish(),
     ...wpMetaFields,
+    ...ghostMetaFields,
   })
   .passthrough();
 
@@ -143,6 +155,7 @@ export const runWpMetaPatchSchema = z
     wp_slug: z.string().nullish(),
     wp_publish_status: wpPublishStatus,
     wp_publish_at: wpPublishAt,
+    ...ghostMetaFields,
     expected_version: z.number().int().nullish(),
   })
   .passthrough();
@@ -160,6 +173,7 @@ export const hitl2SnapshotSchema = z
     notes: z.string().nullish(),
     comments: z.array(z.unknown()).nullish(),
     ...wpMetaFields,
+    ...ghostMetaFields,
   })
   .passthrough();
 

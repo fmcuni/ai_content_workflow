@@ -82,6 +82,10 @@ function makeFakeSql(): unknown {
 
     if (lower.startsWith("select")) {
       if (row === null) return [];
+      // The approve-path pre-flight guard reads publish metadata; this harness
+      // doesn't model it, so return an empty result (meta absent → guard skips,
+      // exercising the concurrency/identity paths these tests target).
+      if (lower.includes("select persona, wp_publish_status")) return [];
       // Return the row (only the selected columns matter to callers, but the
       // full object is harmless).
       return [row];

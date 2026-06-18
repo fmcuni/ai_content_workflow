@@ -32,6 +32,7 @@ describe("targetFromRow", () => {
       authRef: null,
       label: "Bowtie WordPress",
       isDefault: true,
+      kind: "wordpress",
     });
   });
 
@@ -40,6 +41,18 @@ describe("targetFromRow", () => {
       authRef: "VHIS101_WP",
       label: "VHIS101 WordPress",
       isDefault: false,
+      kind: "wordpress",
+    });
+  });
+
+  it("maps a ghost row and carries its kind through", () => {
+    expect(
+      targetFromRow(row({ name: "HealthyCheckHK", auth_ref: "HCHK_GT", kind: "ghost" }), "x"),
+    ).toEqual<ResolvedTarget>({
+      authRef: "HCHK_GT",
+      label: "HealthyCheckHK",
+      isDefault: false,
+      kind: "ghost",
     });
   });
 
@@ -48,14 +61,30 @@ describe("targetFromRow", () => {
   });
 
   it("throws for an unsupported kind", () => {
-    expect(() => targetFromRow(row({ kind: "ghost" }), "x")).toThrow(/unsupported/);
+    expect(() => targetFromRow(row({ kind: "drupal" }), "x")).toThrow(/unsupported/);
   });
 });
 
 describe("buildTargetEnv", () => {
   it("returns env unchanged for the default target", () => {
     const base = env();
-    const result = buildTargetEnv(base, { authRef: null, label: "d", isDefault: true });
+    const result = buildTargetEnv(base, {
+      authRef: null,
+      label: "d",
+      isDefault: true,
+      kind: "wordpress",
+    });
+    expect(result).toBe(base);
+  });
+
+  it("returns env unchanged for a ghost target (creds resolved by the Ghost publisher)", () => {
+    const base = env();
+    const result = buildTargetEnv(base, {
+      authRef: "HCHK_GT",
+      label: "HealthyCheckHK",
+      isDefault: false,
+      kind: "ghost",
+    });
     expect(result).toBe(base);
   });
 
@@ -69,6 +98,7 @@ describe("buildTargetEnv", () => {
       authRef: "VHIS101_WP",
       label: "VHIS101 WordPress",
       isDefault: false,
+      kind: "wordpress",
     });
     expect(result.WP_BASE_URL).toBe("https://vhis101.example.com");
     expect(result.WP_USERNAME).toBe("editor");
@@ -80,7 +110,12 @@ describe("buildTargetEnv", () => {
   it("throws when a target credential env var is missing", () => {
     const base = env({ VHIS101_WP_BASE_URL: "https://vhis101.example.com" });
     expect(() =>
-      buildTargetEnv(base, { authRef: "VHIS101_WP", label: "x", isDefault: false }),
+      buildTargetEnv(base, {
+        authRef: "VHIS101_WP",
+        label: "x",
+        isDefault: false,
+        kind: "wordpress",
+      }),
     ).toThrow(/VHIS101_WP_USERNAME/);
   });
 });

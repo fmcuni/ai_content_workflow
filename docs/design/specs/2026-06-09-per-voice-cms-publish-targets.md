@@ -132,6 +132,29 @@ admin** — shipped WordPress-only:
 - **No migration** — schema already supports everything; `kind` CHECK stays
   `wordpress`-only (widen when Ghost lands).
 
-**Still deferred to a later Phase 2.x:** Ghost(Pro) publisher (blocked on the
-API plan upgrade) — widen the `kind` CHECK, add `GhostPublisher` + JWT, store
-`runs.cms_post_id`.
+**Phase 2.x — Ghost(Pro) publisher: SHIPPED (2026-06-17, Workers backend).**
+After the Admin API plan was upgraded, the Ghost publisher was built on the
+Workers (production) backend:
+- Migration `20260618000000_publish_targets_ghost.sql`: `kind` CHECK widened to
+  `('wordpress','ghost')`; new `runs.cms_post_id text` (Ghost ids are UUID
+  strings, not integers, so they cannot reuse `wp_pushed_post_id`).
+- `src/publishers/ghost.ts`: `GhostPublisher` — Web Crypto HS256 JWT from the
+  `{id}:{secret}` admin key; create via `POST /posts/?source=html`; update via
+  GET-then-PUT with `updated_at` optimistic concurrency (409 →
+  `GhostConflictError`). Creds read from env by auth_ref:
+  **`{ref}_API_URL` + `{ref}_ADMIN_API_KEY`** (Ghost-idiomatic; WP uses
+  `_BASE_URL/_USERNAME/_APP_PASSWORD`).
+- `src/publishers/ghost_html.ts`: `wrapNonNativeHtmlForGhost` fences our FAQ
+  accordion in a `<!--kg-card-begin: html-->` card. **Verified live against
+  healthycheckhk.ghost.io (Ghost v6.45):** Ghost's HTML→Lexical converter
+  flattens bare class-bearing `<div>` wrappers and drops their classes
+  (destroying the accordion); the card fence preserves it byte-for-byte.
+- Dispatch: `wp_factory.targetFromRow` carries `kind`; `buildTargetEnv` is a
+  no-op for Ghost; `production.ts::publish` branches to `publishToGhost`.
+- CRUD `POST /publish-targets` accepts `kind ∈ {wordpress, ghost}` (default
+  wordpress).
+
+**Still deferred (follow-ups):** Python backend mirror (`content_tool/` is
+evals/local only — its publish path is still WordPress-only); web admin
+`kind` picker in `TargetDrawer` (a Ghost target can be created via the API in
+the meantime); Ghost SEO meta / tags / authors / featured image (out of scope).

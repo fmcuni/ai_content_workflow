@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { runFetchArticle } from "./fetch_article";
 import type { FetchArticleInput } from "./fetch_article";
 import { WordPressClient } from "../wordpress/client";
+import { GhostPublisher } from "../publishers/ghost";
+import type { GhostFetchedPost } from "../publishers/ghost";
 import type { FetchedPost, WpCategory } from "../wordpress/types";
 import type { Env } from "../index";
 
@@ -69,6 +71,20 @@ function baseInput(client: WordPressClient): FetchArticleInput {
   return { runId: RUN_ID, articleUrl: ARTICLE_URL, wpClient: client };
 }
 
+const GHOST_POST: GhostFetchedPost = {
+  id: "ghost-uuid-123",
+  slug: "sample-slug",
+  url: "https://demo.ghost.io/sample-slug/",
+  title: "Sample",
+  html: "<h1>Ghost Heading</h1><p>Ghost body</p>",
+};
+
+function makeGhostPublisher(post: GhostFetchedPost | null): GhostPublisher {
+  const pub = Object.create(GhostPublisher.prototype) as GhostPublisher;
+  vi.spyOn(pub, "fetchPostBySlug").mockResolvedValue(post);
+  return pub;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -91,9 +107,14 @@ describe("runFetchArticle", () => {
 
     // Exactly one INSERT happened
     expect(inserts).toHaveLength(1);
-    // wp_categories bound value (3rd value) is the native array, not a string
+    // Column order: run_id, wp_post_id, cms_post_id, wp_categories, ...
+    // cms_post_id (3rd value) is null for a WordPress source; wp_categories
+    // (4th value) is the native array, not a string.
     const insertValues = inserts[0]!;
-    expect(insertValues[2]).toEqual([CATEGORIES[3], CATEGORIES[9]]);
+    expect(insertValues[2]).toBeNull();
+    expect(insertValues[3]).toEqual([CATEGORIES[3], CATEGORIES[9]]);
+    // WP source returns a null cmsPostId.
+    expect(result.cmsPostId).toBeNull();
   });
 
   it("hydrates full category objects via getCategory", async () => {
@@ -205,6 +226,76 @@ describe("runFetchArticle", () => {
 
     expect(result.source).toBe("live");
     expect(result.wpPostId).toBeNull();
+    expect(fetchLiveHtml).toHaveBeenCalledOnce();
+  });
+
+  it("ghost branch: resolves the existing post by slug → cms_post_id + source 'ghost'", async () => {
+    // Arrange — ghost cmsKind + an injected publisher that finds the post.
+    const { sql, inserts } = makeFakeSql(null);
+    const ghostPublisher = makeGhostPublisher(GHOST_POST);
+
+    // Act
+    const result = await runFetchArticle(sql, ENV, {
+      runId: RUN_ID,
+      articleUrl: ARTICLE_URL,
+      cmsKind: "ghost",
+      ghostPublisher,
+    });
+
+    // Assert — Ghost source, UUID id, no WP id, html→markdown converted
+    expect(result.source).toBe("ghost");
+    expect(result.cmsPostId).toBe("ghost-uuid-123");
+    expect(result.wpPostId).toBeNull();
+    expect(result.wpCategories).toEqual([]);
+    expect(result.rawHtml).toBe(GHOST_POST.html);
+    expect(result.markdown).toContain("# Ghost Heading");
+    expect(ghostPublisher.fetchPostBySlug).toHaveBeenCalledWith("sample-slug");
+
+    // One INSERT: wp_post_id (idx 1) null, cms_post_id (idx 2) the UUID.
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]![1]).toBeNull();
+    expect(inserts[0]![2]).toBe("ghost-uuid-123");
+  });
+
+  it("ghost branch: falls back to live when the slug isn't found on Ghost", async () => {
+    const { sql } = makeFakeSql(null);
+    const ghostPublisher = makeGhostPublisher(null);
+    const fetchLiveHtml = vi
+      .fn<(url: string) => Promise<string>>()
+      .mockResolvedValue("<p>live</p>");
+
+    const result = await runFetchArticle(sql, ENV, {
+      runId: RUN_ID,
+      articleUrl: ARTICLE_URL,
+      cmsKind: "ghost",
+      ghostPublisher,
+      fetchLiveHtml,
+    });
+
+    expect(result.source).toBe("live");
+    expect(result.cmsPostId).toBeNull();
+    expect(result.wpPostId).toBeNull();
+    expect(fetchLiveHtml).toHaveBeenCalledWith(ARTICLE_URL);
+  });
+
+  it("ghost branch: falls back to live when a Ghost read throws", async () => {
+    const { sql } = makeFakeSql(null);
+    const ghostPublisher = Object.create(GhostPublisher.prototype) as GhostPublisher;
+    vi.spyOn(ghostPublisher, "fetchPostBySlug").mockRejectedValue(new Error("boom"));
+    const fetchLiveHtml = vi
+      .fn<(url: string) => Promise<string>>()
+      .mockResolvedValue("<p>live</p>");
+
+    const result = await runFetchArticle(sql, ENV, {
+      runId: RUN_ID,
+      articleUrl: ARTICLE_URL,
+      cmsKind: "ghost",
+      ghostPublisher,
+      fetchLiveHtml,
+    });
+
+    expect(result.source).toBe("live");
+    expect(result.cmsPostId).toBeNull();
     expect(fetchLiveHtml).toHaveBeenCalledOnce();
   });
 });

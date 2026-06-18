@@ -39,6 +39,9 @@ function makeForm(overrides: Partial<Hitl2Request> = {}): Hitl2Request {
     wp_slug: "my-slug",
     wp_excerpt: "An excerpt",
     wp_publish_at: "2026-06-01T00:00:00Z",
+    ghost_author_ids: ["ga1"],
+    ghost_tags: ["Wellness"],
+    feature_image_url: "https://cdn.example/feature.jpg",
     ...overrides,
   };
 }
@@ -63,6 +66,9 @@ function makeSnapshot(overrides: Partial<Hitl2Snapshot> = {}): Hitl2Snapshot {
     wp_slug: "saved-slug",
     wp_excerpt: "saved excerpt",
     wp_publish_at: "2026-06-02T00:00:00Z",
+    ghost_author_ids: ["sga1"],
+    ghost_tags: ["Saved Tag"],
+    feature_image_url: "https://cdn.example/saved-feature.jpg",
     ...overrides,
   };
 }
@@ -133,10 +139,13 @@ describe("buildSnapshotIn", () => {
       wp_slug: "my-slug",
       wp_excerpt: "An excerpt",
       wp_publish_at: "2026-06-01T00:00:00Z",
+      ghost_author_ids: ["ga1"],
+      ghost_tags: ["Wellness"],
+      feature_image_url: "https://cdn.example/feature.jpg",
     });
   });
 
-  it("emits null for every absent wp_* / seo / meta / notes field", () => {
+  it("emits null for every absent wp_* / ghost_* / seo / meta / notes field", () => {
     const form: Hitl2Request = { decision: "approve", wp_publish_status: "draft" };
     const snap = buildSnapshotIn("<p>Body</p>", form, [], "manual");
 
@@ -156,6 +165,9 @@ describe("buildSnapshotIn", () => {
       wp_slug: null,
       wp_excerpt: null,
       wp_publish_at: null,
+      ghost_author_ids: null,
+      ghost_tags: null,
+      feature_image_url: null,
     });
   });
 
@@ -186,6 +198,9 @@ describe("buildDryRequest", () => {
       wp_slug: "my-slug",
       wp_excerpt: "An excerpt",
       wp_publish_at: "2026-06-01T00:00:00Z",
+      ghost_author_ids: ["ga1"],
+      ghost_tags: ["Wellness"],
+      feature_image_url: "https://cdn.example/feature.jpg",
     });
   });
 
@@ -205,6 +220,9 @@ describe("buildDryRequest", () => {
       wp_slug: null,
       wp_excerpt: null,
       wp_publish_at: null,
+      ghost_author_ids: null,
+      ghost_tags: null,
+      feature_image_url: null,
     });
   });
 });
@@ -276,6 +294,9 @@ describe("snapshotKey", () => {
     expect(snapshotKey({ ...base, wp_slug: "other" })).not.toBe(key);
     expect(snapshotKey({ ...base, wp_excerpt: "other" })).not.toBe(key);
     expect(snapshotKey({ ...base, wp_publish_at: "2030-01-01" })).not.toBe(key);
+    expect(snapshotKey({ ...base, ghost_author_ids: ["other"] })).not.toBe(key);
+    expect(snapshotKey({ ...base, ghost_tags: ["Other"] })).not.toBe(key);
+    expect(snapshotKey({ ...base, feature_image_url: "https://cdn.example/other.jpg" })).not.toBe(key);
   });
 
   it("serializes the fields in the documented order with ?? null / ?? [] defaults", () => {
@@ -301,6 +322,9 @@ describe("snapshotKey", () => {
         null,
         null,
         null,
+        null, // ghost_author_ids
+        null, // ghost_tags
+        null, // feature_image_url
       ]),
     );
   });
@@ -348,6 +372,9 @@ describe("snapshotInFromSaved", () => {
         wp_slug: saved.wp_slug,
         wp_excerpt: saved.wp_excerpt,
         wp_publish_at: saved.wp_publish_at,
+        ghost_author_ids: saved.ghost_author_ids,
+        ghost_tags: saved.ghost_tags,
+        feature_image_url: saved.feature_image_url,
       }),
       saved.comments ?? [],
       "manual",
@@ -385,6 +412,29 @@ describe("applySnapshotToForm", () => {
     expect(result.wp_slug).toBe("saved-slug");
     expect(result.wp_excerpt).toBe("saved excerpt");
     expect(result.wp_publish_at).toBe("2026-06-02T00:00:00Z");
+    expect(result.ghost_author_ids).toEqual(["sga1"]);
+    expect(result.ghost_tags).toEqual(["Saved Tag"]);
+    expect(result.feature_image_url).toBe("https://cdn.example/saved-feature.jpg");
+  });
+
+  it("keeps the form's ghost author/tags/feature image when the snapshot omits them", () => {
+    // Regression: a snapshot that never captured the Ghost metadata must not
+    // null it out over a known form value (mirror of the wp author/slug guard).
+    const form = makeForm({
+      ghost_author_ids: ["ga1"],
+      ghost_tags: ["Wellness"],
+      feature_image_url: "https://cdn.example/feature.jpg",
+    });
+    const snapshot = makeSnapshot({
+      ghost_author_ids: null,
+      ghost_tags: null,
+      feature_image_url: null,
+    });
+    const result = applySnapshotToForm(form, snapshot);
+
+    expect(result.ghost_author_ids).toEqual(["ga1"]);
+    expect(result.ghost_tags).toEqual(["Wellness"]);
+    expect(result.feature_image_url).toBe("https://cdn.example/feature.jpg");
   });
 
   it("falls back to the prior form's wp_publish_status when the snapshot value is unknown", () => {

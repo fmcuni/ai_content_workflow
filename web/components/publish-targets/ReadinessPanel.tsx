@@ -70,11 +70,18 @@ export function ReadinessPanel({ targetId }: { targetId: string }) {
     return <p className="text-[11px] text-ink-faint">Readiness unavailable.</p>;
   }
   const r: PublishTargetReadiness = q.data;
+  // Prefer the kind-aware `secrets` list; fall back to the legacy WordPress
+  // triplet for older backends that don't return it.
+  const rows = r.secrets ?? [
+    { name: `${r.auth_ref}_BASE_URL`, present: r.base_url },
+    { name: `${r.auth_ref}_USERNAME`, present: r.username },
+    { name: `${r.auth_ref}_APP_PASSWORD`, present: r.app_password },
+  ];
   return (
     <ul className="space-y-0.5 border-t border-rule pt-2">
-      <Row label={`${r.auth_ref}_BASE_URL`} ok={r.base_url} />
-      <Row label={`${r.auth_ref}_USERNAME`} ok={r.username} />
-      <Row label={`${r.auth_ref}_APP_PASSWORD`} ok={r.app_password} />
+      {rows.map((s) => (
+        <Row key={s.name} label={s.name} ok={s.present} />
+      ))}
     </ul>
   );
 }

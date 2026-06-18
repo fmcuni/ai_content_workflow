@@ -49,8 +49,14 @@ import {
   type SeoPlugin,
 } from "../wordpress/client";
 import { resolvePublishStatus } from "../wordpress/publish_status";
-import { resolvePublishTarget, buildTargetEnv } from "../publishers/wp_factory";
+import {
+  resolvePublishTarget,
+  buildTargetEnv,
+  type ResolvedTarget,
+} from "../publishers/wp_factory";
+import { GhostPublisher, buildGhostCreds, buildGhostSchemaHead } from "../publishers/ghost";
 import { writeComplianceLog } from "../compliance/log";
+import { resolvePostIdForSlug, slugFromUrl } from "../util/url_slug";
 import { CITATIONS_STEP_CONFIG } from "./step_config";
 
 // ---------------------------------------------------------------------------
@@ -101,6 +107,7 @@ interface RunRawRow {
   chosen_route: string | null;
   article_url: string | null;
   wp_pushed_post_id: number | null;
+  cms_post_id: string | null;
   auto_accept_hitl1: boolean;
 }
 
@@ -126,6 +133,7 @@ interface RunLoadRow {
   chosen_route: string | null;
   article_url: string | null;
   wp_pushed_post_id: number | null;
+  cms_post_id: string | null;
   auto_accept_hitl1: boolean;
 }
 
@@ -153,6 +161,11 @@ interface Hitl2PersistRow {
   wp_featured_media_id: number | null;
   wp_slug: string | null;
   wp_excerpt: string | null;
+  wp_publish_at: string | null;
+  // Ghost-specific metadata (kind='ghost' runs).
+  ghost_author_ids: unknown;
+  ghost_tags: unknown;
+  feature_image_url: string | null;
 }
 
 interface RenderRowForPublish {
@@ -248,7 +261,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           SELECT run_id, status, start_mode, mode, topic, keywords, persona,
                  topic_category, target_audience, edit_note,
                  acf_adv_id, acf_widget_id, today_date, chosen_route,
-                 article_url, wp_pushed_post_id, auto_accept_hitl1
+                 article_url, wp_pushed_post_id, cms_post_id, auto_accept_hitl1
           FROM content_tool.runs
           WHERE run_id = ${runId}::uuid
           LIMIT 1
@@ -433,7 +446,25 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         // the article being refreshed. Mirror the target the publish step uses.
         const target = await resolvePublishTarget(sql, run.persona, this.env.WP_TARGET ?? "");
         const fetchEnv = buildTargetEnv(this.env, target);
-        const result = await runFetchArticle(sql, fetchEnv, { runId, articleUrl });
+        // Ghost targets resolve the existing post via the Ghost Admin API (by
+        // slug) so a refresh UPDATEs the externally-authored post instead of
+        // scraping the live page + minting a duplicate. WordPress targets pass
+        // no cmsKind → the WP resolution path is unchanged.
+        const isGhost = target.kind === "ghost";
+        const ghostPublisher = isGhost
+          ? new GhostPublisher(
+              buildGhostCreds(
+                this.env as unknown as Record<string, string | undefined>,
+                target.authRef,
+              ),
+            )
+          : undefined;
+        const result = await runFetchArticle(sql, fetchEnv, {
+          runId,
+          articleUrl,
+          cmsKind: isGhost ? "ghost" : "wordpress",
+          ghostPublisher,
+        });
         // Persist only what the outline + done-event need — keep the step
         // checkpoint small.
         return { markdown: result.markdown, wpPostId: result.wpPostId, source: result.source };
@@ -836,6 +867,14 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         resolvePublishTarget(sql, run.persona, this.env.WP_TARGET ?? ""),
       ),
     );
+
+    // Ghost targets use a different API + body model than WordPress — dispatch
+    // to the Ghost publisher and skip the WP-specific SEO probe + payload.
+    if (target.kind === "ghost") {
+      await this.publishToGhost(runId, run, step, target);
+      return;
+    }
+
     const targetEnv = buildTargetEnv(this.env, target);
 
     // SEO plugin detection is a network probe — its own durable step. Detect
@@ -859,9 +898,19 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         // Resolve the target post id. Refresh updates the existing post (from
         // fetched_articles) unless a prior push already recorded an id. Create
         // reuses wp_pushed_post_id on a re-push, else mints a new draft (null).
-        const postId = isRefresh
+        const basePostId = isRefresh
           ? (run.wp_pushed_post_id ?? (await this.loadFetchedPostId(sql, runId)))
           : run.wp_pushed_post_id;
+
+        // If the operator changed the slug of an already-published post, create a
+        // NEW post (null id) instead of overwriting the old one. Same rule for both
+        // CMSes; see resolvePostIdForSlug. Keeps first-push create unaffected.
+        const postId = resolvePostIdForSlug(basePostId, run.article_url, hitl2.wp_slug);
+        if (basePostId !== null && postId === null) {
+          console.warn(
+            `[publish] slug changed (${slugFromUrl(run.article_url) ?? ""} → ${(hitl2.wp_slug ?? "").trim()}); creating new post`,
+          );
+        }
 
         // Honor the operator's status choice for both create and refresh runs
         // (defaulting to draft) so a "publish" selection is never silently
@@ -888,37 +937,107 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         const wpClient = new WordPressClient(targetEnv);
         const result = await wpClient.upsert(payload);
 
-        // Backfill the WP post id + flip to published. Create surfaces the freshly
-        // minted draft URL on the run row; refresh keeps the canonical article_url.
-        if (isRefresh) {
+        // For refresh runs, stamp the inventory article's last_persisted_at so the
+        // refresh scanner's staleness reference tracks the republish instead of
+        // drifting off first_seen_at (mirrors publish.py). Uses the OLD url
+        // (run.article_url) captured in memory — NOT the freshly published link —
+        // and runs before the runs UPDATE so the lookup matches the inventory row.
+        // No-op if the URL isn't in the inventory.
+        if (isRefresh && run.article_url !== null && run.article_url !== "") {
           await sql`
-            UPDATE content_tool.runs
-            SET wp_pushed_post_id = ${result.id},
-                wp_pushed_at = now(),
-                status = 'published'
-            WHERE run_id = ${runId}::uuid
-          `;
-          // Stamp the inventory article's last_persisted_at so the refresh
-          // scanner's staleness reference tracks the republish instead of
-          // drifting off first_seen_at (mirrors publish.py). No-op if the URL
-          // isn't in the inventory.
-          if (run.article_url !== null && run.article_url !== "") {
-            await sql`
-              UPDATE content_tool.articles
-              SET last_persisted_at = now()
-              WHERE article_url = ${run.article_url}
-            `;
-          }
-        } else {
-          await sql`
-            UPDATE content_tool.runs
-            SET wp_pushed_post_id = ${result.id},
-                wp_pushed_at = now(),
-                status = 'published',
-                article_url = ${result.link}
-            WHERE run_id = ${runId}::uuid
+            UPDATE content_tool.articles
+            SET last_persisted_at = now()
+            WHERE article_url = ${run.article_url}
           `;
         }
+
+        // Backfill the WP post id, flip to published, and ALWAYS surface the
+        // freshly published article's URL on the run row (so a refresh/rewrite or
+        // slug-change-create-new shows the live URL under the h1 on /runs/{id}).
+        await sql`
+          UPDATE content_tool.runs
+          SET wp_pushed_post_id = ${result.id},
+              wp_pushed_at = now(),
+              status = 'published',
+              article_url = ${result.link}
+          WHERE run_id = ${runId}::uuid
+        `;
+        return "ok";
+      }),
+    );
+  }
+
+  /**
+   * Publish to a Ghost (Pro) target via the Admin API. Ghost post ids are UUID
+   * strings, so the id is recorded in runs.cms_post_id (not wp_pushed_post_id);
+   * a re-push reuses it to update the same post. The article HTML is card-fenced
+   * inside GhostPublisher so our FAQ accordion survives Ghost's HTML→Lexical
+   * conversion. Ghost runs are create-mode in practice; refresh simply re-pushes
+   * any prior cms_post_id.
+   */
+  private async publishToGhost(
+    runId: string,
+    run: RunLoadRow,
+    step: WorkflowStep,
+    target: ResolvedTarget,
+  ): Promise<void> {
+    const creds = buildGhostCreds(
+      this.env as unknown as Record<string, string | undefined>,
+      target.authRef,
+    );
+    await step.do("publish-ghost", async () =>
+      this.withSql(async (sql) => {
+        const hitl2 = await this.loadHitl2Options(sql, runId);
+        const draftId = await this.loadLatestDraftId(sql, runId);
+        const render = await this.loadRenderForAudit(sql, draftId);
+        const status = resolvePublishStatus(hitl2.wp_publish_status);
+
+        // Resolve the target Ghost post id. A re-push reuses runs.cms_post_id;
+        // a refresh of an externally-authored post falls back to the id
+        // fetch_article resolved (fetched_articles.cms_post_id) so the existing
+        // post is UPDATEd rather than duplicated. Create runs have neither → null.
+        const isRefresh = run.start_mode === "refresh";
+        const basePostId =
+          run.cms_post_id ?? (isRefresh ? await this.loadFetchedGhostPostId(sql, runId) : null);
+
+        // If the operator changed the slug of an already-published Ghost post,
+        // create a NEW post (null id) instead of overwriting the old one — same
+        // rule WP uses; see resolvePostIdForSlug. First-push create unaffected.
+        const postId = resolvePostIdForSlug(basePostId, run.article_url, hitl2.wp_slug);
+        if (basePostId !== null && postId === null) {
+          console.warn(
+            `[publish] slug changed (${slugFromUrl(run.article_url) ?? ""} → ${(hitl2.wp_slug ?? "").trim()}); creating new post`,
+          );
+        }
+
+        const publisher = new GhostPublisher(creds);
+        const result = await publisher.upsert({
+          postId,
+          title: render.seo_title,
+          html: render.html_body,
+          slug: hitl2.wp_slug,
+          status,
+          excerpt: hitl2.wp_excerpt || (render.excerpt_suggestion ?? ""),
+          // WordPress-parity metadata mapped to Ghost's model.
+          authorIds: toStringArray(hitl2.ghost_author_ids),
+          tags: toStringArray(hitl2.ghost_tags),
+          featureImage: hitl2.feature_image_url,
+          metaDescription: render.meta_description,
+          codeInjectionHead: buildGhostSchemaHead(toObjectArrayOrNull(render.schema_jsonld)),
+          publishedAt: hitl2.wp_publish_at,
+        });
+
+        // Backfill the Ghost post id, flip to published, and ALWAYS surface the
+        // freshly published article's URL on the run row (so a refresh/rewrite or
+        // slug-change-create-new shows the live URL under the h1 on /runs/{id}).
+        await sql`
+          UPDATE content_tool.runs
+          SET cms_post_id = ${result.id},
+              wp_pushed_at = now(),
+              status = 'published',
+              article_url = ${result.link}
+          WHERE run_id = ${runId}::uuid
+        `;
         return "ok";
       }),
     );
@@ -934,6 +1053,18 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       WHERE run_id = ${runId}::uuid LIMIT 1
     `;
     return rows[0]?.wp_post_id ?? null;
+  }
+
+  /** Existing Ghost post id (UUID) captured by fetch_article (refresh target). */
+  private async loadFetchedGhostPostId(
+    sql: ReturnType<typeof getSql>,
+    runId: string,
+  ): Promise<string | null> {
+    const rows = await sql<Array<{ cms_post_id: string | null }>>`
+      SELECT cms_post_id FROM content_tool.fetched_articles
+      WHERE run_id = ${runId}::uuid LIMIT 1
+    `;
+    return rows[0]?.cms_post_id ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -1090,7 +1221,8 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
   ): Promise<Hitl2PersistRow> {
     const rows = await sql<Hitl2PersistRow[]>`
       SELECT hitl_2_iteration, wp_publish_status, wp_author_id, wp_category_ids,
-             wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt
+             wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at,
+             ghost_author_ids, ghost_tags, feature_image_url
       FROM content_tool.runs WHERE run_id = ${runId}::uuid LIMIT 1
     `;
     const row = rows[0];

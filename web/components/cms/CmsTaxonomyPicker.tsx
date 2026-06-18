@@ -74,7 +74,9 @@ export function CmsTaxonomyPicker({
   return (
     <SearchableSelect
       value={value}
-      onChange={onChange}
+      // SearchableSelect is id-type-agnostic (string | number) so Ghost can reuse
+      // it; WordPress ids are always numeric, so narrow back here.
+      onChange={(v) => onChange(typeof v === "number" ? v : null)}
       options={options}
       loading={isPending}
       placeholder={placeholder}

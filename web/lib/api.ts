@@ -19,6 +19,7 @@ import type {
   TopicBatch, TopicBatchCreateResponse, TopicBatchDefaultsPatch, TopicBatchIn, TopicCandidate,
   UserPromptExample,
   WpCategoryOption, WpUserOption,
+  GhostAuthorOption, GhostTagOption, MediaUploadResult,
 } from "./types";
 
 import { getSessionEmail } from "./auth-client";
@@ -88,6 +89,41 @@ function wpOptionsQuery(runId?: string, persona?: string): string {
   if (persona) params.set("persona", persona);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
+}
+
+/**
+ * Upload an image to the run's CMS media store (kind-resolved server-side).
+ * Multipart — we must NOT set content-type so the browser writes the boundary.
+ * Mirrors `http`'s Bearer attach + single 401 refresh-and-retry.
+ */
+export async function uploadMedia(
+  file: File,
+  opts: { runId?: string; persona?: string } = {},
+): Promise<MediaUploadResult> {
+  const url = `/api/media/upload${wpOptionsQuery(opts.runId, opts.persona)}`;
+  const send = async (token: string | null): Promise<Response> => {
+    const body = new FormData();
+    body.append("file", file, file.name || "upload");
+    const headers: Record<string, string> = {};
+    if (token) headers["authorization"] = `Bearer ${token}`;
+    return fetch(url, { method: "POST", credentials: "include", headers, body });
+  };
+  let resp = await send(await supabaseBearer());
+  if (resp.status === 401) {
+    const refreshed = await supabaseBearer(true);
+    if (refreshed) resp = await send(refreshed);
+  }
+  if (!resp.ok) {
+    let detail = `upload failed (${resp.status})`;
+    try {
+      const j = (await resp.json()) as { detail?: string };
+      if (j.detail) detail = j.detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail);
+  }
+  return (await resp.json()) as MediaUploadResult;
 }
 
 // Build-time fallback only (local dev). In production the signed-in editor's
@@ -284,6 +320,10 @@ export const api = {
     http<WpUserOption[]>(`/api/wp-options/users${wpOptionsQuery(runId, persona)}`),
   listWpCategories: (runId?: string, persona?: string) =>
     http<WpCategoryOption[]>(`/api/wp-options/categories${wpOptionsQuery(runId, persona)}`),
+  listGhostAuthors: (runId?: string, persona?: string) =>
+    http<GhostAuthorOption[]>(`/api/ghost-options/authors${wpOptionsQuery(runId, persona)}`),
+  listGhostTags: (runId?: string, persona?: string) =>
+    http<GhostTagOption[]>(`/api/ghost-options/tags${wpOptionsQuery(runId, persona)}`),
   saveHitl2Snapshot: (runId: string, body: Hitl2SnapshotIn) =>
     http<Hitl2Snapshot>(`${BASE}/${runId}/hitl2-snapshots`, {
       method: "POST",

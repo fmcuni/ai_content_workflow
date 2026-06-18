@@ -64,11 +64,11 @@ export async function authRefExists(
  */
 export async function createPublishTarget(
   sql: ReturnType<typeof getSql>,
-  input: { name: string; auth_ref: string; status: string },
+  input: { name: string; auth_ref: string; status: string; kind?: string },
 ): Promise<PublishTargetRow> {
   const rows = await sql<PublishTargetRow[]>`
     INSERT INTO content_tool.publish_targets (name, kind, auth_ref, status, is_archived)
-    VALUES (${input.name}, 'wordpress', ${input.auth_ref}, ${input.status}, false)
+    VALUES (${input.name}, ${input.kind ?? "wordpress"}, ${input.auth_ref}, ${input.status}, false)
     RETURNING ${sql.unsafe(TARGET_COLUMNS)}
   `;
   const row = rows[0];

@@ -69,6 +69,12 @@ export interface RunSummary {
   // Post-date column reads it, falling back to "—" when the list omits it).
   wp_publish_at?: string | null;
   wp_pushed_post_id?: number | null;
+  // Ghost-destination metadata (kind='ghost' runs) — the operator's last-selected
+  // author ids / tags / feature image, echoed on the list payload so the drawer
+  // can prefill them. Null when unset or for WordPress runs.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
   // Latest render's SEO title + meta description (LEFT JOIN LATERAL renders⟕drafts
   // by run_id, newest first — see GET /runs list-payload delta, both backends).
   // Drives the ledger's draft-snippet line + the drawer's SERP preview/prefill;
@@ -310,6 +316,12 @@ export interface RunWpMetaPatch {
   wp_slug?: string | null;
   wp_publish_status?: "draft" | "future" | "publish" | null;
   wp_publish_at?: string | null;
+  // Ghost-destination metadata (kind='ghost' runs). Arrays persist via COALESCE
+  // on the backend: an empty array clears, a populated array sets, `null`
+  // preserves the stored value. feature_image_url rides this PATCH too.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
   expected_version?: number | null;
 }
 
@@ -438,15 +450,28 @@ export interface DryPublishRequest {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  // Ghost-destination metadata (kind='ghost' runs). Author = staff-user ids,
+  // tags = names, feature image = URL. Ignored for WordPress runs.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 export interface DryPublishResponse {
-  target_base_url: string;
+  target_base_url: string | null;
   target_label: string;
+  /** CMS kind the preview targets. Absent on older backends → treat as WP. */
+  kind?: PublishTargetKind;
   request_method: "PUT" | "POST";
   request_url: string;
   request_headers: Record<string, string>;
   request_body: Record<string, unknown>;
+  /**
+   * Pre-flight publish validation message (scheduled-without-date, or
+   * categories on a Ghost target), or null when the metadata is publishable.
+   * Absent on older backends → treat as null.
+   */
+  validation_error?: string | null;
 }
 
 export interface Hitl2Request {
@@ -467,6 +492,11 @@ export interface Hitl2Request {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  // Ghost-destination metadata (kind='ghost' runs). Author = staff-user ids,
+  // tags = names, feature image = URL. Ignored for WordPress runs.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 /**
@@ -511,6 +541,11 @@ export interface Hitl2SnapshotIn {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  // Ghost-destination metadata (kind='ghost' runs). Author = staff-user ids,
+  // tags = names, feature image = URL. Ignored for WordPress runs.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 export interface Hitl2Snapshot extends Hitl2SnapshotIn {
@@ -547,6 +582,11 @@ export interface ArticleEditRequest {
   wp_slug?: string | null;
   wp_excerpt?: string | null;
   wp_publish_at?: string | null;
+  // Ghost-destination metadata (kind='ghost' runs). Author = staff-user ids,
+  // tags = names, feature image = URL. Ignored for WordPress runs.
+  ghost_author_ids?: string[] | null;
+  ghost_tags?: string[] | null;
+  feature_image_url?: string | null;
 }
 
 export interface RepublishResponse {
@@ -615,6 +655,12 @@ export interface ScanResponse {
 
 export interface WpUserOption { id: number; name: string; slug: string }
 export interface WpCategoryOption { id: number; name: string; slug: string }
+/** Ghost staff author (id is a UUID string). Feeds the HITL_2 author picker. */
+export interface GhostAuthorOption { id: string; name: string; slug: string }
+/** Public Ghost tag (selected by name). Feeds the HITL_2 tag combobox. */
+export interface GhostTagOption { name: string; slug: string }
+/** Image-upload result: WordPress returns a numeric media id, Ghost a URL. */
+export interface MediaUploadResult { kind: PublishTargetKind; id: number | null; url: string }
 
 export interface ExistingPost {
   wp_post_id: number;
@@ -685,11 +731,15 @@ export interface PublishTarget {
   is_archived: boolean;
 }
 
-// Create a WordPress target. kind is always 'wordpress' this phase (not sent).
+// Create a publish target. `kind` selects the publisher + which env-var
+// credentials the auth_ref prefix resolves (wordpress: _BASE_URL/_USERNAME/
+// _APP_PASSWORD; ghost: _API_URL/_ADMIN_API_KEY). Defaults to wordpress.
+export type PublishTargetKind = "wordpress" | "ghost";
 export interface PublishTargetCreate {
   name: string;
   auth_ref: string;
   status?: "active" | "inactive";
+  kind?: PublishTargetKind;
 }
 
 // Edit a target's display name / status. auth_ref + kind are immutable.
@@ -704,9 +754,13 @@ export interface PublishTargetUsage {
 }
 
 // Presence-only check of a target's credential env vars (booleans only).
+// `secrets` is the kind-aware list (wordpress vs ghost); the base_url/username/
+// app_password booleans are legacy WordPress-shaped fields kept for back-compat.
 export interface PublishTargetReadiness {
   publish_target_id: string;
   auth_ref: string;
+  kind?: string;
+  secrets?: { name: string; present: boolean }[];
   base_url: boolean;
   username: boolean;
   app_password: boolean;

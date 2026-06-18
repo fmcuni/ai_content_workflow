@@ -158,6 +158,11 @@ export function RunDrawer({
       wp_category_ids: v.categoryId != null ? [v.categoryId] : null,
       wp_slug: v.slug || null,
       wp_publish_at: v.pubStatus === "future" && v.pubDate ? `${v.pubDate}T00:00:00Z` : null,
+      // The resume UPDATE direct-assigns Ghost fields (null wipes them), so carry
+      // the live edited values to avoid clobbering what the drawer just saved.
+      ghost_author_ids: v.ghostAuthorIds,
+      ghost_tags: v.ghostTags,
+      feature_image_url: v.featureImageUrl || null,
       comments: [],
     };
   };
@@ -170,6 +175,9 @@ export function RunDrawer({
         edited_meta_description: autosave.values.metaDesc || null,
         wp_publish_status: autosave.values.pubStatus || null,
         wp_author_id: autosave.values.authorId,
+        ghost_author_ids: autosave.values.ghostAuthorIds,
+        ghost_tags: autosave.values.ghostTags,
+        feature_image_url: autosave.values.featureImageUrl || null,
       }),
     onSuccess: (res) => setConfirmLabel(res.target_label),
     onError: (e: Error) => toast.error(`Dry-publish failed — ${e.message}`),
@@ -298,6 +306,7 @@ export function RunDrawer({
               ) : (
                 <CmsForm
                   autosave={autosave}
+                  runId={runId}
                   tag={target.tag}
                   users={users.data ?? []}
                   usersLoading={users.isLoading}

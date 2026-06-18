@@ -66,6 +66,19 @@ function makeFakeSql(): unknown {
           ? []
           : [{ status: state.run.status, hitl_2_iteration: state.run.hitl_2_iteration }];
       }
+      // Approve-path pre-flight guard reads the stored publish metadata.
+      if (lower.includes("select persona, wp_publish_status")) {
+        return state.run === null
+          ? []
+          : [
+              {
+                persona: "bowtie-editor",
+                wp_publish_status: null,
+                wp_publish_at: null,
+                wp_category_ids: null,
+              },
+            ];
+      }
       if (lower.includes("select status from content_tool.runs")) {
         return state.run === null ? [] : [{ status: state.run.status }];
       }
@@ -273,6 +286,17 @@ describe("POST /runs/:id/hitl-2 body validation", () => {
       wp_category_ids: [1, 2],
     });
     expect(res.status).not.toBe(400);
+  });
+
+  it("rejects an approve scheduled with no publish date (422, gate not claimed)", async () => {
+    state.run = { run_id: "r1", status: "hitl_2", hitl_2_iteration: 0, created_by: "a@b.com" };
+    const res = await req(appWith("a@b.com"), "POST", "/r1/hitl-2", {
+      decision: "approve",
+      wp_publish_status: "future",
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(String(json.detail)).toMatch(/scheduled publish needs a publish date/i);
   });
 });
 

@@ -294,6 +294,25 @@ export class WordPressClient {
     this.sleep = opts?.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   }
 
+  /** Upload a file to the WordPress media library; returns the attachment id
+   * (→ featured_media) and its source URL. Multipart — FormData sets the
+   * boundary, so no explicit Content-Type. */
+  async uploadMedia(file: File): Promise<{ id: number; source_url: string }> {
+    const form = new FormData();
+    form.append("file", file, file.name !== "" ? file.name : "upload");
+    const resp = await fetch(`${this.baseUrl}/wp-json/wp/v2/media`, {
+      method: "POST",
+      headers: { Authorization: buildAuthHeader(this.username, this.appPassword) },
+      body: form,
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`WordPress media upload failed (${resp.status}): ${text.slice(0, 300)}`);
+    }
+    const json = (await resp.json()) as { id?: number; source_url?: string };
+    return { id: json.id ?? 0, source_url: json.source_url ?? "" };
+  }
+
   // -------------------------------------------------------------------------
   // upsert
   // -------------------------------------------------------------------------

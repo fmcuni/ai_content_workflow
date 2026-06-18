@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  CmsFeatureImageField,
+  CmsGhostAuthorSelect,
+  CmsGhostTagPicker,
+} from "@/components/cms/ghost-fields";
 import { cn } from "@/lib/utils";
 
 import { CmsCombobox, type CmsOption } from "./CmsCombobox";
@@ -7,6 +12,8 @@ import type { CmsAutosave } from "./useCmsAutosave";
 
 interface CmsFormProps {
   autosave: CmsAutosave;
+  /** Run id — scopes the Ghost author/tag option lists to this run's target. */
+  runId: string;
   tag: string;
   users: CmsOption[];
   usersLoading: boolean;
@@ -28,6 +35,7 @@ const INPUT =
  * drawer owns the autosave state so the action buttons read the live values. */
 export function CmsForm({
   autosave,
+  runId,
   tag,
   users,
   usersLoading,
@@ -42,6 +50,12 @@ export function CmsForm({
 }: CmsFormProps) {
   const { values, dirty, setField } = autosave;
   const dirtyRing = (k: keyof typeof values) => (dirty.has(k) ? "border-warn bg-warn/[0.06]" : "");
+  // Ghost targets (tag "GT") have no categories and a different author/tag model
+  // (string ids / names) than this WP-shaped quick-edit, so those fields adapt:
+  // Category is hidden; Ghost gets its own searchable author picker + tag input
+  // and a feature-image field (parity with the full review screen). Shared fields
+  // (SEO/slug/status/date) stay editable for both kinds.
+  const isGhost = tag === "GT";
 
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
@@ -71,39 +85,80 @@ export function CmsForm({
         />
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="f-author" className={FIELD_LABEL}>Author</label>
-        <CmsCombobox
-          inputId="f-author"
-          value={values.authorId}
-          onChange={(v) => setField("authorId", v)}
-          options={users}
-          tag={tag}
-          loading={usersLoading}
-          error={usersError}
-          onRetry={onRetryUsers}
-          disabled={!canPatch}
-          placeholder="Search author…"
-          className={cn(dirty.has("authorId") && "rounded-md ring-1 ring-warn")}
-        />
-      </div>
+      {isGhost ? (
+        <>
+          <div className="col-span-2 flex flex-col gap-1">
+            <label className={FIELD_LABEL}>Author</label>
+            <div className={cn(dirty.has("ghostAuthorIds") && "rounded-md ring-1 ring-warn")}>
+              <CmsGhostAuthorSelect
+                runId={runId}
+                value={values.ghostAuthorIds}
+                onChange={(v) => setField("ghostAuthorIds", v)}
+              />
+            </div>
+          </div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="f-category" className={FIELD_LABEL}>Category</label>
-        <CmsCombobox
-          inputId="f-category"
-          value={values.categoryId}
-          onChange={(v) => setField("categoryId", v)}
-          options={categories}
-          tag={tag}
-          loading={categoriesLoading}
-          error={categoriesError}
-          onRetry={onRetryCategories}
-          disabled={!canPatch}
-          placeholder="Search category…"
-          className={cn(dirty.has("categoryId") && "rounded-md ring-1 ring-warn")}
-        />
-      </div>
+          <div className="col-span-2 flex flex-col gap-1">
+            <label className={FIELD_LABEL}>Tags</label>
+            <div className={cn(dirty.has("ghostTags") && "rounded-md ring-1 ring-warn")}>
+              <CmsGhostTagPicker
+                runId={runId}
+                value={values.ghostTags}
+                onChange={(v) => setField("ghostTags", v)}
+              />
+            </div>
+          </div>
+
+          <div className="col-span-2 flex flex-col gap-1">
+            <label className={FIELD_LABEL}>Feature image</label>
+            <div className={cn(dirty.has("featureImageUrl") && "rounded-md ring-1 ring-warn")}>
+              <CmsFeatureImageField
+                runId={runId}
+                kind="ghost"
+                valueUrl={values.featureImageUrl}
+                valueMediaId={null}
+                onChange={(p) => setField("featureImageUrl", p.feature_image_url ?? null)}
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="f-author" className={FIELD_LABEL}>Author</label>
+            <CmsCombobox
+              inputId="f-author"
+              value={values.authorId}
+              onChange={(v) => setField("authorId", v)}
+              options={users}
+              tag={tag}
+              loading={usersLoading}
+              error={usersError}
+              onRetry={onRetryUsers}
+              disabled={!canPatch}
+              placeholder="Search author…"
+              className={cn(dirty.has("authorId") && "rounded-md ring-1 ring-warn")}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="f-category" className={FIELD_LABEL}>Category</label>
+            <CmsCombobox
+              inputId="f-category"
+              value={values.categoryId}
+              onChange={(v) => setField("categoryId", v)}
+              options={categories}
+              tag={tag}
+              loading={categoriesLoading}
+              error={categoriesError}
+              onRetry={onRetryCategories}
+              disabled={!canPatch}
+              placeholder="Search category…"
+              className={cn(dirty.has("categoryId") && "rounded-md ring-1 ring-warn")}
+            />
+          </div>
+        </>
+      )}
 
       <div className="col-span-2 flex flex-col gap-1">
         <label htmlFor="f-slug" className={FIELD_LABEL}>Slug</label>
@@ -129,8 +184,8 @@ export function CmsForm({
         >
           <option value="">— unset (defaults to draft)</option>
           <option value="draft">draft</option>
-          <option value="publish">publish</option>
-          <option value="future">future (scheduled)</option>
+          <option value="publish">{isGhost ? "published" : "publish"}</option>
+          <option value="future">{isGhost ? "scheduled" : "future (scheduled)"}</option>
         </select>
       </div>
 
