@@ -12,10 +12,16 @@
 
 import type { Sql } from "postgres";
 import type { PromptTemplateRow } from "../db/schema";
-import type { VoiceLocale } from "../agents/persona";
-import { loadPersona, toPromptBlock, voiceLocaleFromRaw } from "../agents/persona";
+import type { GlossaryEntry, PersonaOverride, VoiceLocale } from "../agents/persona";
+import {
+  glossaryFromRaw,
+  loadPersona,
+  toPromptBlock,
+  voiceLocaleFromRaw,
+} from "../agents/persona";
 import { applyLocaleTokens } from "../agents/writer";
 import { getPolicy } from "../source_policy/store";
+import { SourcePolicy } from "../config/source_policy";
 
 // Re-exported for existing callers (routes/prompts.ts) — the implementations
 // now live in a neutral module so the source-policy store can share them
@@ -160,15 +166,22 @@ export function consumersOf(
 async function defaultPersonaBlock(
   sql: Sql,
   voice: string,
-  localeOverride?: VoiceLocale,
+  personaOverride?: PersonaOverride,
 ): Promise<string> {
   for (const slug of voice === DEFAULT_PREVIEW_VOICE ? [voice] : [voice, DEFAULT_PREVIEW_VOICE]) {
     try {
       const persona = await loadPersona(sql, slug);
-      // When the caller supplies an unsaved locale (live preview), render the
-      // persona block under labels derived from that locale's `outputLanguage`
-      // instead of the row's stored locale. Absent ⇒ stored locale, byte-identical.
-      const pack = localeOverride === undefined ? persona : { ...persona, locale: localeOverride };
+      // When the caller supplies unsaved persona drafts (live preview), render
+      // the block under that locale's labels and/or that draft glossary instead
+      // of the row's stored values. Each field absent ⇒ stored value,
+      // byte-identical to today.
+      const pack = {
+        ...persona,
+        ...(personaOverride?.locale !== undefined ? { locale: personaOverride.locale } : {}),
+        ...(personaOverride?.glossary !== undefined
+          ? { glossary: personaOverride.glossary }
+          : {}),
+      };
       return toPromptBlock(pack);
     } catch {
       continue;
@@ -200,8 +213,10 @@ export async function substitutePreview(
   overrides: Record<string, string>,
   view: Map<string, PromptTemplateRow>,
   voice: string = DEFAULT_PREVIEW_VOICE,
-  localeOverride?: VoiceLocale,
+  personaOverride?: PersonaOverride,
+  sourcePolicyOverride?: SourcePolicy,
 ): Promise<string> {
+  const localeOverride = personaOverride?.locale;
   const todayIso = Object.hasOwn(overrides, "today_date")
     ? (overrides["today_date"] ?? "")
     : new Date().toISOString().slice(0, 10);
@@ -210,12 +225,21 @@ export async function substitutePreview(
   if (Object.hasOwn(overrides, "persona_block")) {
     personaBlock = overrides["persona_block"] ?? "";
   } else {
-    personaBlock = await defaultPersonaBlock(sql, voice, localeOverride);
+    personaBlock = await defaultPersonaBlock(sql, voice, personaOverride);
   }
 
-  const sourcePolicyBlock = Object.hasOwn(overrides, "source_policy_block")
-    ? (overrides["source_policy_block"] ?? "")
-    : (await getPolicy(sql, voice)).toPromptBlock();
+  // `source_policy_block` precedence: explicit context override wins, then a
+  // structured draft `source_policy` (rendered server-side via the policy
+  // store's own `toPromptBlock`), then the voice's stored policy. Absent both
+  // ⇒ byte-identical to today.
+  let sourcePolicyBlock: string;
+  if (Object.hasOwn(overrides, "source_policy_block")) {
+    sourcePolicyBlock = overrides["source_policy_block"] ?? "";
+  } else if (sourcePolicyOverride !== undefined) {
+    sourcePolicyBlock = sourcePolicyOverride.toPromptBlock();
+  } else {
+    sourcePolicyBlock = (await getPolicy(sql, voice)).toPromptBlock();
+  }
 
   let createModeBlock: string;
   if (Object.hasOwn(overrides, "create_mode_block")) {
@@ -268,8 +292,47 @@ export function parsePreviewLocale(
   if (raw === undefined || raw === null) {
     return { ok: true, locale: undefined };
   }
-  if (typeof raw !== "object") {
+  if (typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false };
   }
   return { ok: true, locale: voiceLocaleFromRaw(raw) };
+}
+
+/**
+ * Parse an optional preview `glossary` draft override (snake_case wire form —
+ * `GlossaryEntry[]`). Absent/null ⇒ `{ ok: true, glossary: undefined }`
+ * (no override). A non-array value ⇒ `{ ok: false }` (route → 422). Each entry
+ * is defaulted by `glossaryFromRaw` exactly as a stored row, so a draft renders
+ * the same `toPromptBlock` bytes as the equivalent saved glossary.
+ */
+export function parsePreviewGlossary(
+  raw: unknown,
+): { ok: true; glossary: GlossaryEntry[] | undefined } | { ok: false } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, glossary: undefined };
+  }
+  if (!Array.isArray(raw)) {
+    return { ok: false };
+  }
+  return { ok: true, glossary: glossaryFromRaw(raw) };
+}
+
+/**
+ * Parse an optional preview `source_policy` draft override into a live
+ * `SourcePolicy` (rendered server-side via its own `toPromptBlock` — never
+ * hand-rendered on the client). Absent/null ⇒ `{ ok: true, policy: undefined }`
+ * (no override; the voice's stored policy is used). A non-object value ⇒
+ * `{ ok: false }` (route → 422). `SourcePolicy`/`cleanPolicy` tolerate missing
+ * sub-keys, so a partial draft is normalised exactly as a saved policy.
+ */
+export function parsePreviewSourcePolicy(
+  raw: unknown,
+): { ok: true; policy: SourcePolicy | undefined } | { ok: false } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, policy: undefined };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false };
+  }
+  return { ok: true, policy: new SourcePolicy(raw) };
 }

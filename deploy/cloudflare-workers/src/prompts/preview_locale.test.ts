@@ -79,7 +79,9 @@ describe("substitutePreview locale override", () => {
       faq_heading: "Frequently Asked Questions",
     });
 
-    const out = await substitutePreview(sql, TEMPLATE, { ...CONTEXT }, view, "bowtie-editor", locale);
+    const out = await substitutePreview(sql, TEMPLATE, { ...CONTEXT }, view, "bowtie-editor", {
+      locale,
+    });
 
     expect(out).toContain("brand=Bowtie MY");
     expect(out).toContain("lang=English (Malaysia)");
@@ -101,7 +103,7 @@ describe("substitutePreview locale override", () => {
       { persona_block: "PB", source_policy_block: "SP" },
       view,
       "bowtie-editor",
-      locale,
+      { locale },
     );
     expect(out).toBe("S=");
   });

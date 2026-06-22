@@ -2,7 +2,7 @@ import type {
   AdminUser, MeResponse, UserRole,
   ApplyEditsRequest, ApplyEditsResponse,
   ArticleEditRequest, Audit, Article, ArticleDetail, ArticleListResponse, BatchStatus,
-  CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GraphMode,
+  CreateRunRequest, DryPublishRequest, DryPublishResponse, ExistingPost, GapAnalysis, GlossaryEntry, GraphMode,
   Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn, Outline, PatchCandidateIn, Persona, PersonaIn,
   RunDraft,
   PersonaPatch, PersonaUsage, PublishTarget,
@@ -577,6 +577,25 @@ function voiceQuery(voice: string, extra?: Record<string, string | number>): str
   return `?${qs.toString()}`;
 }
 
+/**
+ * Optional unsaved-draft inputs the Voice Studio sends with a consumer preview so
+ * the assembled output reflects in-progress edits before they are saved. All keys
+ * are optional and snake_case on the wire; an empty object is byte-identical to a
+ * plain preview (the backend defaults each to the persona's stored value).
+ */
+export interface PreviewDraftInputs {
+  context?: Record<string, string>;
+  /** Other unsaved partial drafts, keyed by partial template id → body. The
+   * focused template (the `template` field) always wins over a same-id entry. */
+  partial_overrides?: Record<string, string>;
+  /** Unsaved locale override → resolves the persona-block / locale tokens. */
+  locale?: VoiceLocale;
+  /** Unsaved structured source policy → rendered into {source_policy_block}. */
+  source_policy?: SourcePolicyDoc;
+  /** Unsaved glossary → folded into the persona block's glossary section. */
+  glossary?: GlossaryEntry[];
+}
+
 export const promptsApi = {
   graph: (mode: GraphMode = "refresh") =>
     http<PromptGraph>(`${PROMPTS_BASE}/graph?mode=${mode}`),
@@ -602,14 +621,7 @@ export const promptsApi = {
   previewTemplate: (
     id: string,
     voice: string,
-    body: {
-      template: string;
-      route?: string;
-      context?: Record<string, string>;
-      // Optional unsaved locale override. When present the assembled preview
-      // reflects this locale instead of the persona's stored one.
-      locale?: VoiceLocale;
-    },
+    body: { template: string; route?: string } & PreviewDraftInputs,
   ) =>
     http<PromptPreviewResponse>(`${PROMPTS_BASE}/templates/${id}/preview${voiceQuery(voice)}`, {
       method: "POST",

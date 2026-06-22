@@ -3,6 +3,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Suspense, use, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { VoiceStudioCanvas } from "@/components/voice-studio/VoiceStudioCanvas";
 import {
@@ -16,8 +17,12 @@ import {
   graphModeForRun,
   type RunOverlay,
 } from "@/components/voice-studio/run-overlay";
+import { StudioDraftProvider, useStudioDraft } from "@/lib/voice-studio/draft-store-provider";
+import { useSaveAll, type SaveAllResult } from "@/lib/voice-studio/use-save-all";
+import { useUnsavedGuard } from "@/lib/voice-studio/use-unsaved-guard";
 import { api, promptsApi } from "@/lib/api";
 import type { GraphMode, RunSummary } from "@/lib/types";
+import { partialId } from "@/components/voice-studio/node-id";
 import { cn } from "@/lib/utils";
 
 const MODES: { mode: GraphMode; label: string }[] = [
@@ -62,7 +67,18 @@ export default function VoiceStudioPage({
 
 function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
+  // The draft store wraps the whole shell (header toolbar + canvas + inspector)
+  // so the unsaved indicator, Save-all, and loss guard can read it. Per-voice:
+  // `key={slug}` remounts the provider on a voice switch, so its useReducer resets
+  // to initial state naturally — no render-phase reset needed.
+  return (
+    <StudioDraftProvider key={slug} voice={slug}>
+      <VoiceStudioInner slug={slug} />
+    </StudioDraftProvider>
+  );
+}
 
+function VoiceStudioInner({ slug }: { slug: string }) {
   const [mode, setMode] = useState<GraphMode>("refresh");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The run anchor: defaults to the latest progressed run for this voice until
@@ -169,6 +185,76 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
     }
   }, [selectedId, graphQ.data]);
 
+  // ---- Unsaved drafts: count, Save-all, loss guard -----------------------
+  const studio = useStudioDraft();
+  const unsavedCount = studio?.unsavedCount ?? 0;
+  const { saveAll, isSaving } = useSaveAll(slug);
+  useUnsavedGuard(unsavedCount);
+
+  // Optional single batch note stamped on each prompt/partial history row in the
+  // commit (config writes ignore it).
+  const [batchNote, setBatchNote] = useState("");
+  const [showDiscard, setShowDiscard] = useState(false);
+
+  // Jump the canvas selection to the node owning a template — used to surface
+  // the first pre-validation offender. Partials map to their partial node; an
+  // agent prompt maps to the agent node referencing it.
+  const selectTemplateNode = (templateId: string) => {
+    const isPartial = partialItems.some((p) => p.template_id === templateId);
+    if (isPartial) {
+      setSelectedId(partialId(templateId));
+      return;
+    }
+    const owner = (graphQ.data?.nodes ?? []).find(
+      (n) =>
+        n.system_prompt_template_id === templateId ||
+        (n.alt_template_ids ?? []).includes(templateId),
+    );
+    if (owner) setSelectedId(owner.id);
+  };
+
+  const reportSaveAll = (result: SaveAllResult) => {
+    if (result.validationErrors.length > 0) {
+      const first = result.validationErrors[0];
+      selectTemplateNode(first.templateId);
+      const reason = first.tooLarge
+        ? "exceeds 64 KiB"
+        : `missing ${first.missingPlaceholders.map((p) => `{${p}}`).join(", ")}`;
+      toast.error(
+        `Can't save — ${first.templateId} ${reason}` +
+          (result.validationErrors.length > 1
+            ? ` (+${result.validationErrors.length - 1} more)`
+            : ""),
+      );
+      return;
+    }
+    const conflicts = result.items.filter((i) => !i.ok && i.conflict).length;
+    const failures = result.items.filter((i) => !i.ok && !i.conflict).length;
+    const parts = [`Saved ${result.ok} of ${result.total}`];
+    if (conflicts > 0) parts.push(`${conflicts} conflict${conflicts > 1 ? "s" : ""}`);
+    if (failures > 0) parts.push(`${failures} failed`);
+    const message = parts.join(" · ");
+    if (result.ok === result.total) {
+      toast.success(message);
+      setBatchNote("");
+    } else if (conflicts > 0) {
+      toast.error(`${message} — reload the conflicted item(s) to merge.`);
+    } else {
+      toast.error(message);
+    }
+  };
+
+  const handleSaveAll = async () => {
+    if (unsavedCount === 0 || isSaving) return;
+    reportSaveAll(await saveAll(batchNote));
+  };
+
+  const handleDiscardAll = () => {
+    studio?.clearAll();
+    setBatchNote("");
+    setShowDiscard(false);
+  };
+
   return (
     <div className="flex h-[calc(100vh-var(--app-header-h,56px))] flex-col">
       <header className="px-5 md:px-8 py-4 border-b border-rule">
@@ -237,6 +323,66 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
             </button>
           </div>
         </div>
+
+        {/* Unsaved-draft toolbar (Phase 5): quiet until dirty, then an amber
+            count + the unified Save-all, an optional batch note, and Discard. */}
+        {unsavedCount > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-3">
+            <span
+              className="font-mono text-[11px] uppercase tracking-[0.14em] text-amber-700"
+              aria-live="polite"
+            >
+              ● {unsavedCount} unsaved
+            </span>
+            <input
+              type="text"
+              value={batchNote}
+              maxLength={500}
+              onChange={(e) => setBatchNote(e.target.value)}
+              placeholder="Optional batch note (stamped on each prompt history row)"
+              className="flex-1 min-w-[200px] max-w-[440px] font-mono text-[11.5px] text-ink bg-paper-deep/30 border border-rule rounded-sm px-2.5 py-1.5 outline-none focus-visible:border-accent placeholder:text-ink-faint"
+            />
+            <div className="flex items-center gap-2">
+              {showDiscard ? (
+                <>
+                  <span className="font-mono text-[10.5px] text-ink-soft">Discard all drafts?</span>
+                  <button
+                    type="button"
+                    onClick={handleDiscardAll}
+                    disabled={isSaving}
+                    className="font-mono text-[11px] uppercase tracking-wider px-2.5 py-1.5 border border-accent-deep text-accent-deep rounded-sm hover:bg-rose-50 transition-colors"
+                  >
+                    Discard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDiscard(false)}
+                    className="font-mono text-[11px] uppercase tracking-wider px-2.5 py-1.5 border border-rule text-ink-faint rounded-sm hover:text-ink transition-colors"
+                  >
+                    Keep
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowDiscard(true)}
+                  disabled={isSaving}
+                  className="font-mono text-[11px] uppercase tracking-wider px-2.5 py-1.5 border border-rule text-ink-faint rounded-sm hover:text-ink hover:bg-paper-deep/40 transition-colors"
+                >
+                  Discard all
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleSaveAll()}
+                disabled={isSaving}
+                className="font-mono text-[11px] uppercase tracking-[0.14em] px-3 py-1.5 rounded-sm bg-amber-500 text-ink hover:bg-amber-400 transition-colors disabled:opacity-60"
+              >
+                {isSaving ? "Saving…" : `Save all · ${unsavedCount}`}
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -281,6 +427,8 @@ function VoiceStudioContent({ params }: { params: Promise<{ slug: string }> }) {
               voice={slug}
               runId={runId}
               onClose={() => setSelectedId(null)}
+              onStudioSave={() => void handleSaveAll()}
+              isStudioSaving={isSaving}
             />
           </aside>
         )}

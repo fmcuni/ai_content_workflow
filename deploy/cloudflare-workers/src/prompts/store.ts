@@ -165,23 +165,26 @@ export function resolveBody(
 }
 
 // ---------------------------------------------------------------------------
-// resolveBodyWithOverride: same as resolveBody but slots an unsaved draft
-// partial in place of `overrideName` (used by the editor preview).
+// resolveBodyWithOverrides: same as resolveBody but consults `overrides` at
+// every `{{include:NAME}}` — when NAME is in the map, its draft body is slotted
+// in place of the DB/stored row (used by the editor preview to reflect multiple
+// unsaved partial drafts at once). An override body's own includes still resolve
+// recursively, themselves honouring the override map.
 // ---------------------------------------------------------------------------
-function resolveBodyWithOverride(
+export function resolveBodyWithOverrides(
   body: string,
   snap: Map<string, PromptTemplateRow>,
-  overrideName: string,
-  overrideBody: string,
+  overrides: ReadonlyMap<string, string>,
   seen: Set<string> = new Set(),
 ): string {
   return body.replace(INCLUDE_RE, (_match: string, name: string): string => {
     if (seen.has(name)) {
       throw new Error(`prompt include cycle: ${name}`);
     }
+    const override = overrides.get(name);
     const inner =
-      name === overrideName
-        ? overrideBody.replace(/\n+$/, "")
+      override !== undefined
+        ? override.replace(/\n+$/, "")
         : (() => {
             const row = snap.get(name);
             if (row === undefined) throw new PromptTemplateNotFound(name);
@@ -189,7 +192,7 @@ function resolveBodyWithOverride(
           })();
     const nextSeen = new Set(seen);
     nextSeen.add(name);
-    return resolveBodyWithOverride(inner, snap, overrideName, overrideBody, nextSeen);
+    return resolveBodyWithOverrides(inner, snap, overrides, nextSeen);
   });
 }
 
@@ -224,20 +227,36 @@ export function assembleFromSnapshot(
 }
 
 /**
+ * Assemble `routeId` resolving each `{{include:NAME}}` against `overrides` (a
+ * `partial_id -> draft_body` map) before falling back to the snapshot. Used by
+ * the editor preview so multiple unsaved partial drafts are slotted into their
+ * positions at once without a DB write. An empty map is byte-identical to
+ * `assembleFromSnapshot(routeId, snap)`.
+ */
+export function assembleWithOverrides(
+  routeId: string,
+  snap: Map<string, PromptTemplateRow>,
+  overrides: ReadonlyMap<string, string>,
+): string {
+  const row = snap.get(routeId);
+  if (row === undefined) {
+    throw new PromptTemplateNotFound(routeId);
+  }
+  return resolveBodyWithOverrides(row.body, snap, overrides);
+}
+
+/**
  * Assemble `routeId` but resolve `overrideName` to `overrideBody`.
- * Used by the editor preview so an unsaved partial draft is slotted into its
- * position without a DB write.
+ * Back-compat shim — delegates to {@link assembleWithOverrides} with a
+ * single-entry map. Existing callers (the editor preview's partial path) are
+ * untouched.
  */
 export function assembleWithOverride(
   routeId: string,
   snap: Map<string, PromptTemplateRow>,
   opts: { overrideName: string; overrideBody: string },
 ): string {
-  const row = snap.get(routeId);
-  if (row === undefined) {
-    throw new PromptTemplateNotFound(routeId);
-  }
-  return resolveBodyWithOverride(row.body, snap, opts.overrideName, opts.overrideBody);
+  return assembleWithOverrides(routeId, snap, new Map([[opts.overrideName, opts.overrideBody]]));
 }
 
 /**

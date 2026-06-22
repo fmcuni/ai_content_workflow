@@ -6,7 +6,11 @@ fall through); with an override it resolves them. A legacy retired ``ui_lang``
 key on the request body is silently ignored (labels derive from output_language).
 """
 
-from content_tool.api.routes.prompts import _PreviewRequest, _substitute_placeholders
+from content_tool.api.routes.prompts import (
+    _PersonaOverride,
+    _PreviewRequest,
+    _substitute_placeholders,
+)
 from content_tool.models.persona import VoiceLocale
 
 # Named-default tokens supplied via overrides so no DB lookup happens.
@@ -39,7 +43,7 @@ def test_no_override_is_byte_identical_to_today() -> None:
         _TEMPLATE, overrides=dict(_BASE_OVERRIDES), view={}
     )
     out_with_none = _substitute_placeholders(
-        _TEMPLATE, overrides=dict(_BASE_OVERRIDES), view={}, locale_override=None
+        _TEMPLATE, overrides=dict(_BASE_OVERRIDES), view={}, persona_override=None
     )
 
     expected = "\n".join(
@@ -72,7 +76,10 @@ def test_override_resolves_brand_lang_market_and_headings() -> None:
         }
     )
     out = _substitute_placeholders(
-        _TEMPLATE, overrides=dict(_BASE_OVERRIDES), view={}, locale_override=locale
+        _TEMPLATE,
+        overrides=dict(_BASE_OVERRIDES),
+        view={},
+        persona_override=_PersonaOverride(locale=locale),
     )
 
     assert "brand=Bowtie MY" in out
@@ -93,7 +100,7 @@ def test_override_null_sources_heading_substitutes_empty() -> None:
         "S={sources_heading}",
         overrides={"persona_block": "PB", "source_policy_block": "SP"},
         view={},
-        locale_override=locale,
+        persona_override=_PersonaOverride(locale=locale),
     )
     assert out == "S="
 

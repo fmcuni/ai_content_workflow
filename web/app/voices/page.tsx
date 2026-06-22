@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -8,6 +7,7 @@ import { SectionHead } from "@/components/SectionHead";
 import { ComposeDrawer } from "@/components/voices/ComposeDrawer";
 import { DuplicateVoiceDialog } from "@/components/voices/DuplicateVoiceDialog";
 import { Rolodex } from "@/components/voices/Rolodex";
+import { StudioEntryBand } from "@/components/voices/StudioEntryBand";
 import { StyleCard } from "@/components/voices/StyleCard";
 import { PressWorkflow } from "@/components/voices/PressWorkflow";
 import { PromptInspector } from "@/components/voices/PromptInspector";
@@ -81,6 +81,9 @@ export default function VoicesPage() {
         </label>
       </section>
 
+      {/* Movement 1.5: Studio entry band — primary CTA into Voice Studio */}
+      <StudioEntryBand slug={activeSlug} />
+
       {/* Movement 2: Style Card */}
       <section aria-label="style-card">
         {personas.data && activeSlug && (() => {
@@ -98,16 +101,6 @@ export default function VoicesPage() {
 
       {/* Movement 3+4: Press Workflow */}
       <section aria-label="press-workflow">
-        {activeSlug && (
-          <div className="flex justify-end pb-2">
-            <Link
-              href={`/voices/${encodeURIComponent(activeSlug)}`}
-              className="font-mono text-[11px] uppercase tracking-[0.14em] text-accent hover:underline"
-            >
-              Open in Studio →
-            </Link>
-          </div>
-        )}
         {graph.data && (
           <PressWorkflow
             graph={graph.data}

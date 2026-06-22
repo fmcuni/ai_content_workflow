@@ -38,6 +38,7 @@ voice whose rows match ``__shared__`` (e.g. the seeded ``bowtie-editor``).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -235,6 +236,25 @@ def assemble_from_snapshot(
     return resolve_body(body, snap, voice_slug=voice_slug)
 
 
+def assemble_with_overrides(
+    route_id: str,
+    snap: dict[tuple[str, str], TemplateRow],
+    overrides: Mapping[str, str],
+    *,
+    voice_slug: str = SHARED_VOICE,
+) -> str:
+    """Assemble ``route_id`` resolving each ``{{include:NAME}}`` against ``overrides``.
+
+    ``overrides`` maps ``partial_id -> draft_body``; an included name present in
+    the map is slotted in place of the DB/stored row, the rest resolve from the
+    snapshot (within ``voice_slug``, with the usual shared/file fallback). Used by
+    the editor preview so multiple unsaved partial drafts reflect at once. An
+    empty mapping is byte-identical to ``assemble_from_snapshot``.
+    """
+    body = _raw_body(snap, voice_slug, route_id)
+    return _resolve_with_overrides(body, snap, overrides, voice_slug=voice_slug)
+
+
 def assemble_with_override(
     route_id: str,
     snap: dict[tuple[str, str], TemplateRow],
@@ -245,26 +265,40 @@ def assemble_with_override(
 ) -> str:
     """Assemble ``route_id`` but resolve ``override_name`` to ``override_body``.
 
-    Used by the editor preview so an unsaved partial draft is slotted into its
-    consumer while the rest resolve from the DB (within ``voice_slug``, with the
-    usual shared/file fallback).
+    Back-compat shim — delegates to :func:`assemble_with_overrides` with a
+    single-entry mapping. Existing callers (the editor preview's partial path)
+    are untouched.
     """
-    body = _raw_body(snap, voice_slug, route_id)
-    return _resolve_with_override(
-        body,
+    return assemble_with_overrides(
+        route_id,
         snap,
-        override_name=override_name,
-        override_body=override_body,
+        {override_name: override_body},
         voice_slug=voice_slug,
     )
 
 
-def _resolve_with_override(
+def resolve_body_with_overrides(
     body: str,
     snap: dict[tuple[str, str], TemplateRow],
+    overrides: Mapping[str, str],
     *,
-    override_name: str,
-    override_body: str,
+    voice_slug: str = SHARED_VOICE,
+) -> str:
+    """Inline ``{{include:NAME}}`` in ``body``, consulting ``overrides`` first.
+
+    Like :func:`resolve_body` but a name present in ``overrides`` resolves to the
+    draft body instead of the snapshot/file. Used by the editor preview's agent
+    path so sibling partial drafts reflect. Empty ``overrides`` is byte-identical
+    to :func:`resolve_body`.
+    """
+    return _resolve_with_overrides(body, snap, overrides, voice_slug=voice_slug)
+
+
+def _resolve_with_overrides(
+    body: str,
+    snap: dict[tuple[str, str], TemplateRow],
+    overrides: Mapping[str, str],
+    *,
     voice_slug: str = SHARED_VOICE,
     _seen: frozenset[str] = frozenset(),
 ) -> str:
@@ -272,15 +306,14 @@ def _resolve_with_override(
         name = match.group(1)
         if name in _seen:
             raise ValueError(f"include cycle detected at {{{{include:{name}}}}}")
-        if name == override_name:
-            inner = override_body.rstrip("\n")
+        if name in overrides:
+            inner = overrides[name].rstrip("\n")
         else:
             inner = _raw_body(snap, voice_slug, name).rstrip("\n")
-        return _resolve_with_override(
+        return _resolve_with_overrides(
             inner,
             snap,
-            override_name=override_name,
-            override_body=override_body,
+            overrides,
             voice_slug=voice_slug,
             _seen=_seen | {name},
         )

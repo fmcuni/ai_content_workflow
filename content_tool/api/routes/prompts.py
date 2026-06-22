@@ -1,6 +1,7 @@
 # ruff: noqa: RUF001  — the user-prompt reference strings mirror CJK prompts verbatim
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
@@ -32,10 +33,11 @@ from content_tool.db.models import (
 from content_tool.models.audit import AuditOutput
 from content_tool.models.gap_analysis import GapAnalysis
 from content_tool.models.outline import Outline
-from content_tool.models.persona import VoiceLocale
+from content_tool.models.persona import GlossaryEntry, VoiceLocale
 from content_tool.models.topic_batch import TopicDedupOutput, TopicGenOutput, TopicHotOutput
 from content_tool.models.writer import WriterOutput
 from content_tool.policy.personas import load_persona, load_persona_from_yaml
+from content_tool.policy.source_policy import SourcePolicy
 from content_tool.prompts_store import SHARED_VOICE, TemplateRow
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
@@ -77,6 +79,13 @@ _REQUIRED_PLACEHOLDERS: dict[str, set[str]] = {
 }
 
 _MAX_TEMPLATE_BYTES = 64 * 1024
+# Preview-endpoint resource caps. The preview handler accepts unsaved drafts as
+# untrusted request input; bound each so one request can't carry an arbitrarily
+# large payload. Per-body byte caps reuse the save-path _MAX_TEMPLATE_BYTES.
+# Kept byte-in-sync with the Workers backend (routes/prompts.ts).
+_MAX_PARTIAL_OVERRIDE_ENTRIES = 100
+_MAX_GLOSSARY_ENTRIES = 500
+_MAX_GLOSSARY_FIELD_CHARS = 500
 _INCLUDE_RE = re.compile(r"\{\{include:([A-Za-z0-9_./-]+)\}\}")
 _PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 
@@ -784,6 +793,70 @@ class _PreviewRequest(BaseModel):
     # (matches ``VoiceLocale``); missing fields fall back to HK-ZH defaults.
     # Absent ⇒ ``None`` ⇒ preview uses the voice's stored locale (today's path).
     locale: VoiceLocale | None = None
+    # Optional unsaved sibling-partial drafts (partial_id -> body). Threaded into
+    # assembly so multiple drafts reflect at once. Absent/empty ⇒ no-op. Pydantic
+    # raises 422 for a non-mapping value.
+    partial_overrides: dict[str, str] = Field(default_factory=dict)
+    # Optional unsaved draft source policy (structured). Rendered server-side via
+    # ``SourcePolicy.to_prompt_block`` into ``{source_policy_block}``. Absent ⇒
+    # the voice's stored policy (today's path). 422 for a non-object value.
+    source_policy: dict[str, Any] | None = None
+    # Optional unsaved draft glossary (snake_case ``GlossaryEntry`` list), folded
+    # into the persona block. Absent ⇒ the persona's stored glossary. 422 for a
+    # non-array value.
+    glossary: list[GlossaryEntry] | None = None
+
+
+@dataclass(frozen=True)
+class _PersonaOverride:
+    """Unsaved persona-draft overrides for the editor preview.
+
+    Folds the previously-standalone ``locale_override`` together with the new
+    ``glossary`` draft into one object threaded through
+    :func:`_default_persona_block` / :func:`PersonaPack.to_prompt_block`. Each
+    field ``None`` ⇒ the persona's stored value (byte-identical to today).
+    """
+
+    locale: VoiceLocale | None = None
+    glossary: list[GlossaryEntry] | None = None
+
+
+def _enforce_preview_caps(body: _PreviewRequest) -> None:
+    """Reject oversized unsaved-draft preview input before any DB work.
+
+    Mirrors the Workers backend caps (routes/prompts.ts): per-value byte caps
+    reuse the save-path ``_MAX_TEMPLATE_BYTES``; entry counts and per-string
+    field lengths are bounded. 413 for byte-size excess, 422 for count/length.
+    """
+    if len(body.partial_overrides) > _MAX_PARTIAL_OVERRIDE_ENTRIES:
+        raise HTTPException(
+            422, f"partial_overrides exceeds {_MAX_PARTIAL_OVERRIDE_ENTRIES} entries"
+        )
+    for key, value in body.partial_overrides.items():
+        if len(value.encode("utf-8")) > _MAX_TEMPLATE_BYTES:
+            raise HTTPException(
+                413, f"partial_overrides['{key}'] exceeds {_MAX_TEMPLATE_BYTES} bytes"
+            )
+    if body.source_policy is not None:
+        prompt_block = body.source_policy.get("prompt_block")
+        if (
+            isinstance(prompt_block, str)
+            and len(prompt_block.encode("utf-8")) > _MAX_TEMPLATE_BYTES
+        ):
+            raise HTTPException(
+                413, f"source_policy.prompt_block exceeds {_MAX_TEMPLATE_BYTES} bytes"
+            )
+    if body.glossary is not None:
+        if len(body.glossary) > _MAX_GLOSSARY_ENTRIES:
+            raise HTTPException(422, f"glossary exceeds {_MAX_GLOSSARY_ENTRIES} entries")
+        for entry in body.glossary:
+            if (
+                len(entry.term) > _MAX_GLOSSARY_FIELD_CHARS
+                or len(entry.preferred) > _MAX_GLOSSARY_FIELD_CHARS
+            ):
+                raise HTTPException(
+                    422, f"glossary field exceeds {_MAX_GLOSSARY_FIELD_CHARS} chars"
+                )
 
 
 @router.post("/templates/{template_id}/preview")
@@ -806,6 +879,7 @@ async def preview_template(
     persona, the voice's source_policy) unless the request overrides them via
     `context`.
     """
+    _enforce_preview_caps(body)
     snap = await _load_snapshot(sf)
     view = _voice_view(snap, voice)
     row = _editable_or_404(view, template_id)
@@ -821,11 +895,14 @@ async def preview_template(
                 f"route '{body.route}' does not include partial '{template_id}'",
             )
         route_id = body.route
-        assembled = prompts_store.assemble_with_override(
+        # Slot the currently-edited partial draft AND any sibling partial drafts
+        # into the consumer at once. The currently-edited template wins over a
+        # same-id entry in ``partial_overrides`` (it is the focused buffer).
+        overrides = {**body.partial_overrides, template_id: body.template}
+        assembled = prompts_store.assemble_with_overrides(
             route_id,
             snap,
-            override_name=template_id,
-            override_body=body.template,
+            overrides,
             voice_slug=voice,
         )
     else:
@@ -833,7 +910,11 @@ async def preview_template(
         if route_id != template_id:
             raise HTTPException(400, "route must equal template_id for agent prompts")
         try:
-            assembled = prompts_store.resolve_body(body.template, snap, voice_slug=voice)
+            # Resolve the submitted agent body directly, threading sibling partial
+            # drafts through its includes. Empty mapping ⇒ identical to resolve_body.
+            assembled = prompts_store.resolve_body_with_overrides(
+                body.template, snap, body.partial_overrides, voice_slug=voice
+            )
         except prompts_store.PromptTemplateNotFound as e:
             raise HTTPException(
                 400,
@@ -845,9 +926,18 @@ async def preview_template(
             ) from e
 
     async with sf() as session:
-        source_policy = await source_policy_store.get_policy(voice_slug=voice, session=session)
-        # Absent an unsaved override (the /voices live-edit path), resolve the
-        # voice's STORED locale so the assembled prompt shows the same
+        # ``source_policy_block`` source: a structured draft ``source_policy``
+        # (rendered server-side via the policy's own ``to_prompt_block`` — never
+        # hand-rendered on the client) wins; else the voice's stored policy.
+        if body.source_policy is not None:
+            source_policy_default = SourcePolicy(body.source_policy).to_prompt_block()
+        else:
+            source_policy = await source_policy_store.get_policy(
+                voice_slug=voice, session=session
+            )
+            source_policy_default = source_policy.to_prompt_block()
+        # Absent an unsaved locale override (the /voices live-edit path), resolve
+        # the voice's STORED locale so the assembled prompt shows the same
         # brand/language/market/heading tokens the runtime agents inject —
         # instead of leaking literal {brand_name}/… placeholders.
         effective_locale = (
@@ -855,13 +945,16 @@ async def preview_template(
             if body.locale is not None
             else await _stored_locale(voice, session=session)
         )
+    # Fold locale + the draft glossary (if any) into one persona override; an
+    # absent glossary ⇒ the persona's stored glossary, byte-identical to today.
+    persona_override = _PersonaOverride(locale=effective_locale, glossary=body.glossary)
     resolved = _substitute_placeholders(
         assembled,
         overrides=body.context,
         view=view,
         voice=voice,
-        source_policy_default=source_policy.to_prompt_block(),
-        locale_override=effective_locale,
+        source_policy_default=source_policy_default,
+        persona_override=persona_override,
     )
     return {"resolved": resolved, "route": route_id, "voice": voice}
 
@@ -883,23 +976,31 @@ async def _stored_locale(voice: str, *, session: AsyncSession) -> VoiceLocale:
     return VoiceLocale()
 
 
-def _default_persona_block(voice: str, locale_override: VoiceLocale | None = None) -> str:
+def _default_persona_block(
+    voice: str, persona_override: "_PersonaOverride | None" = None
+) -> str:
     """Best-effort persona block for the preview, from the voice's YAML config.
 
     Falls back to the default voice, then a placeholder, when a voice has no
     bundled YAML (e.g. a duplicated voice exists only in the DB). The persona
     block is preview-cosmetic — runtime assembly reads the persona from the DB.
 
-    When ``locale_override`` is supplied (live preview of unsaved locale edits),
-    the persona block renders under labels derived from that locale's
-    ``output_language`` instead of the YAML-stored locale. Absent ⇒ stored
-    locale, byte-identical to today.
+    When ``persona_override`` supplies an unsaved locale and/or glossary (live
+    preview of in-progress edits), the persona block renders under that locale's
+    labels and/or that draft glossary instead of the YAML-stored values. Each
+    field absent ⇒ stored value, byte-identical to today.
     """
     for slug in dict.fromkeys((voice, DEFAULT_VOICE)):
         try:
             pack = load_persona_from_yaml(slug)
-            if locale_override is not None:
-                pack = pack.model_copy(update={"locale": locale_override})
+            if persona_override is not None:
+                update: dict[str, Any] = {}
+                if persona_override.locale is not None:
+                    update["locale"] = persona_override.locale
+                if persona_override.glossary is not None:
+                    update["glossary"] = persona_override.glossary
+                if update:
+                    pack = pack.model_copy(update=update)
             return pack.to_prompt_block(None)
         except FileNotFoundError:
             continue
@@ -913,7 +1014,7 @@ def _substitute_placeholders(
     view: dict[str, TemplateRow],
     voice: str = DEFAULT_VOICE,
     source_policy_default: str = "",
-    locale_override: VoiceLocale | None = None,
+    persona_override: "_PersonaOverride | None" = None,
 ) -> str:
     """Fill `{name}` placeholders with overrides or sensible defaults.
 
@@ -924,11 +1025,12 @@ def _substitute_placeholders(
     ``outline_create_mode`` template (with the ``__shared__`` fallback).
     """
     today_iso = overrides.get("today_date", date.today().isoformat())
+    locale_override = persona_override.locale if persona_override is not None else None
 
     if "persona_block" in overrides:
         persona_block = overrides["persona_block"]
     else:
-        persona_block = _default_persona_block(voice, locale_override)
+        persona_block = _default_persona_block(voice, persona_override)
 
     if "source_policy_block" in overrides:
         source_policy_block = overrides["source_policy_block"]

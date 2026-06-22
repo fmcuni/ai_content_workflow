@@ -26,6 +26,10 @@ interface StudioInspectorProps {
   /** Anchored run from the page header — feeds the real-run user-prompt tab. */
   runId: string | null;
   onClose: () => void;
+  /** Trigger the page-owned unified Save-all from an in-editor Save button (Q5). */
+  onStudioSave: () => void;
+  /** True while a unified save is in flight. */
+  isStudioSaving: boolean;
 }
 
 function RealRunUserPrompt({ agent, runId }: { agent: string; runId: string | null }) {
@@ -76,10 +80,14 @@ function AgentInspector({
   node,
   voice,
   runId,
+  onStudioSave,
+  isStudioSaving,
 }: {
   node: PromptNode;
   voice: string;
   runId: string | null;
+  onStudioSave: () => void;
+  isStudioSaving: boolean;
 }) {
   const templateIds = [
     node.system_prompt_template_id,
@@ -153,7 +161,13 @@ function AgentInspector({
       </div>
 
       {tab === "prompt" && activeTemplate && (
-        <PromptEditor templateId={activeTemplate} voice={voice} compact />
+        <PromptEditor
+          templateId={activeTemplate}
+          voice={voice}
+          compact
+          onStudioSave={onStudioSave}
+          isStudioSaving={isStudioSaving}
+        />
       )}
       {tab === "run" && (
         <div>
@@ -173,7 +187,14 @@ function AgentInspector({
  * prompt + JSON schema via the shared PromptEditor) and a real-run user prompt;
  * partial → the shared editor; gate → a read-only description.
  */
-export function StudioInspector({ selection, voice, runId, onClose }: StudioInspectorProps) {
+export function StudioInspector({
+  selection,
+  voice,
+  runId,
+  onClose,
+  onStudioSave,
+  isStudioSaving,
+}: StudioInspectorProps) {
   const title =
     selection.kind === "agent"
       ? selection.node.id
@@ -210,10 +231,23 @@ export function StudioInspector({ selection, voice, runId, onClose }: StudioInsp
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {selection.kind === "agent" && (
-          <AgentInspector key={selection.node.id} node={selection.node} voice={voice} runId={runId} />
+          <AgentInspector
+            key={selection.node.id}
+            node={selection.node}
+            voice={voice}
+            runId={runId}
+            onStudioSave={onStudioSave}
+            isStudioSaving={isStudioSaving}
+          />
         )}
         {selection.kind === "partial" && (
-          <PromptEditor templateId={selection.templateId} voice={voice} compact />
+          <PromptEditor
+            templateId={selection.templateId}
+            voice={voice}
+            compact
+            onStudioSave={onStudioSave}
+            isStudioSaving={isStudioSaving}
+          />
         )}
         {selection.kind === "gate" && (
           <p className="text-ink-soft text-[13px] leading-relaxed">{selection.description}</p>
