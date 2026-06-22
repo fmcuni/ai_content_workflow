@@ -526,10 +526,15 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
   }
   const template = body.template;
   const route = typeof body.route === "string" ? body.route : null;
-  const context: Record<string, string> =
-    body.context !== null && typeof body.context === "object"
-      ? (body.context as Record<string, string>)
-      : {};
+  // Keep only string-valued entries: substitutePreview calls String.replaceAll
+  // with each value, so a non-string (number/null/object) would throw → 500.
+  // Mirrors the partial_overrides string guard and the Python backend.
+  const context: Record<string, string> = {};
+  if (body.context !== null && typeof body.context === "object" && !Array.isArray(body.context)) {
+    for (const [k, v] of Object.entries(body.context as Record<string, unknown>)) {
+      if (typeof v === "string") context[k] = v;
+    }
+  }
   // Optional unsaved-locale override for live preview (snake_case wire contract).
   // Absent ⇒ undefined ⇒ preview uses the persona's stored locale (today's path).
   const localeParse = parsePreviewLocale(body.locale);

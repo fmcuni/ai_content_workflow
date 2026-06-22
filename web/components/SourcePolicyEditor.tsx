@@ -231,7 +231,12 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
     } else {
       studio.clearConfigDraft("source_policy");
     }
-  }, [studio, doc, isDirty, sha]);
+    // Depend ONLY on the inputs, NOT on `studio`: the provider memoizes `studio`
+    // on `[state]`, so setConfigDraft (which always produces new state) would give
+    // `studio` a new identity and re-fire this effect → infinite loop while dirty.
+    // The store setters dispatch to a stable reducer, so the captured `studio` is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, isDirty, sha]);
 
   // Live preview: debounce edits, render the prompt block server-side so it
   // matches exactly what the writer agents inject.

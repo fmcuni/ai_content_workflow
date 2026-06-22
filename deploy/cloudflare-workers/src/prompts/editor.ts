@@ -292,7 +292,7 @@ export function parsePreviewLocale(
   if (raw === undefined || raw === null) {
     return { ok: true, locale: undefined };
   }
-  if (typeof raw !== "object") {
+  if (typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false };
   }
   return { ok: true, locale: voiceLocaleFromRaw(raw) };

@@ -322,14 +322,19 @@ interface RawGlossaryEntry {
  */
 export function glossaryFromRaw(raw: unknown): GlossaryEntry[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as RawGlossaryEntry[])
-    .filter((e): e is RawGlossaryEntry => e !== null && typeof e === "object" && "term" in e)
+  // `term` MUST be a string — untrusted preview JSON can carry non-string fields
+  // (route → 422 caps read `.length`), so narrow defensively and coerce the rest.
+  return (raw as unknown[])
+    .filter(
+      (e): e is RawGlossaryEntry =>
+        e !== null && typeof e === "object" && typeof (e as RawGlossaryEntry).term === "string",
+    )
     .map((e) => ({
       term: e.term,
-      preferred: e.preferred ?? "",
-      variants: e.variants ?? [],
+      preferred: typeof e.preferred === "string" ? e.preferred : "",
+      variants: Array.isArray(e.variants) ? e.variants.filter((v) => typeof v === "string") : [],
       status: e.status ?? "preferred",
-      notes: e.notes ?? null,
+      notes: typeof e.notes === "string" ? e.notes : null,
     }));
 }
 
