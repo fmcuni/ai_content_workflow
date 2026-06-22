@@ -18,6 +18,8 @@ import { VersionDiff } from "@/components/VersionDiff";
 import { useRole } from "@/lib/use-role";
 import { sourcePolicyApi } from "@/lib/api";
 import type { PromptVersionSummary, SourcePolicyDoc } from "@/lib/types";
+import { isSourcePolicyDraft } from "@/lib/voice-studio/draft-store";
+import { useStudioDraft } from "@/lib/voice-studio/draft-store-provider";
 
 const EMPTY_DOC: SourcePolicyDoc = {
   deny: { domains: [], tlds: [] },
@@ -162,6 +164,9 @@ interface SourcePolicyEditorProps {
 
 export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
   const queryClient = useQueryClient();
+  // Voice Studio draft store — null on the standalone /prompts library page, in
+  // which case the editor keeps its local-only behavior (zero change).
+  const studio = useStudioDraft();
   const q = useQuery({
     queryKey: ["source-policy", voice],
     queryFn: () => sourcePolicyApi.get(voice),
@@ -197,18 +202,36 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
   // is the intended use here — see the matching pattern in the prompt editor.
   useEffect(() => {
     if (q.data) {
+      // In Studio, an existing store draft takes precedence over the server copy
+      // so a prior edit is reflected when the panel remounts (tab switch).
+      const stored = studio?.state.config.source_policy;
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDoc(q.data.policy);
+      setDoc(isSourcePolicyDraft(stored) ? stored.policy : q.data.policy);
       setBaseline(q.data.policy);
       setSha(q.data.sha256);
       setRendered(q.data.rendered);
     }
+    // `studio` intentionally omitted: store draft is read once at seed time; it
+    // is kept in sync afterwards by the mirroring effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.data]);
 
   const isDirty = useMemo(
     () => JSON.stringify(doc) !== JSON.stringify(baseline),
     [doc, baseline],
   );
+
+  // Mirror the working doc into the shared store (Studio only) so Save-all and
+  // the live preview reflect the in-progress policy; reverting to the server
+  // baseline drops the draft. `sha` is the optimistic lock for the eventual PUT.
+  useEffect(() => {
+    if (!studio || sha === null) return;
+    if (isDirty) {
+      studio.setConfigDraft("source_policy", { kind: "source_policy", policy: doc, baseSha: sha });
+    } else {
+      studio.clearConfigDraft("source_policy");
+    }
+  }, [studio, doc, isDirty, sha]);
 
   // Live preview: debounce edits, render the prompt block server-side so it
   // matches exactly what the writer agents inject.
@@ -239,6 +262,7 @@ export function SourcePolicyEditor({ voice }: SourcePolicyEditorProps) {
       setSha(res.sha256);
       setRendered(res.rendered);
       setNoteInput("");
+      studio?.clearConfigDraft("source_policy");
       void queryClient.invalidateQueries({ queryKey: ["source-policy", voice] });
     },
     onError: (e: unknown) => {

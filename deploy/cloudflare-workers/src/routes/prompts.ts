@@ -28,8 +28,8 @@ import {
   snapshot,
   voiceView,
   invalidate,
-  resolveBody,
-  assembleWithOverride,
+  resolveBodyWithOverrides,
+  assembleWithOverrides,
   PromptTemplateNotFound,
   SHARED_VOICE,
 } from "../prompts/store";
@@ -47,8 +47,11 @@ import {
   partialsReferencedBy,
   substitutePreview,
   parsePreviewLocale,
+  parsePreviewGlossary,
+  parsePreviewSourcePolicy,
   storedLocale,
 } from "../prompts/editor";
+import type { PersonaOverride } from "../agents/persona";
 import {
   renderUserPrompt,
   USER_PROMPT_AGENTS,
@@ -64,6 +67,14 @@ const MIN_HISTORY_LIMIT = 1;
 const MAX_HISTORY_LIMIT = 200;
 
 const EXPECTED_SHA_LENGTH = 64;
+
+// Preview-endpoint resource caps. The preview handler accepts unsaved drafts as
+// untrusted request input; bound each so a single request can't carry an
+// arbitrarily large payload. Per-body byte caps reuse the save-path
+// MAX_TEMPLATE_BYTES (64 KiB). Kept byte-in-sync with the Python backend.
+const MAX_PARTIAL_OVERRIDE_ENTRIES = 100;
+const MAX_GLOSSARY_ENTRIES = 500;
+const MAX_GLOSSARY_FIELD_CHARS = 500;
 
 // Default voice for every template endpoint when the caller omits `?voice=`.
 // Mirrors the seeded persona slug; per-voice rows fall back to `__shared__`
@@ -500,7 +511,15 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
   const templateId = c.req.param("id");
   const voice = resolveVoice(c);
   const body = await c.req
-    .json<{ template?: unknown; route?: unknown; context?: unknown; locale?: unknown }>()
+    .json<{
+      template?: unknown;
+      route?: unknown;
+      context?: unknown;
+      locale?: unknown;
+      partial_overrides?: unknown;
+      source_policy?: unknown;
+      glossary?: unknown;
+    }>()
     .catch(() => null);
   if (body === null || typeof body.template !== "string") {
     return c.json({ detail: "template is required" }, 422);
@@ -518,6 +537,86 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
     return c.json({ detail: "locale must be an object" }, 422);
   }
   const localeOverride = localeParse.locale;
+
+  // Optional unsaved draft glossary (snake_case GlossaryEntry[]). Non-array ⇒ 422.
+  const glossaryParse = parsePreviewGlossary(body.glossary);
+  if (!glossaryParse.ok) {
+    return c.json({ detail: "glossary must be an array" }, 422);
+  }
+  // Resource cap: bound the glossary array length and each string field so an
+  // untrusted preview draft can't carry an unbounded payload.
+  if (glossaryParse.glossary !== undefined) {
+    if (glossaryParse.glossary.length > MAX_GLOSSARY_ENTRIES) {
+      return c.json({ detail: `glossary exceeds ${MAX_GLOSSARY_ENTRIES} entries` }, 422);
+    }
+    for (const entry of glossaryParse.glossary) {
+      if (
+        entry.term.length > MAX_GLOSSARY_FIELD_CHARS ||
+        entry.preferred.length > MAX_GLOSSARY_FIELD_CHARS
+      ) {
+        return c.json(
+          { detail: `glossary field exceeds ${MAX_GLOSSARY_FIELD_CHARS} chars` },
+          422,
+        );
+      }
+    }
+  }
+  // Resource cap: bound the source-policy prompt_block (the editable text field)
+  // before constructing the policy, mirroring the save-path MAX_TEMPLATE_BYTES.
+  if (
+    body.source_policy !== undefined &&
+    body.source_policy !== null &&
+    typeof body.source_policy === "object" &&
+    !Array.isArray(body.source_policy)
+  ) {
+    const promptBlock = (body.source_policy as { prompt_block?: unknown }).prompt_block;
+    if (typeof promptBlock === "string" && utf8ByteLength(promptBlock) > MAX_TEMPLATE_BYTES) {
+      return c.json(
+        { detail: `source_policy.prompt_block exceeds ${MAX_TEMPLATE_BYTES} bytes` },
+        413,
+      );
+    }
+  }
+  // Optional unsaved draft source policy (structured). Non-object ⇒ 422.
+  const policyParse = parsePreviewSourcePolicy(body.source_policy);
+  if (!policyParse.ok) {
+    return c.json({ detail: "source_policy must be an object" }, 422);
+  }
+  // Optional unsaved sibling partial drafts (partial_id -> body). A non-object ⇒
+  // 422; unknown keys are simply never consulted at include time (ignored, not
+  // errored). Absent ⇒ empty map ⇒ byte-identical to today.
+  if (
+    body.partial_overrides !== undefined &&
+    (body.partial_overrides === null ||
+      typeof body.partial_overrides !== "object" ||
+      Array.isArray(body.partial_overrides))
+  ) {
+    return c.json({ detail: "partial_overrides must be an object" }, 422);
+  }
+  if (
+    body.partial_overrides !== undefined &&
+    Object.keys(body.partial_overrides as Record<string, unknown>).length >
+      MAX_PARTIAL_OVERRIDE_ENTRIES
+  ) {
+    return c.json(
+      { detail: `partial_overrides exceeds ${MAX_PARTIAL_OVERRIDE_ENTRIES} entries` },
+      422,
+    );
+  }
+  const partialOverrides = new Map<string, string>();
+  if (body.partial_overrides !== undefined) {
+    for (const [k, v] of Object.entries(body.partial_overrides as Record<string, unknown>)) {
+      if (typeof v !== "string") continue;
+      // Resource cap: bound each override body, mirroring the save-path limit.
+      if (utf8ByteLength(v) > MAX_TEMPLATE_BYTES) {
+        return c.json(
+          { detail: `partial_overrides['${k}'] exceeds ${MAX_TEMPLATE_BYTES} bytes` },
+          413,
+        );
+      }
+      partialOverrides.set(k, v);
+    }
+  }
 
   return withDb(c.env, c.executionCtx, async (sql) => {
     const view = voiceView(await snapshot(sql), voice);
@@ -554,11 +653,13 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
         );
       }
       routeId = route;
+      // Slot the currently-edited partial draft AND any sibling partial drafts
+      // into the consumer at once. The currently-edited template wins over a
+      // same-id entry in `partial_overrides` (it is the focused buffer).
+      const overrides = new Map(partialOverrides);
+      overrides.set(templateId, template);
       try {
-        assembled = assembleWithOverride(routeId, view, {
-          overrideName: templateId,
-          overrideBody: template,
-        });
+        assembled = assembleWithOverrides(routeId, view, overrides);
       } catch (e) {
         if (e instanceof PromptTemplateNotFound) return unknownIncludesError(e);
         throw e;
@@ -569,25 +670,34 @@ promptsRouter.post("/templates/:id/preview", async (c) => {
         return c.json({ detail: "route must equal template_id for agent prompts" }, 400);
       }
       try {
-        assembled = resolveBody(template, view);
+        // Resolve the submitted agent body directly, threading sibling partial
+        // drafts through its includes. Empty map ⇒ identical to resolveBody.
+        assembled = resolveBodyWithOverrides(template, view, partialOverrides);
       } catch (e) {
         if (e instanceof PromptTemplateNotFound) return unknownIncludesError(e);
         throw e;
       }
     }
 
-    // Absent an unsaved override (the /voices live-edit path), resolve the
-    // voice's STORED locale so the assembled prompt shows the same
+    // Absent an unsaved locale override (the /voices live-edit path), resolve
+    // the voice's STORED locale so the assembled prompt shows the same
     // brand/language/market/heading tokens the runtime agents inject — instead
-    // of leaking literal {brand_name}/… placeholders.
+    // of leaking literal {brand_name}/… placeholders. The draft glossary (if
+    // any) folds into the same persona override; an absent glossary ⇒ the
+    // persona's stored glossary, byte-identical to today.
     const effectiveLocale = localeOverride ?? (await storedLocale(sql, voice));
+    const personaOverride: PersonaOverride = {
+      locale: effectiveLocale,
+      ...(glossaryParse.glossary !== undefined ? { glossary: glossaryParse.glossary } : {}),
+    };
     const resolved = await substitutePreview(
       sql,
       assembled,
       context,
       view,
       voice,
-      effectiveLocale,
+      personaOverride,
+      policyParse.policy,
     );
     return c.json({ resolved, route: routeId, voice });
   });

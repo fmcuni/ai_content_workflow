@@ -16,8 +16,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { VersionDiff } from "@/components/VersionDiff";
-import { promptsApi } from "@/lib/api";
+import { promptsApi, type PreviewDraftInputs } from "@/lib/api";
 import type { PromptVersionSummary } from "@/lib/types";
+import {
+  isGlossaryDraft,
+  isLocaleDraft,
+  isSourcePolicyDraft,
+} from "@/lib/voice-studio/draft-store";
+import { useStudioDraft } from "@/lib/voice-studio/draft-store-provider";
 import { cn } from "@/lib/utils";
 
 function relativeTime(iso: string): string {
@@ -42,6 +48,12 @@ interface PromptEditorProps {
    * `SectionHead`, and a single stacked column (the lg: split collapses anyway
    * inside the narrow panel). Default false = the standalone library page. */
   compact?: boolean;
+  /** Studio only: the in-editor Save button triggers the unified Save-all (Q5)
+   * instead of a per-prompt PUT. Owned by the page so reporting + offender-jump
+   * stay in one place. Ignored on the library page. */
+  onStudioSave?: () => void;
+  /** Studio only: true while a unified save is in flight (disables Save). */
+  isStudioSaving?: boolean;
 }
 
 /**
@@ -51,8 +63,21 @@ interface PromptEditorProps {
  * standalone `/prompts/[templateId]` library page and the Voice Studio
  * inspector so the two never drift.
  */
-export function PromptEditor({ templateId, voice, compact = false }: PromptEditorProps) {
+export function PromptEditor({
+  templateId,
+  voice,
+  compact = false,
+  onStudioSave,
+  isStudioSaving = false,
+}: PromptEditorProps) {
   const queryClient = useQueryClient();
+
+  // Voice Studio draft store. Null on the standalone /prompts library page — in
+  // that case the editor keeps its local-only buffer (zero behavior change). In
+  // Studio the store is the source of truth so drafts survive node switches /
+  // the inspector remounting a single PromptEditor across selections.
+  const studio = useStudioDraft();
+  const inStudio = studio !== null;
 
   const templateQ = useQuery({
     queryKey: ["prompts", "template", voice, templateId],
@@ -71,7 +96,10 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
     queryFn: () => promptsApi.templateHistory(templateId, voice),
   });
 
-  const [buffer, setBuffer] = useState<string>("");
+  // Local buffer is used ONLY in library mode. In Studio the body lives in the
+  // shared store; `sha` (the latest server sha) is tracked locally in both modes
+  // for reload + as the baseSha seed captured on the first Studio edit.
+  const [localBuffer, setLocalBuffer] = useState<string>("");
   const [sha, setSha] = useState<string>("");
   const [activeRoute, setActiveRoute] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string>("");
@@ -83,29 +111,57 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
   // toggle reveals the selected version's raw body.
   const [versionDiffMode, setVersionDiffMode] = useState(true);
 
+  // The store draft for this template (Studio only). When present its body is
+  // the displayed buffer and its baseSha is the optimistic lock; switching nodes
+  // and coming back re-reads it, so edits are never wiped on remount.
+  const studioDraft = studio?.state.prompts.get(templateId) ?? null;
+
+  // Effective editor body. Studio: store draft body, else the server template
+  // (so an unedited node shows the live copy). Library: the local buffer.
+  const buffer = inStudio ? (studioDraft?.body ?? templateQ.data?.template ?? "") : localBuffer;
+
   // Reset the editor when the target template changes (the inspector reuses one
   // mounted instance across node selections). Without this, switching nodes
   // would briefly show the previous node's buffer until the query resolves.
+  // In Studio the body itself lives in the store (not reset here) so drafts
+  // survive the switch; only the transient per-node view state is cleared.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBuffer("");
+    if (!inStudio) setLocalBuffer("");
     setSha("");
     setActiveRoute(null);
     setPreviewText("");
     setPreviewError(null);
     setNoteInput("");
-  }, [templateId, voice]);
+  }, [templateId, voice, inStudio]);
 
-  // The server-loaded copy primes the buffer once per (template_id, sha)
-  // pair; afterwards the buffer is the source of truth for the editor,
-  // chip validation, and preview.
+  // The server-loaded copy primes the buffer once per (template_id, sha) pair.
+  // Library: seeds the local buffer. Studio: only tracks the server sha — the
+  // body is owned by the store, and an existing draft is left untouched.
   useEffect(() => {
     if (templateQ.data) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBuffer(templateQ.data.template);
+      if (!inStudio) setLocalBuffer(templateQ.data.template);
       setSha(templateQ.data.sha256 ?? "");
     }
-  }, [templateQ.data]);
+  }, [templateQ.data, inStudio]);
+
+  // Write an edit to the right place: store in Studio (capturing the current
+  // server sha as the baseSha on the first edit), local state in library mode.
+  const onBufferChange = (value: string) => {
+    if (studio) {
+      // baseSha is the optimistic lock captured on the FIRST edit (later edits keep
+      // it). Don't seed a draft with an empty sha — that would lock baseSha="" and
+      // trigger a spurious 409 on save. Once a draft exists its baseSha is already
+      // captured, so further edits are safe even before the query re-resolves.
+      const hasDraft = studio.state.prompts.has(templateId);
+      if (sha !== "" || hasDraft) {
+        studio.setPromptDraft(templateId, value, sha);
+      }
+    } else {
+      setLocalBuffer(value);
+    }
+  };
 
   // Default preview to the first consumer (= itself for agent prompts).
   useEffect(() => {
@@ -132,18 +188,52 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
   }, [buffer, schemaQ.data]);
 
   const missingPlaceholders = placeholderStatus.filter((p) => !p.present).map((p) => p.name);
-  const isDirty = templateQ.data ? buffer !== templateQ.data.template : false;
+  // Studio: dirty iff a store draft exists whose body differs from the server.
+  // Library: dirty iff the local buffer differs from the server template.
+  const isDirty = inStudio
+    ? studioDraft !== null && templateQ.data !== undefined && studioDraft.body !== templateQ.data.template
+    : templateQ.data
+      ? buffer !== templateQ.data.template
+      : false;
   const tooLarge = new Blob([buffer]).size > MAX_BYTES;
   const saveBlocked = !isDirty || missingPlaceholders.length > 0 || tooLarge;
+
+  // Unsaved-draft inputs sent with the preview so the assembled output reflects
+  // the operator's other in-progress edits (Studio only). `partial_overrides`
+  // excludes the focused template id (it is sent as `template`, which wins).
+  // Config drafts (locale / glossary / source policy) reflect live too. Library
+  // mode sends nothing extra → byte-identical to the previous behavior.
+  const previewDraftInputs = useMemo<PreviewDraftInputs>(() => {
+    const state = studio?.state;
+    if (!state) return {};
+    const inputs: PreviewDraftInputs = {};
+    const partialOverrides: Record<string, string> = {};
+    for (const [id, draft] of state.prompts) {
+      if (id !== templateId) partialOverrides[id] = draft.body;
+    }
+    if (Object.keys(partialOverrides).length > 0) inputs.partial_overrides = partialOverrides;
+
+    const localeDraft = state.config.locale;
+    if (isLocaleDraft(localeDraft)) inputs.locale = localeDraft.locale;
+    const glossaryDraft = state.config.glossary;
+    if (isGlossaryDraft(glossaryDraft)) inputs.glossary = glossaryDraft.glossary;
+    const policyDraft = state.config.source_policy;
+    if (isSourcePolicyDraft(policyDraft)) inputs.source_policy = policyDraft.policy;
+    return inputs;
+    // Depend on `studio?.state` (the reducer's state object — a new reference only
+    // when the reducer produced new state) rather than `studio` (the context
+    // wrapper, which gets a fresh identity on every dispatch). This re-derives on
+    // any draft edit but not on unrelated re-renders.
+  }, [studio?.state, templateId]);
 
   const previewMut = useMutation({
     mutationFn: async () => {
       if (!activeRoute) throw new Error("no route selected");
-      const body: { template: string; route: string } = {
+      return promptsApi.previewTemplate(templateId, voice, {
         template: buffer,
         route: activeRoute,
-      };
-      return promptsApi.previewTemplate(templateId, voice, body);
+        ...previewDraftInputs,
+      });
     },
     onSuccess: (data) => {
       setPreviewText(data.resolved);
@@ -164,8 +254,10 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
     if (!activeRoute || !buffer) return;
     const t = setTimeout(() => previewMut.mutate(), 600);
     return () => clearTimeout(t);
+    // previewDraftInputs is included so a sibling partial / config draft edit
+    // re-runs the preview, not just edits to the focused buffer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute, buffer]);
+  }, [activeRoute, buffer, previewDraftInputs]);
 
   const saveMut = useMutation({
     mutationFn: () =>
@@ -231,34 +323,60 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
 
   const reloadMut = useMutation({
     mutationFn: async () => {
-      setBuffer("");
+      setLocalBuffer("");
       await queryClient.invalidateQueries({
         queryKey: ["prompts", "template", voice, templateId],
       });
     },
   });
 
-  const actions = (
-    <div className="flex items-center gap-3">
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => reloadMut.mutate()}
-        disabled={saveMut.isPending || reloadMut.isPending}
-      >
-        {reloadMut.isPending ? "Reloading…" : "Reload"}
-      </Button>
-      <RoleButton
-        need="edit_prompts"
-        deniedHint="Admin role required to edit prompts."
-        size="sm"
-        onClick={() => saveMut.mutate()}
-        disabled={saveBlocked || saveMut.isPending}
-      >
-        {saveMut.isPending ? "Saving…" : "Save"}
-      </RoleButton>
-    </div>
-  );
+  // Studio: unified Save-all (Q5) + a per-node "revert this draft". Library:
+  // the original per-prompt Reload + SHA-locked Save.
+  const actions =
+    inStudio && studio ? (
+      <div className="flex items-center gap-3">
+        {isDirty && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => studio.clearPromptDraft(templateId)}
+            disabled={isStudioSaving}
+            title="Discard this node's unsaved edit"
+          >
+            Revert draft
+          </Button>
+        )}
+        <RoleButton
+          need="edit_prompts"
+          deniedHint="Admin role required to edit prompts."
+          size="sm"
+          onClick={() => onStudioSave?.()}
+          disabled={saveBlocked || isStudioSaving || !onStudioSave}
+        >
+          {isStudioSaving ? "Saving…" : "Save all"}
+        </RoleButton>
+      </div>
+    ) : (
+      <div className="flex items-center gap-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => reloadMut.mutate()}
+          disabled={saveMut.isPending || reloadMut.isPending}
+        >
+          {reloadMut.isPending ? "Reloading…" : "Reload"}
+        </Button>
+        <RoleButton
+          need="edit_prompts"
+          deniedHint="Admin role required to edit prompts."
+          size="sm"
+          onClick={() => saveMut.mutate()}
+          disabled={saveBlocked || saveMut.isPending}
+        >
+          {saveMut.isPending ? "Saving…" : "Save"}
+        </RoleButton>
+      </div>
+    );
 
   const kicker = (
     <>
@@ -312,7 +430,7 @@ export function PromptEditor({ templateId, voice, compact = false }: PromptEdito
               autoCorrect="off"
               autoCapitalize="off"
               value={buffer}
-              onChange={(e) => setBuffer(e.target.value)}
+              onChange={(e) => onBufferChange(e.target.value)}
               className="w-full font-mono text-[12.5px] leading-[1.55] text-ink bg-paper-deep/30 border border-rule rounded-sm p-3 outline-none focus-visible:border-accent resize-y min-h-[420px]"
               style={{ tabSize: 2 }}
             />

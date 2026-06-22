@@ -106,6 +106,18 @@ export interface PersonaPack {
   locale: VoiceLocale;
 }
 
+/**
+ * Unsaved persona-draft overrides for the editor preview. Each field is
+ * optional and absent ⇒ the persona's stored value (byte-identical to today).
+ * Folds the previously-standalone `localeOverride` together with the new
+ * `glossary` draft into one object threaded through `defaultPersonaBlock` /
+ * `toPromptBlock`.
+ */
+export interface PersonaOverride {
+  locale?: VoiceLocale;
+  glossary?: GlossaryEntry[];
+}
+
 // ---------------------------------------------------------------------------
 // Persona-block scaffolding labels (auto-derived from VoiceLocale.outputLanguage)
 // ---------------------------------------------------------------------------
@@ -301,6 +313,26 @@ interface RawGlossaryEntry {
   notes?: string | null;
 }
 
+/**
+ * Map a raw (snake_case / JSONB) glossary value to validated `GlossaryEntry[]`.
+ * Shared by `rowToPack` (DB row) and the preview's `glossary` draft override
+ * (request body). A non-array value ⇒ `[]`; each entry is defaulted exactly as
+ * the persona row mapping does, so a draft and a stored glossary render the
+ * same `toPromptBlock` bytes.
+ */
+export function glossaryFromRaw(raw: unknown): GlossaryEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as RawGlossaryEntry[])
+    .filter((e): e is RawGlossaryEntry => e !== null && typeof e === "object" && "term" in e)
+    .map((e) => ({
+      term: e.term,
+      preferred: e.preferred ?? "",
+      variants: e.variants ?? [],
+      status: e.status ?? "preferred",
+      notes: e.notes ?? null,
+    }));
+}
+
 interface RawToneExamples {
   good?: string[];
   bad?: string[];
@@ -322,7 +354,6 @@ function rowToPack(row: {
   const requiredPhrasings = row.required_phrasings as string[];
   const rawDisclaimers = row.disclaimer_templates as Record<string, RawDisclaimerTemplate>;
   const rawTone = row.tone_examples as RawToneExamples;
-  const rawGlossary = (row.glossary ?? []) as RawGlossaryEntry[];
 
   const disclaimerTemplates: Record<string, DisclaimerTemplate> = {};
   for (const [key, val] of Object.entries(rawDisclaimers)) {
@@ -332,13 +363,7 @@ function rowToPack(row: {
     };
   }
 
-  const glossary: GlossaryEntry[] = rawGlossary.map((e) => ({
-    term: e.term,
-    preferred: e.preferred ?? "",
-    variants: e.variants ?? [],
-    status: e.status ?? "preferred",
-    notes: e.notes ?? null,
-  }));
+  const glossary: GlossaryEntry[] = glossaryFromRaw(row.glossary ?? []);
 
   return {
     name: row.name,

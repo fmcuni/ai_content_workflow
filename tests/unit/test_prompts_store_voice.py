@@ -98,3 +98,75 @@ def test_include_cycle_raises() -> None:
     )
     with pytest.raises(ValueError, match="include cycle"):
         prompts_store.resolve_body("{{include:_a}}", snap, voice_slug="v1")
+
+
+# ---------------------------------------------------------------------------
+# Multi-override assembly (assemble_with_overrides)
+# ---------------------------------------------------------------------------
+
+
+def test_multi_override_slots_multiple_partials() -> None:
+    snap = _snap(
+        _row("v1", "agent_x", "{{include:_p1}}\n{{include:_p2}}\n"),
+        _row("v1", "_p1", "stored p1\n", category="partial"),
+        _row("v1", "_p2", "stored p2\n", category="partial"),
+    )
+    out = prompts_store.assemble_with_overrides(
+        "agent_x",
+        snap,
+        {"_p1": "draft p1\n", "_p2": "draft p2\n"},
+        voice_slug="v1",
+    )
+    assert out == "draft p1\ndraft p2\n"
+
+
+def test_multi_override_resolves_nested_includes_via_map() -> None:
+    # agent includes _p1; the _p1 DRAFT itself nests {{include:_p2}}, which is
+    # also overridden — the nested include must resolve from the map.
+    snap = _snap(
+        _row("v1", "agent_x", "{{include:_p1}}\n"),
+        _row("v1", "_p1", "stored p1\n", category="partial"),
+        _row("v1", "_p2", "stored p2\n", category="partial"),
+    )
+    out = prompts_store.assemble_with_overrides(
+        "agent_x",
+        snap,
+        {"_p1": "draft p1\n{{include:_p2}}\n", "_p2": "draft p2\n"},
+        voice_slug="v1",
+    )
+    assert out == "draft p1\ndraft p2\n"
+
+
+def test_multi_override_body_wins_over_stored() -> None:
+    snap = _snap(
+        _row("v1", "agent_x", "{{include:_p1}}\n"),
+        _row("v1", "_p1", "stored p1\n", category="partial"),
+    )
+    out = prompts_store.assemble_with_overrides(
+        "agent_x", snap, {"_p1": "draft wins\n"}, voice_slug="v1"
+    )
+    assert out == "draft wins\n"
+
+
+def test_multi_override_empty_map_equals_stored_assembly() -> None:
+    snap = _snap(
+        _row("v1", "agent_x", "HEAD\n{{include:_p1}}\nTAIL\n"),
+        _row("v1", "_p1", "stored p1\n", category="partial"),
+    )
+    with_empty = prompts_store.assemble_with_overrides("agent_x", snap, {}, voice_slug="v1")
+    stored = prompts_store.assemble_from_snapshot("agent_x", snap, voice_slug="v1")
+    assert with_empty == stored == "HEAD\nstored p1\nTAIL\n"
+
+
+def test_single_override_shim_delegates_to_multi() -> None:
+    snap = _snap(
+        _row("v1", "agent_x", "{{include:_p1}}\n"),
+        _row("v1", "_p1", "stored p1\n", category="partial"),
+    )
+    via_shim = prompts_store.assemble_with_override(
+        "agent_x", snap, override_name="_p1", override_body="draft p1\n", voice_slug="v1"
+    )
+    via_map = prompts_store.assemble_with_overrides(
+        "agent_x", snap, {"_p1": "draft p1\n"}, voice_slug="v1"
+    )
+    assert via_shim == via_map == "draft p1\n"

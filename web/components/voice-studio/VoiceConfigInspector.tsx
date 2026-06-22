@@ -2,14 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { RoleButton } from "@/components/RoleGate";
 import { SourcePolicyEditor } from "@/components/SourcePolicyEditor";
 import { GlossaryTable, emptyEntry } from "@/components/voices/GlossaryTable";
 import { HK_ZH_LOCALE, LocaleFields } from "@/components/voices/LocaleFields";
 import { personasApi, publishTargetsApi } from "@/lib/api";
-import type { GlossaryEntry, Persona, VoiceLocale } from "@/lib/types";
+import type { GlossaryEntry, VoiceLocale } from "@/lib/types";
+import { isGlossaryDraft, isLocaleDraft, isPublishTargetDraft } from "@/lib/voice-studio/draft-store";
+import { useStudioDraft } from "@/lib/voice-studio/draft-store-provider";
 import { cn } from "@/lib/utils";
 
 export type VoiceConfigTab = "locale" | "source_policy" | "glossary" | "publish_target";
@@ -72,19 +74,30 @@ export function VoiceConfigInspector({ voice, initialTab }: VoiceConfigInspector
 
 function LocalePanel({ voice }: { voice: string }) {
   const qc = useQueryClient();
+  const studio = useStudioDraft();
   const personaQ = useQuery({ queryKey: ["persona", voice], queryFn: () => personasApi.get(voice) });
   const [draft, setDraft] = useState<VoiceLocale | null>(null);
-  // Seed/re-seed the draft from the fetched persona without an effect: track the
-  // locale object's identity (fresh per fetch) and sync during render.
-  const [syncedLocale, setSyncedLocale] = useState<VoiceLocale | null>(null);
-  if (personaQ.data && personaQ.data.locale !== syncedLocale) {
-    setSyncedLocale(personaQ.data.locale);
-    setDraft(personaQ.data.locale);
-  }
+  // Seed/re-seed the draft from the fetched persona post-commit (keyed on the
+  // locale object's identity, which is fresh per fetch) rather than reading the
+  // store during a render-phase setState. An existing Studio store draft takes
+  // precedence so a prior edit is reflected when the panel remounts (tab switch).
+  const storedLocale = studio?.state.config.locale;
+  useEffect(() => {
+    if (!personaQ.data) return;
+    // Seed once per fetched persona; the store value wins on mount, later edits
+    // mirror into the store via onChange. `storedLocale` is intentionally read at
+    // seed time only — re-seeding on every store edit would clobber typing. The
+    // setState here is the supported "sync from an external system (the query)"
+    // case, not derived state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(isLocaleDraft(storedLocale) ? storedLocale.locale : personaQ.data.locale);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaQ.data]);
 
   const saveMut = useMutation({
     mutationFn: (locale: VoiceLocale) => personasApi.update(voice, { locale }),
     onSuccess: () => {
+      studio?.clearConfigDraft("locale");
       void qc.invalidateQueries({ queryKey: ["persona", voice] });
       void qc.invalidateQueries({ queryKey: ["personas"] });
     },
@@ -96,13 +109,27 @@ function LocalePanel({ voice }: { voice: string }) {
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(personaQ.data?.locale);
 
+  // Edits update the rendered draft and (in Studio) the shared store so Save-all
+  // and the live preview reflect them; clearing back to the server value drops
+  // the store draft.
+  const onChange = (next: VoiceLocale) => {
+    setDraft(next);
+    if (studio) {
+      if (JSON.stringify(next) === JSON.stringify(personaQ.data?.locale)) {
+        studio.clearConfigDraft("locale");
+      } else {
+        studio.setConfigDraft("locale", { kind: "locale", locale: next });
+      }
+    }
+  };
+
   return (
     <div className="space-y-4">
       <p className="text-ink-faint text-[11px] leading-snug">
         Brand, language and market tokens substituted into every persona-using prompt. Blank fields
         fall back to the HK-ZH defaults shown.
       </p>
-      <LocaleFields locale={draft} defaults={HK_ZH_LOCALE} onChange={setDraft} />
+      <LocaleFields locale={draft} defaults={HK_ZH_LOCALE} onChange={onChange} />
       <div className="flex items-center gap-3">
         <RoleButton
           need="manage_personas"
@@ -120,20 +147,28 @@ function LocalePanel({ voice }: { voice: string }) {
 
 function GlossaryPanel({ voice }: { voice: string }) {
   const qc = useQueryClient();
+  const studio = useStudioDraft();
   const personaQ = useQuery({ queryKey: ["persona", voice], queryFn: () => personasApi.get(voice) });
   const [draft, setDraft] = useState<GlossaryEntry[] | null>(null);
 
-  // Sync the editable glossary draft from the fetched persona during render
-  // (the array ref is fresh per fetch) instead of in an effect.
-  const [syncedGlossary, setSyncedGlossary] = useState<GlossaryEntry[] | null>(null);
-  if (personaQ.data && personaQ.data.glossary !== syncedGlossary) {
-    setSyncedGlossary(personaQ.data.glossary);
-    setDraft(personaQ.data.glossary);
-  }
+  // Seed the editable glossary draft from the fetched persona post-commit (keyed
+  // on the array ref, fresh per fetch) rather than reading the store during a
+  // render-phase setState. An existing Studio store draft takes precedence so a
+  // prior edit survives a tab switch.
+  const storedGlossary = studio?.state.config.glossary;
+  useEffect(() => {
+    if (!personaQ.data) return;
+    // Seed once per fetched persona; store wins on mount, edits mirror via onChange.
+    // setState here syncs from the query (an external system), not derived state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(isGlossaryDraft(storedGlossary) ? storedGlossary.glossary : personaQ.data.glossary);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaQ.data]);
 
   const saveMut = useMutation({
     mutationFn: (glossary: GlossaryEntry[]) => personasApi.update(voice, { glossary }),
     onSuccess: () => {
+      studio?.clearConfigDraft("glossary");
       void qc.invalidateQueries({ queryKey: ["persona", voice] });
       void qc.invalidateQueries({ queryKey: ["personas"] });
     },
@@ -146,6 +181,19 @@ function GlossaryPanel({ voice }: { voice: string }) {
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(personaQ.data?.glossary);
 
+  // Edits update the rendered draft and (in Studio) the shared store; reverting
+  // to the server glossary drops the store draft.
+  const onChange = (next: GlossaryEntry[]) => {
+    setDraft(next);
+    if (studio) {
+      if (JSON.stringify(next) === JSON.stringify(personaQ.data?.glossary)) {
+        studio.clearConfigDraft("glossary");
+      } else {
+        studio.setConfigDraft("glossary", { kind: "glossary", glossary: next });
+      }
+    }
+  };
+
   return (
     <div className="space-y-3">
       <p className="text-ink-faint text-[11px] leading-snug">
@@ -155,11 +203,11 @@ function GlossaryPanel({ voice }: { voice: string }) {
         </Link>
         .
       </p>
-      <GlossaryTable entries={draft} onChange={setDraft} />
+      <GlossaryTable entries={draft} onChange={onChange} />
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => setDraft([...draft, emptyEntry()])}
+          onClick={() => onChange([...draft, emptyEntry()])}
           className="font-mono text-[11px] uppercase tracking-wider text-ink-faint hover:text-ink border border-rule rounded-sm px-2 py-1"
         >
           + Add term
@@ -180,6 +228,7 @@ function GlossaryPanel({ voice }: { voice: string }) {
 
 function PublishTargetPanel({ voice }: { voice: string }) {
   const qc = useQueryClient();
+  const studio = useStudioDraft();
   const personaQ = useQuery({ queryKey: ["persona", voice], queryFn: () => personasApi.get(voice) });
   const targetsQ = useQuery({
     queryKey: ["publish-targets", false],
@@ -187,21 +236,43 @@ function PublishTargetPanel({ voice }: { voice: string }) {
   });
   const [selected, setSelected] = useState<string | null>(null);
 
-  // Sync the selected target from the fetched persona during render (track the
-  // persona object's identity, since publish_target_id can legitimately be null).
-  const [syncedPersona, setSyncedPersona] = useState<Persona | null>(null);
-  if (personaQ.data && personaQ.data !== syncedPersona) {
-    setSyncedPersona(personaQ.data);
-    setSelected(personaQ.data.publish_target_id);
-  }
+  // Seed the selected target from the fetched persona post-commit (keyed on the
+  // persona object's identity, since publish_target_id can legitimately be null)
+  // rather than reading the store during a render-phase setState. An existing
+  // Studio store draft takes precedence so a prior pick survives a tab switch.
+  const storedTarget = studio?.state.config.publish_target;
+  useEffect(() => {
+    if (!personaQ.data) return;
+    // Seed once per fetched persona; store wins on mount, picks mirror via onChange.
+    // setState here syncs from the query (an external system), not derived state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelected(
+      isPublishTargetDraft(storedTarget) ? storedTarget.publishTargetId : personaQ.data.publish_target_id,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaQ.data]);
 
   const saveMut = useMutation({
     mutationFn: (publish_target_id: string | null) => personasApi.update(voice, { publish_target_id }),
     onSuccess: () => {
+      studio?.clearConfigDraft("publish_target");
       void qc.invalidateQueries({ queryKey: ["persona", voice] });
       void qc.invalidateQueries({ queryKey: ["personas"] });
     },
   });
+
+  // Selecting a target updates local state and (in Studio) the store; choosing
+  // the persona's stored value drops the draft.
+  const onSelect = (next: string | null) => {
+    setSelected(next);
+    if (studio) {
+      if (next === (personaQ.data?.publish_target_id ?? null)) {
+        studio.clearConfigDraft("publish_target");
+      } else {
+        studio.setConfigDraft("publish_target", { kind: "publish_target", publishTargetId: next });
+      }
+    }
+  };
 
   const readinessQ = useQuery({
     enabled: Boolean(selected),
@@ -232,7 +303,7 @@ function PublishTargetPanel({ voice }: { voice: string }) {
       )}
       <select
         value={selected ?? ""}
-        onChange={(e) => setSelected(e.target.value || null)}
+        onChange={(e) => onSelect(e.target.value || null)}
         className="w-full font-mono text-[12px] text-ink bg-paper border border-rule rounded-sm px-2 py-1.5"
       >
         <option value="">— none (default Bowtie WP) —</option>

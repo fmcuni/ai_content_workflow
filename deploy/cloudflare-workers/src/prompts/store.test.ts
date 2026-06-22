@@ -9,6 +9,7 @@ import {
   resolveBody,
   assembleFromSnapshot,
   assembleWithOverride,
+  assembleWithOverrides,
   voiceView,
   substitute,
   SHARED_VOICE,
@@ -139,6 +140,123 @@ describe("assembleWithOverride", () => {
 
     // Assert — override body used; its trailing \n stripped before inlining
     expect(result).toBe("Before\ndraft brand block\nAfter\n");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assembleWithOverrides (multi-override) tests
+// ---------------------------------------------------------------------------
+
+describe("assembleWithOverrides", () => {
+  it("slots multiple unsaved partial drafts in one assembly", () => {
+    // Arrange
+    const snap = new Map([
+      ["agent_main", row("agent_main", "{{include:_brand}}\n{{include:_seo}}\n")],
+      ["_brand", row("_brand", "stored brand\n")],
+      ["_seo", row("_seo", "stored seo\n")],
+    ]);
+
+    // Act
+    const result = assembleWithOverrides(
+      "agent_main",
+      snap,
+      new Map([
+        ["_brand", "draft brand\n"],
+        ["_seo", "draft seo\n"],
+      ]),
+    );
+
+    // Assert — both overrides applied; trailing \n stripped per partial
+    expect(result).toBe("draft brand\ndraft seo\n");
+  });
+
+  it("resolves nested includes inside an override body, honouring the map", () => {
+    // Arrange — agent includes _brand; the _brand DRAFT itself includes _seo
+    const snap = new Map([
+      ["agent_main", row("agent_main", "{{include:_brand}}\n")],
+      ["_brand", row("_brand", "stored brand\n")],
+      ["_seo", row("_seo", "stored seo\n")],
+    ]);
+
+    // Act — override _brand with a body that nests {{include:_seo}}, and also
+    // override _seo so the nested include reflects its own draft
+    const result = assembleWithOverrides(
+      "agent_main",
+      snap,
+      new Map([
+        ["_brand", "draft brand\n{{include:_seo}}\n"],
+        ["_seo", "draft seo\n"],
+      ]),
+    );
+
+    // Assert — nested include resolved from the override map (not the snapshot)
+    expect(result).toBe("draft brand\ndraft seo\n");
+  });
+
+  it("override body wins over the stored partial (precedence)", () => {
+    // Arrange
+    const snap = new Map([
+      ["agent_main", row("agent_main", "{{include:_brand}}\n")],
+      ["_brand", row("_brand", "stored brand\n")],
+    ]);
+
+    // Act
+    const result = assembleWithOverrides(
+      "agent_main",
+      snap,
+      new Map([["_brand", "draft wins\n"]]),
+    );
+
+    // Assert
+    expect(result).toBe("draft wins\n");
+  });
+
+  it("an empty override map is byte-identical to assembleFromSnapshot", () => {
+    // Arrange
+    const snap = new Map([
+      ["agent_main", row("agent_main", "Before\n{{include:_brand}}\nAfter\n")],
+      ["_brand", row("_brand", "stored brand\n")],
+    ]);
+
+    // Act
+    const withEmpty = assembleWithOverrides("agent_main", snap, new Map());
+    const stored = assembleFromSnapshot("agent_main", snap);
+
+    // Assert
+    expect(withEmpty).toBe(stored);
+    expect(withEmpty).toBe("Before\nstored brand\nAfter\n");
+  });
+
+  it("unknown include not in the map and not in the snapshot throws", () => {
+    // Arrange
+    const snap = new Map([["agent_main", row("agent_main", "{{include:_missing}}\n")]]);
+
+    // Act / Assert
+    expect(() => assembleWithOverrides("agent_main", snap, new Map())).toThrow(
+      PromptTemplateNotFound,
+    );
+  });
+
+  it("assembleWithOverride shim delegates to assembleWithOverrides", () => {
+    // Arrange
+    const snap = new Map([
+      ["agent_main", row("agent_main", "{{include:_brand}}\n")],
+      ["_brand", row("_brand", "stored brand\n")],
+    ]);
+
+    // Act
+    const viaShim = assembleWithOverride("agent_main", snap, {
+      overrideName: "_brand",
+      overrideBody: "draft brand\n",
+    });
+    const viaMap = assembleWithOverrides(
+      "agent_main",
+      snap,
+      new Map([["_brand", "draft brand\n"]]),
+    );
+
+    // Assert
+    expect(viaShim).toBe(viaMap);
   });
 });
 
