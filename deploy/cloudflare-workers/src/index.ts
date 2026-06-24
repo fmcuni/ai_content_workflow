@@ -73,9 +73,6 @@ export interface Env {
   // Var — comma-separated domains eligible for the `admin` role (default
   // bowtie.com.hk,bowtie.com.sg). Non-eligible emails can log in but never be admin.
   ADMIN_EMAIL_DOMAINS?: string;
-  // Var — set "off" to temporarily allow sign-in without email verification
-  // (and skip the on-signup send). Anything else (or unset) = verification ON.
-  EMAIL_VERIFICATION?: string;
   // Var — set "true" to bypass the auth gate for local dev (Python backend).
   AUTH_DISABLED?: string;
   // --- Supabase Auth (GoTrue) ---

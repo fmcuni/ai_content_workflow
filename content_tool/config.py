@@ -46,7 +46,6 @@ class Settings(BaseSettings):
 
     # Refresh route
     refresh_config_path: str = "config/refresh.yaml"
-    refresh_cron_enabled: bool = True
 
     # Langfuse observability (all optional; integration is a no-op when disabled)
     langfuse_enabled: bool = False

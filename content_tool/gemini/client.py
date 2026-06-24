@@ -87,8 +87,6 @@ class GeminiResult:
     latency_ms: int
     grounding_chunks: list[dict[str, Any]] | None = None
     finish_reason: str | None = None
-    safety_ratings: list[dict[str, Any]] | None = None
-    raw_response: dict[str, Any] | None = None
 
 
 class GeminiClient(Protocol):

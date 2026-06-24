@@ -16,7 +16,7 @@ import { useWpCategories, useWpUsers } from "@/lib/use-wp-options";
 
 export type CmsPublishStatus = "draft" | "future" | "publish";
 
-export const CMS_PUBLISH_STATUSES: ReadonlyArray<{ value: CmsPublishStatus; label: string }> = [
+const CMS_PUBLISH_STATUSES: ReadonlyArray<{ value: CmsPublishStatus; label: string }> = [
   { value: "draft", label: "Draft (recommended)" },
   { value: "future", label: "Schedule" },
   { value: "publish", label: "Publish now" },

@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { Hitl2Comment, Hitl2Request } from "@/lib/types";
 
-// Mock the API so WordPressMetaForm's wp-users / wp-categories queries never
+// Mock the API so any wp-users / wp-categories queries never
 // hit the network — keeps the rail render deterministic.
 vi.mock("@/lib/api", () => ({
   api: {
