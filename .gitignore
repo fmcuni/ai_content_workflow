@@ -94,7 +94,7 @@ graphify-out/
 
 # Local MCP/tool artifacts that land at the repo root. The Python backend uses
 # uv and the frontend uses npm under web/, so the repo root never holds a Node
-# manifest — these are dropped by tools (e.g. headroom-ai) and are not project
+# manifest — these are dropped by local tools (e.g. serena) and are not project
 # code. node_modules/ is already ignored above.
 .serena/
 /package.json
