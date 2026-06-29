@@ -23,44 +23,33 @@ async def build_system_prompt(
 ) -> str:
     """Render the outline system prompt for ``voice_slug`` (the run's voice).
 
-    ``start_mode == "create"``: slot the create-mode body into the
-    ``{create_mode_block}`` placeholder so the LLM gets the create-mode brief
-    *before* the refresh-mode instructions in the template.
+    ``start_mode == "create"`` uses the ``outline_create_mode`` template
+    directly; ``start_mode == "refresh"`` (default) uses ``outline_rewrite_mode``.
+    The two are independent — create-mode is no longer injected into the
+    rewrite template via a ``{create_mode_block}`` seam.
 
-    ``start_mode == "refresh"`` (default): the placeholder is replaced with
-    an empty string and only the refresh-mode body applies — identical to
-    the pre-Task-4 behaviour.
-
-    Both the ``outline_rewrite_mode`` and ``outline_create_mode`` templates
-    resolve under ``voice_slug`` (falling back to __shared__ / bundled file).
+    Both templates resolve under ``voice_slug`` (falling back to __shared__ /
+    bundled file).
     """
-    block = (
-        (
-            await prompts_store.get_assembled(
-                "outline_create_mode", voice_slug=voice_slug, session=session
-            )
-        ).rstrip()
-        if start_mode == "create"
-        else ""
-    )
+    template_id = "outline_create_mode" if start_mode == "create" else "outline_rewrite_mode"
     template = await prompts_store.get_assembled(
-        "outline_rewrite_mode", voice_slug=voice_slug, session=session
+        template_id, voice_slug=voice_slug, session=session
     )
     row = await prompts_store.get_template_row(
-        "outline_rewrite_mode", voice_slug=voice_slug, session=session
+        template_id, voice_slug=voice_slug, session=session
     )
     if row is not None:
         set_prompt_meta(PromptMeta(
             template_id=row.template_id, voice_slug=row.voice_slug, sha256=row.sha256
         ))
-    # Locale/brand tokens (mirror writer.build_system_prompt). The create-mode
-    # block is injected FIRST so any {output_language}/{brand_name}/{market}
-    # tokens it carries are interpolated by the replaces below. HK-ZH defaults
+    # Locale/brand tokens (mirror writer.build_system_prompt). HK-ZH defaults
     # equal the old literals → byte-identical for bowtie-editor.
     loc = (await load_persona(voice_slug, session=session)).locale
     return (
         template.replace("{today_date}", today.isoformat())
-        .replace("{create_mode_block}", block)
+        # ponytail: strip the retired create-mode seam from any legacy stored
+        # rewrite body so it never leaks the literal token; new bodies omit it.
+        .replace("{create_mode_block}", "")
         .replace("{brand_name}", loc.brand_name)
         .replace("{output_language}", loc.output_language)
         .replace("{market}", loc.market)

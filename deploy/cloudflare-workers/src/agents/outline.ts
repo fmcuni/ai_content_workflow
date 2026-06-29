@@ -51,8 +51,9 @@ export interface OutlineTokens {
 // ---------------------------------------------------------------------------
 // System prompt assembly — mirrors Python `build_system_prompt`
 //
-// For "create": fetch outline_create_mode, rstrip, slot into {create_mode_block}.
-// For "refresh": replace {create_mode_block} with "".
+// "create" uses the outline_create_mode template directly; "refresh" uses
+// outline_rewrite_mode. The two are independent — create-mode is no longer
+// injected into the rewrite template via a {create_mode_block} seam.
 // Then substitute {today_date} with todayDate.
 // ---------------------------------------------------------------------------
 
@@ -62,21 +63,18 @@ async function buildSystemPrompt(
   todayDate: string,
   voiceSlug: string,
 ): Promise<string> {
-  const block =
-    startMode === "create"
-      ? (await getAssembled(sql, "outline_create_mode", voiceSlug)).replace(/\n+$/, "")
-      : "";
+  const templateId = startMode === "create" ? "outline_create_mode" : "outline_rewrite_mode";
+  const template = await getAssembled(sql, templateId, voiceSlug);
 
-  const template = await getAssembled(sql, "outline_rewrite_mode", voiceSlug);
-
-  // Inject the create-mode block FIRST, then interpolate locale/brand tokens
-  // (mirror outline.py / writer.ts). String.replace is first-match-only in JS
-  // but these tokens recur, so use replaceAll. HK-ZH defaults equal the old
-  // literals → byte-identical for bowtie-editor.
+  // Interpolate locale/brand tokens (mirror outline.py / writer.ts). String
+  // .replace is first-match-only in JS but these tokens recur, so use replaceAll.
+  // HK-ZH defaults equal the old literals → byte-identical for bowtie-editor.
+  // create_mode_block:"" strips the retired seam from any legacy stored rewrite
+  // body so it never leaks the literal token; new bodies omit it.
   const { locale: loc } = await loadPersona(sql, voiceSlug);
   return substitute(template, {
     today_date: todayDate,
-    create_mode_block: block,
+    create_mode_block: "",
   })
     .replaceAll("{brand_name}", loc.brandName)
     .replaceAll("{output_language}", loc.outputLanguage)

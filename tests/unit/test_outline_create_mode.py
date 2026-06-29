@@ -1,27 +1,26 @@
-"""Guards the substitution point for the outline create-mode swap.
+"""Guards the create/refresh outline template split.
 
-Real branching wiring (refresh → "" / create → n8n Settings3 body) lives in
-``content_tool/agents/outline.py`` and is added in Task 4. This test just
-ensures the template carries exactly one ``{create_mode_block}`` token so the
-later swap is unambiguous.
+Create-mode and refresh-mode now use independent templates: create resolves
+``outline_create_mode`` directly and refresh resolves ``outline_rewrite_mode``.
+The old ``{create_mode_block}`` injection seam is retired — the rewrite body
+must no longer carry it (the branching wiring lives in
+``content_tool/agents/outline.py::build_system_prompt``).
 """
 
 from pathlib import Path
 
+_PROMPTS = Path(__file__).resolve().parents[2] / "prompts"
 
-def test_outline_prompt_has_single_create_mode_token():
-    outline_path = (
-        Path(__file__).resolve().parents[2] / "prompts" / "outline_rewrite_mode.md"
+
+def test_rewrite_template_no_longer_carries_create_mode_seam():
+    text = (_PROMPTS / "outline_rewrite_mode.md").read_text(encoding="utf-8")
+    assert "{create_mode_block}" not in text, (
+        "outline_rewrite_mode.md must not contain the retired "
+        "{create_mode_block} seam — create-mode uses outline_create_mode directly."
     )
-    text = outline_path.read_text(encoding="utf-8")
-    assert text.count("{create_mode_block}") == 1, (
-        "outline_rewrite_mode.md must declare exactly one {create_mode_block} "
-        "substitution point so create/refresh swapping is unambiguous."
-    )
-    # Token must appear before the refresh-mode body (the "你會收到" block).
-    token_idx = text.index("{create_mode_block}")
-    body_idx = text.index("你會收到")
-    assert token_idx < body_idx, (
-        "{create_mode_block} must precede the refresh-mode instructions so "
-        "create-mode runs see their full prompt body first."
-    )
+
+
+def test_create_template_is_a_standalone_prompt():
+    text = (_PROMPTS / "outline_create_mode.md").read_text(encoding="utf-8").strip()
+    assert text, "outline_create_mode.md must be a non-empty standalone prompt."
+    assert "{create_mode_block}" not in text

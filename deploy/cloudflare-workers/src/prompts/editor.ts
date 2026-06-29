@@ -63,7 +63,7 @@ const DEFAULT_PREVIEW_VOICE = "bowtie-editor";
 export const REQUIRED_PLACEHOLDERS: Readonly<Record<string, readonly string[]>> = {
   audit: ["persona_block", "today_date"],
   gap_analysis: ["today_date"],
-  outline_rewrite_mode: ["today_date", "create_mode_block"],
+  outline_rewrite_mode: ["today_date"],
   outline_create_mode: [],
   writer_small_refresh: ["persona_block", "today_date", "source_policy_block"],
   writer_full_rewrite: ["persona_block", "today_date", "source_policy_block"],

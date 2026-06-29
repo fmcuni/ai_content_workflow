@@ -2,8 +2,6 @@
 
 今天是 {today_date}
 
-{create_mode_block}
-
 你會收到：
 - gap_analysis（完整 JSON）
 - existing_article_markdown
