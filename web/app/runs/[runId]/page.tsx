@@ -48,9 +48,12 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
   const { runId } = use(params);
   const shortId = runId.slice(0, 8);
   const queryClient = useQueryClient();
-  const { data: run } = useQuery({
+  const { data: run, isError } = useQuery({
     queryKey: ["run", runId], queryFn: () => api.getRun(runId),
-    refetchInterval: 3000,
+    // Stop polling once the run can't be loaded (e.g. deleted / bad id) — no point
+    // hammering a 404 every 3s, and it lets the not-found state settle.
+    refetchInterval: (query) => (query.state.error ? false : 3000),
+    retry: false,
   });
   const events = useRunEvents(runId);
 
@@ -62,6 +65,23 @@ export default function RunDetail({ params }: { params: Promise<{ runId: string 
   // Run row exposes candidate_id but not batch_id; the shared hook walks recent
   // batches to locate the parent (no candidate-lookup endpoint today).
   const batch = useTopicBatchForRun(run);
+
+  // Run can't be loaded (deleted / bad id) — show a not-found state rather than a
+  // skeleton stuck at "…". Placed after all hooks so hook order stays stable.
+  if (isError) {
+    return (
+      <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">
+        <Link href="/runs" className="font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider">
+          ← All runs
+        </Link>
+        <SectionHead
+          kicker={<>Run · <span className="text-accent">{shortId}</span></>}
+          hed="Run not found"
+          dek="This run could not be loaded — it may have been deleted, or the link is wrong."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 md:px-10 py-10">

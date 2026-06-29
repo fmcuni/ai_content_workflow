@@ -169,17 +169,36 @@ export function RunDrawer({
 
   const [confirmLabel, setConfirmLabel] = useState<string | null>(null);
   const dry = useMutation({
-    mutationFn: () =>
-      api.dryPublish(runId, {
-        edited_seo_title: autosave.values.seoTitle || null,
-        edited_meta_description: autosave.values.metaDesc || null,
-        wp_publish_status: autosave.values.pubStatus || null,
-        wp_author_id: autosave.values.authorId,
-        ghost_author_ids: autosave.values.ghostAuthorIds,
-        ghost_tags: autosave.values.ghostTags,
-        feature_image_url: autosave.values.featureImageUrl || null,
-      }),
-    onSuccess: (res) => setConfirmLabel(res.target_label),
+    // Cancel any debounced metadata save before the publish flow — the resume
+    // carries every field, so a late PATCH firing afterwards is pure noise.
+    onMutate: () => autosave.cancelPending(),
+    mutationFn: () => {
+      const v = autosave.values;
+      // Mirror the real approve payload so the pre-flight validates the same data
+      // that publish will send — esp. wp_publish_at, or a "future" run reads as
+      // "scheduled without date" and the check fires on a false premise.
+      return api.dryPublish(runId, {
+        edited_seo_title: v.seoTitle || null,
+        edited_meta_description: v.metaDesc || null,
+        wp_publish_status: v.pubStatus || null,
+        wp_author_id: v.authorId,
+        wp_category_ids: v.categoryId != null ? [v.categoryId] : null,
+        wp_slug: v.slug || null,
+        wp_publish_at: v.pubStatus === "future" && v.pubDate ? `${v.pubDate}T00:00:00Z` : null,
+        ghost_author_ids: v.ghostAuthorIds,
+        ghost_tags: v.ghostTags,
+        feature_image_url: v.featureImageUrl || null,
+      });
+    },
+    onSuccess: (res) => {
+      // Backend pre-flight rejected the metadata — surface it instead of opening
+      // the confirm, so the operator can't sail through to a publish that fails.
+      if (res.validation_error) {
+        toast.error(res.validation_error);
+        return;
+      }
+      setConfirmLabel(res.target_label);
+    },
     onError: (e: Error) => toast.error(`Dry-publish failed — ${e.message}`),
   });
   const publish = useMutation({
@@ -276,6 +295,7 @@ export function RunDrawer({
               <DraftPreview
                 runId={runId}
                 status={r.status}
+                title={r.topic}
                 seoTitle={autosave.values.seoTitle}
                 metaDesc={autosave.values.metaDesc}
                 slug={decodeSlug(r)}

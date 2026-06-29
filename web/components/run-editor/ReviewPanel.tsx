@@ -2,7 +2,9 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 
+import { AnchorQuote } from "@/components/annotations/AnchorQuote";
 import { ReviewThreadList } from "@/components/ReviewThreadList";
+import { onComposerKeyDown } from "@/lib/run-editor/composer-keys";
 import type { ReviewThreadsApi } from "@/lib/useReviewThreads";
 
 interface Props {
@@ -62,9 +64,7 @@ function PendingComposer({ anchorText, busy, error, onSubmit, onCancel }: Pendin
   return (
     <div className="mb-4 rounded border border-accent/60 bg-paper p-3 shadow-sm">
       <div className="mb-2 flex items-start justify-between gap-2">
-        <p className="line-clamp-2 font-mono text-[10px] uppercase tracking-wider text-ink-faint">
-          &ldquo;{anchorText}&rdquo;
-        </p>
+        <AnchorQuote text={anchorText} />
         <button
           type="button"
           onClick={onCancel}
@@ -79,15 +79,7 @@ function PendingComposer({ anchorText, busy, error, onSubmit, onCancel }: Pendin
         autoFocus
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            submit();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            onCancel();
-          }
-        }}
+        onKeyDown={(e) => onComposerKeyDown(e, submit, onCancel)}
         rows={2}
         placeholder="Start a review note for the team… (⌘↵ to post)"
         className="w-full resize-y border-b border-rule bg-transparent pb-1 text-[13px] text-ink focus:border-accent focus:outline-none"

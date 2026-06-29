@@ -2,6 +2,8 @@
 import { useEffect, useRef } from "react";
 import { Trash2 } from "lucide-react";
 
+import { AnchorQuote } from "@/components/annotations/AnchorQuote";
+import { AnnotationCard } from "@/components/annotations/AnnotationCard";
 import type { Hitl2Comment } from "@/lib/types";
 
 interface Props {
@@ -22,9 +24,13 @@ export function CommentsSidebar({
   const refs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
   useEffect(() => {
-    if (focusedId && refs.current[focusedId]) {
-      refs.current[focusedId]!.focus();
-      refs.current[focusedId]!.scrollIntoView({ block: "center", behavior: "smooth" });
+    const el = focusedId ? refs.current[focusedId] : null;
+    if (!el) return;
+    el.focus();
+    // `scrollIntoView` is absent in jsdom and older webviews — guard it (matches
+    // ReviewThreadList) so focusing a comment never throws.
+    if (typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
     }
   }, [focusedId]);
 
@@ -39,16 +45,8 @@ export function CommentsSidebar({
   return (
     <ul className="space-y-3">
       {comments.map((c) => (
-        <li
-          key={c.id}
-          onClick={() => onFocus(c.id)}
-          className={`border border-rule rounded p-3 bg-paper transition-shadow cursor-pointer ${
-            focusedId === c.id ? "shadow-md border-accent/60" : ""
-          }`}
-        >
-          <p className="font-mono text-[10px] uppercase tracking-wider text-ink-faint mb-2 line-clamp-2">
-            &ldquo;{c.anchor_text}&rdquo;
-          </p>
+        <AnnotationCard key={c.id} focused={focusedId === c.id} onClick={() => onFocus(c.id)}>
+          <AnchorQuote text={c.anchor_text} className="mb-2" />
           <textarea
             ref={(el) => {
               refs.current[c.id] = el;
@@ -65,7 +63,7 @@ export function CommentsSidebar({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete(c.id);
+                if (window.confirm("Delete this comment? This cannot be undone.")) onDelete(c.id);
               }}
               className="text-ink-faint hover:text-accent-deep inline-flex items-center gap-1 text-[11px]"
               aria-label="Delete comment"
@@ -73,7 +71,7 @@ export function CommentsSidebar({
               <Trash2 className="h-3 w-3" /> Delete
             </button>
           </div>
-        </li>
+        </AnnotationCard>
       ))}
     </ul>
   );

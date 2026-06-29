@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, CornerDownLeft, RotateCcw, Trash2 } from "lucide-react";
 
+import { AnchorQuote } from "@/components/annotations/AnchorQuote";
+import { AnnotationCard } from "@/components/annotations/AnnotationCard";
+import { onComposerKeyDown } from "@/lib/run-editor/composer-keys";
 import type { ReviewThread } from "@/lib/types";
 
 type Filter = "open" | "resolved" | "all";
@@ -109,20 +112,17 @@ export function ReviewThreadList({
           {shown.map((t) => {
             const isResolved = t.status === "resolved";
             return (
-              <li
+              <AnnotationCard
                 key={t.thread_id}
-                ref={(el) => {
+                cardRef={(el) => {
                   cardRefs.current[t.thread_id] = el;
                 }}
+                focused={focusedId === t.thread_id}
+                resolved={isResolved}
                 onClick={() => onFocus(t.thread_id)}
-                className={`cursor-pointer rounded border bg-paper p-3 transition-shadow ${
-                  focusedId === t.thread_id ? "border-accent/60 shadow-md" : "border-rule"
-                } ${isResolved ? "opacity-60" : ""}`}
               >
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="line-clamp-2 font-mono text-[10px] uppercase tracking-wider text-ink-faint">
-                    &ldquo;{t.anchor_text}&rdquo;
-                  </p>
+                  <AnchorQuote text={t.anchor_text} />
                   {isResolved && (
                     <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-ok">
                       Resolved
@@ -157,12 +157,7 @@ export function ReviewThreadList({
                     onChange={(e) =>
                       setDrafts((d) => ({ ...d, [t.thread_id]: e.target.value }))
                     }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        submitReply(t);
-                      }
-                    }}
+                    onKeyDown={(e) => onComposerKeyDown(e, () => submitReply(t))}
                     rows={1}
                     placeholder="Reply… (⌘↵)"
                     className="w-full resize-y border-b border-rule bg-transparent pb-1 text-[13px] text-ink focus:border-accent focus:outline-none"
@@ -199,14 +194,17 @@ export function ReviewThreadList({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => onDelete(t)}
+                    onClick={() => {
+                      if (window.confirm("Delete this review thread and all its replies? This cannot be undone."))
+                        onDelete(t);
+                    }}
                     className="inline-flex items-center gap-1 text-[11px] text-ink-faint hover:text-accent-deep disabled:opacity-40"
                     aria-label="Delete thread"
                   >
                     <Trash2 className="h-3 w-3" /> Delete
                   </button>
                 </div>
-              </li>
+              </AnnotationCard>
             );
           })}
         </ul>

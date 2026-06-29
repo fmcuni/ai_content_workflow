@@ -36,6 +36,10 @@ export interface BoardModel {
   /** Flattened run order of everything currently rendered (expanded children +
    *  standalone) — drives "select all", keyboard nav, and drawer stepping. */
   visibleRuns: RunSummary[];
+  /** Every run matching the active filters (incl. collapsed-theme children).
+   *  Bulk actions intersect the selection with this so a filter change can never
+   *  leave a now-hidden run in the batch. */
+  filteredRuns: RunSummary[];
 }
 
 function noFiltersActive(opts: RunFilterOpts): boolean {
@@ -123,7 +127,7 @@ export function buildBoard(
         : [],
   );
 
-  return { themes, standalone: sortedStandalone, items, visibleRuns };
+  return { themes, standalone: sortedStandalone, items, visibleRuns, filteredRuns: filtered };
 }
 
 /** Aggregate counts of a theme's children by coarse lifecycle bucket — drives

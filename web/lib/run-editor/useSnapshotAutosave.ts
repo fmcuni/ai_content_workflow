@@ -37,6 +37,12 @@ interface UseSnapshotAutosaveArgs {
    *  flattened live Yjs doc) instead of `snapshotIn.html_body`. When omitted under
    *  collab, body writes are skipped (the Phase 2 placeholder behaviour). */
   flattenBody?: () => string;
+  /** Optional side-channel flush for editor state the snapshot DTO doesn't carry
+   *  (e.g. the /edit outline, persisted via its own PUT endpoint). Fired on the
+   *  SAME triggers as the body snapshot — interval, navigate/unmount, pagehide —
+   *  so that state can't be silently lost on exit. A no-op when there's nothing
+   *  dirty; runs alongside the snapshot save, never replacing it. */
+  onFlush?: () => void;
 }
 
 export interface SnapshotAutosave {
@@ -68,6 +74,7 @@ export function useSnapshotAutosave({
   onHydrate,
   collabActive = false,
   flattenBody,
+  onFlush,
 }: UseSnapshotAutosaveArgs): SnapshotAutosave {
   const qc = useQueryClient();
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -82,6 +89,10 @@ export function useSnapshotAutosave({
   const lastSavedKeyRef = useRef<string | null>(null);
   const snapshotRef = useRef(snapshotIn);
   const hydrationDoneRef = useRef(false);
+  // Mirror onFlush so the interval / unmount / pagehide handlers below (which
+  // don't re-subscribe) always invoke the latest closure.
+  const onFlushRef = useRef(onFlush);
+  onFlushRef.current = onFlush;
 
   useEffect(() => {
     snapshotRef.current = snapshotIn;
@@ -151,16 +162,26 @@ export function useSnapshotAutosave({
 
   // Every 5 minutes, persist a snapshot if anything changed.
   useEffect(() => {
-    const id = setInterval(() => void saveSnapshot("interval"), AUTOSAVE_INTERVAL_MS);
+    const id = setInterval(() => {
+      onFlushRef.current?.();
+      void saveSnapshot("interval");
+    }, AUTOSAVE_INTERVAL_MS);
     return () => clearInterval(id);
   }, [saveSnapshot]);
 
   // Leaving the page — client-side nav, link click, or unmount — flushes a save.
-  useEffect(() => () => void saveSnapshot("navigate"), [saveSnapshot]);
+  useEffect(
+    () => () => {
+      onFlushRef.current?.();
+      void saveSnapshot("navigate");
+    },
+    [saveSnapshot],
+  );
 
   // Tab close / reload: an awaited fetch would be cancelled, so beacon instead.
   useEffect(() => {
     const handler = () => {
+      onFlushRef.current?.(); // side-channel state (e.g. outline) rides the same teardown
       if (collabActive && !flattenBody) return; // DO owns the body, no flatten source
       if (submittedRef.current || lastSavedKeyRef.current == null) return;
       const snap = snapshotRef.current;

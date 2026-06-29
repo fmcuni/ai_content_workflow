@@ -72,6 +72,23 @@ export function statusIsTransient(status: string): boolean {
   return TRANSIENT.has(status as RunStatus);
 }
 
+// Statuses where the article body has been produced — a draft exists to preview
+// and to preserve as a snapshot baseline, even if SEO title/meta are still unset.
+// Excludes pre-draft states (pending/fetching/strategy/hitl_1/production) and
+// terminal-without-draft states (failed/cancelled/rejected).
+const HAS_DRAFT: ReadonlySet<RunStatus> = new Set<RunStatus>([
+  "hitl_2",
+  "publishing",
+  "revising",
+  "persisted",
+  "published",
+  "changes_requested",
+]);
+
+export function statusHasDraft(status: string): boolean {
+  return HAS_DRAFT.has(status as RunStatus);
+}
+
 // Filled-pill Tailwind classes (background + text + dot) for the redesign ledger
 // and any consumer wanting the demo's pill, using the app's existing editorial
 // tokens (warn/info/ok/accent/ink-soft) — NOT a forked colour system. `pill`

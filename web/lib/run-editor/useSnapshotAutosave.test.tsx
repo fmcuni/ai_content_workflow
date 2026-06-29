@@ -55,9 +55,16 @@ interface RenderArgs {
   flattenBody?: () => string;
   snapshotIn: Hitl2SnapshotIn;
   baselineKey: string | null;
+  onFlush?: () => void;
 }
 
-function renderAutosave({ collabActive, flattenBody, snapshotIn, baselineKey }: RenderArgs) {
+function renderAutosave({
+  collabActive,
+  flattenBody,
+  snapshotIn,
+  baselineKey,
+  onFlush,
+}: RenderArgs) {
   const editorEmailRef = { current: "editor@bowtie.com.hk" };
   const submittedRef = { current: false };
   const hydratedFromSnapshotRef = { current: false };
@@ -75,6 +82,7 @@ function renderAutosave({ collabActive, flattenBody, snapshotIn, baselineKey }: 
         onHydrate: () => {},
         collabActive,
         flattenBody,
+        onFlush,
       }),
     { wrapper: wrapper(makeClient()) },
   );
@@ -134,6 +142,24 @@ describe("useSnapshotAutosave — collab gating", () => {
       committed_html_body: "<p>committed baseline</p>",
       trigger: "manual",
     });
+  });
+
+  it("fires onFlush on unmount so side-channel state (outline) rides the navigate-flush", async () => {
+    // The outline is persisted outside the body snapshot; without this it is
+    // silently lost on navigate-away. onFlush must fire on the same unmount that
+    // flushes the body snapshot.
+    const onFlush = vi.fn();
+    const baseline = makeSnapshotIn("<p>seed</p>");
+    const { result, unmount } = renderAutosave({
+      snapshotIn: baseline,
+      baselineKey: snapshotKey(baseline),
+      onFlush,
+    });
+
+    await waitFor(() => expect(result.current).toBeTruthy());
+    unmount();
+
+    expect(onFlush).toHaveBeenCalledTimes(1);
   });
 
   it("persists a dirty body write when collab is off (existing behaviour preserved)", async () => {

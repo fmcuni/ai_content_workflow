@@ -311,6 +311,31 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
     });
   }, [render.data, run.data, existingPost.data, existingPostSettled, normalizedRenderBody]);
 
+  // The outline is persisted via its OWN endpoint (api.saveOutline), not the
+  // body snapshot — so it must ride the autosave lifecycle separately or an
+  // operator who only edits the Outline tab and navigates/closes away loses the
+  // change with the header still reading "Saved". This best-effort flush fires on
+  // the same interval / navigate-unmount / pagehide triggers as the snapshot save
+  // (via the hook's onFlush) and is idempotent: it clears outlineDirty so neither
+  // a later trigger nor the manual persist() double-saves. Kept in a ref so the
+  // hook's teardown handlers always see the latest outline.
+  const outlineRef = useRef(outline);
+  outlineRef.current = outline;
+  const outlineDirtyRef = useRef(outlineDirty);
+  outlineDirtyRef.current = outlineDirty;
+  const flushOutline = useCallback(() => {
+    if (submittedRef.current) return; // a re-push already persisted everything
+    if (!outlineDirtyRef.current || !outlineRef.current) return;
+    outlineDirtyRef.current = false;
+    setOutlineDirty(false);
+    // Fire-and-forget: on client-side navigation the fetch completes; on tab-close
+    // it is best-effort (same ceiling as any awaited save during teardown).
+    void api.saveOutline(runId, outlineRef.current).catch(() => {
+      outlineDirtyRef.current = true;
+      setOutlineDirty(true); // restore the dirty flag so the next trigger retries
+    });
+  }, [runId]);
+
   const applySnapshot = useCallback((s: Hitl2Snapshot) => {
     // Normalize both sides into the editor's serialization space (idempotent for
     // snapshots already saved from the editor; fixes legacy raw bodies) so the
@@ -337,10 +362,17 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       onHydrate: applySnapshot,
       collabActive,
       flattenBody,
+      onFlush: flushOutline,
     });
 
   async function persist() {
-    if (outline && outlineDirty) await api.saveOutline(runId, outline);
+    if (outline && outlineDirty) {
+      await api.saveOutline(runId, outline);
+      // Clear the dirty flag so the autosave navigate-flush (flushOutline) doesn't
+      // redundantly re-save the same outline on exit.
+      outlineDirtyRef.current = false;
+      setOutlineDirty(false);
+    }
     await api.saveArticle(runId, buildArticlePayload(collab ? flattenCollabDoc(collab.ydoc) : html, form));
     // Capture a version-history snapshot so each save is recoverable, mirroring
     // the HITL_2 gate's autosave history. Routed through the autosave hook so the
@@ -430,11 +462,19 @@ export default function EditRunPage({ params }: { params: Promise<{ runId: strin
       dek={`Revise a finished run's outline and article, then save — or save and re-push the article to ${cmsKindName(cmsKind)}.`}
       headerActions={
         <RunEditorHeaderActions
-          saveStatusLabel={saveStatusLabel}
+          // Outline edits live outside the body snapshot, so OR them into the
+          // dirty signal — else the indicator reads "Saved" with a pending
+          // outline change (and the manual Save button stays disabled).
+          saveStatusLabel={outlineDirty && !isDirty ? "Unsaved changes" : saveStatusLabel}
           saveState={saveState}
-          isDirty={isDirty}
+          isDirty={isDirty || outlineDirty}
           canEdit={canEdit}
-          onSave={handleManualSave}
+          // The header Save persists the body snapshot; flush the outline too so
+          // an outline-only edit isn't left unsaved when the operator clicks it.
+          onSave={() => {
+            flushOutline();
+            void handleManualSave();
+          }}
           onOpenHistory={() => setHistoryOpen(true)}
         />
       }

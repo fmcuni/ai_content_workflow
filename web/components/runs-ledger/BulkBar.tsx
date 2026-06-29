@@ -48,7 +48,15 @@ export function BulkBar({ selectedRuns, perms, editorEmail, onSetMeta, onClear, 
   const n = selectedRuns.length;
   const drafted = selectedRuns.filter((r) => r.status === "hitl_2");
   const failed = selectedRuns.filter((r) => r.status === "failed");
-  const rejectable = selectedRuns.filter((r) => r.status === "hitl_1" || r.status === "hitl_2");
+  // Reject covers both gates, but each needs its own capability: cancelling an
+  // outline (hitl_1) is an outline decision, rejecting a draft (hitl_2) a publish
+  // decision. Bake the perms in so the button shows for an outline-only reviewer
+  // and never fires a reject the user can't perform.
+  const rejectable = selectedRuns.filter(
+    (r) =>
+      (r.status === "hitl_1" && perms.canApproveOutline) ||
+      (r.status === "hitl_2" && perms.canPublish),
+  );
   const liveCount = drafted.filter((r) => r.wp_publish_status === "publish").length;
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: RUNS_LIST_KEY });
@@ -146,7 +154,7 @@ export function BulkBar({ selectedRuns, perms, editorEmail, onSetMeta, onClear, 
             Restart failed
           </button>
         )}
-        {perms.canPublish && rejectable.length > 0 && (
+        {rejectable.length > 0 && (
           <button className={PILL_BTN} disabled={busy} onClick={() => rejectMut.mutate()}>
             Reject
           </button>

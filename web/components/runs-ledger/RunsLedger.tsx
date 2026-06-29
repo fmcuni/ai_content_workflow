@@ -64,9 +64,13 @@ export function RunsLedger() {
     canRepublish: can("publish"), // reviewer
   };
 
+  // Bulk batch = selected runs that still match the active filters. Sourcing from
+  // the filtered board (not data.runs) means changing voice/creator/search can
+  // never leave a now-hidden run in the batch — a bulk publish only ever touches
+  // what the operator can currently see.
   const selectedRuns = useMemo(
-    () => data.runs.filter((r) => selected.has(r.run_id)),
-    [data.runs, selected],
+    () => board.filteredRuns.filter((r) => selected.has(r.run_id)),
+    [board.filteredRuns, selected],
   );
 
   // Selection is scoped to the visible tab (demo parity) — switching tabs clears

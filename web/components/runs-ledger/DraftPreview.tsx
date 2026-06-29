@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 
+import { statusHasDraft } from "@/lib/run-status";
+
 interface DraftPreviewProps {
   runId: string;
   status: string;
+  /** Run topic — always present; the SERP headline falls back to it when SEO title is unset. */
+  title: string;
   seoTitle: string;
   metaDesc: string;
   slug: string | null;
@@ -15,12 +19,17 @@ interface DraftPreviewProps {
 function emptyReason(status: string): string {
   if (status === "hitl_1") return "outline awaiting your review.";
   if (status === "failed") return "run failed before drafting.";
+  if (status === "rejected" || status === "cancelled") return "run ended before a draft was produced.";
   return "agents still working.";
 }
 
 /** Middle column for default mode (spec §4.5): a Google-SERP-style draft preview. */
-export function DraftPreview({ runId, status, seoTitle, metaDesc, slug, targetName, liveLink }: DraftPreviewProps) {
-  const hasDraft = Boolean(seoTitle || metaDesc);
+export function DraftPreview({ runId, status, title, seoTitle, metaDesc, slug, targetName, liveLink }: DraftPreviewProps) {
+  // A draft exists once metadata is set OR the run reached a drafted status — a
+  // published run with no SEO meta still has a draft (bug: previously keyed only
+  // on seoTitle/metaDesc, so such runs falsely showed "agents still working").
+  const hasDraft = Boolean(seoTitle || metaDesc || (title && statusHasDraft(status)));
+  const headline = seoTitle || title;
   const editorHref = status === "hitl_2" ? `/runs/${runId}/hitl2` : `/runs/${runId}`;
 
   return (
@@ -32,7 +41,7 @@ export function DraftPreview({ runId, status, seoTitle, metaDesc, slug, targetNa
             {slug ? ` › blog › ${slug.replace(/^\//, "")}` : ""}
           </div>
           <div className="mb-2 font-display text-[15.5px] font-semibold leading-snug text-ink">
-            {seoTitle || "(untitled draft)"}
+            {headline || "(untitled draft)"}
           </div>
           {metaDesc && <div className="text-[12.5px] leading-relaxed text-ink-soft">{metaDesc}</div>}
         </div>

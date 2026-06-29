@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  statusHasDraft,
   statusIsTransient,
   statusLabel,
   statusPill,
@@ -131,6 +132,34 @@ describe("statusIsTransient", () => {
       expect(statusIsTransient(s)).toBe(false);
     },
   );
+});
+
+describe("statusHasDraft", () => {
+  // Regression: a published run with no SEO meta must still be treated as having
+  // a draft, so the drawer preview never shows "agents still working" for it.
+  it.each(["hitl_2", "publishing", "revising", "persisted", "published", "changes_requested"])(
+    "%s has a draft",
+    (s) => {
+      expect(statusHasDraft(s)).toBe(true);
+    },
+  );
+
+  it.each(["pending", "fetching", "strategy", "hitl_1", "production", "failed", "cancelled", "rejected"])(
+    "%s has no draft",
+    (s) => {
+      expect(statusHasDraft(s)).toBe(false);
+    },
+  );
+
+  it("covers the entire RunStatus union (no status left unclassified)", () => {
+    for (const s of ALL_STATUSES) {
+      expect(typeof statusHasDraft(s)).toBe("boolean");
+    }
+  });
+
+  it("treats an unknown status as no-draft (conservative)", () => {
+    expect(statusHasDraft("some_future_state")).toBe(false);
+  });
 });
 
 describe("statusStampTone (PaperStamp bridge)", () => {

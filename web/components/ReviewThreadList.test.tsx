@@ -129,7 +129,8 @@ describe("ReviewThreadList", () => {
     expect(onResolve).toHaveBeenCalledWith(t, true);
   });
 
-  it("fires onDelete from the Delete action", async () => {
+  it("fires onDelete from the Delete action once confirmed", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const onDelete = vi.fn();
     const t = thread();
     render(
@@ -143,6 +144,26 @@ describe("ReviewThreadList", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /delete thread/i }));
+    expect(confirmSpy).toHaveBeenCalled();
     expect(onDelete).toHaveBeenCalledWith(t);
+    confirmSpy.mockRestore();
+  });
+
+  it("does not delete when the confirm is dismissed", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const onDelete = vi.fn();
+    render(
+      <ReviewThreadList
+        threads={[thread()]}
+        focusedId="t-1"
+        onFocus={noop}
+        onReply={noop}
+        onResolve={noop}
+        onDelete={onDelete}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /delete thread/i }));
+    expect(onDelete).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });

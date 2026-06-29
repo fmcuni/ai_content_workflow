@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import { statusHasDraft } from "@/lib/run-status";
 import type { RunSummary, RunWpMetaPatch } from "@/lib/types";
 
 import { RUNS_LIST_KEY } from "./useLedgerData";
@@ -30,6 +31,22 @@ export interface CmsFormValues {
 
 type FieldKey = keyof CmsFormValues;
 
+// Form-value keys that ride the PATCH path (everything except the two meta
+// fields). buildPatch always writes all of them, so a successful PATCH clears
+// the dirty flag on all of them. NOTE: the `dirty` set is keyed by these
+// CmsFormValues keys, NOT the RunWpMetaPatch keys (wp_author_id, …) — clearing
+// by Object.keys(patch) would never match and the flags would stick forever.
+const PATCH_FIELDS: FieldKey[] = [
+  "authorId",
+  "categoryId",
+  "slug",
+  "pubStatus",
+  "pubDate",
+  "ghostAuthorIds",
+  "ghostTags",
+  "featureImageUrl",
+];
+
 export interface CmsAutosave {
   values: CmsFormValues;
   /** Field keys flashing amber because a save is in flight / just landed. */
@@ -41,6 +58,9 @@ export interface CmsAutosave {
    * so the drawer's quick edit doesn't drop the body. Null until loaded.
    */
   body: { html_body: string; committed: string } | null;
+  /** Cancel any in-flight debounced save. Call before approve-publish so a late
+   *  PATCH can't fire after the run is resumed (publish carries all values). */
+  cancelPending: () => void;
 }
 
 function initialFrom(run: RunSummary): CmsFormValues {
@@ -89,10 +109,11 @@ export function useCmsAutosave(
   }
 
   // Latest draft body to preserve on a SEO/meta snapshot — newest snapshot wins,
-  // else the latest render. Only fetched for drafted runs (where meta is editable).
+  // else the latest render. Fetched for any drafted run (meta stays editable on
+  // published/changes_requested etc.); without it a snapshot would wipe the body.
   const bodyQuery = useQuery({
     queryKey: ["run-body-baseline", runId],
-    enabled: perms.canEditMeta && run.status === "hitl_2",
+    enabled: perms.canEditMeta && statusHasDraft(run.status),
     queryFn: async () => {
       const snaps = await api.listHitl2Snapshots(runId).catch(() => []);
       const current = snaps.find((s) => s.is_current) ?? snaps[0];
@@ -117,11 +138,17 @@ export function useCmsAutosave(
   const snapshotMut = useMutation({
     mutationFn: (vals: CmsFormValues) => {
       const body = bodyQuery.data;
+      // Never snapshot without a real body baseline — doing so would persist an
+      // empty article body and clobber the draft. Fail loud; the field stays
+      // dirty so the next keystroke retries once the baseline has loaded.
+      if (!body?.html_body) {
+        return Promise.reject(new Error("draft body still loading — retry in a moment"));
+      }
       return api.saveHitl2Snapshot(runId, {
         trigger: "manual",
         editor_email: editorEmail,
-        html_body: body?.html_body ?? "",
-        committed_html_body: body?.committed ?? body?.html_body ?? "",
+        html_body: body.html_body,
+        committed_html_body: body.committed || body.html_body,
         seo_title: vals.seoTitle || null,
         meta_description: vals.metaDesc || null,
       });
@@ -135,8 +162,8 @@ export function useCmsAutosave(
 
   const patchMut = useMutation({
     mutationFn: (patch: RunWpMetaPatch) => api.patchRun(runId, patch),
-    onSuccess: (_d, patch) => {
-      clearDirty(Object.keys(patch) as FieldKey[]);
+    onSuccess: () => {
+      clearDirty(PATCH_FIELDS);
       void qc.invalidateQueries({ queryKey: RUNS_LIST_KEY });
     },
     onError: (e: Error) => {
@@ -193,6 +220,11 @@ export function useCmsAutosave(
     [META_FIELDS, perms.canEditMeta, perms.canPatch, snapshotMut, patchMut, buildPatch],
   );
 
+  const cancelPending = useCallback(() => {
+    if (metaTimer.current) clearTimeout(metaTimer.current);
+    if (patchTimer.current) clearTimeout(patchTimer.current);
+  }, []);
+
   // Flush pending debounces on unmount / run switch so a fast close still saves.
   useEffect(() => {
     return () => {
@@ -201,5 +233,5 @@ export function useCmsAutosave(
     };
   }, [runId]);
 
-  return { values, dirty, setField, body: bodyQuery.data ?? null };
+  return { values, dirty, setField, body: bodyQuery.data ?? null, cancelPending };
 }
