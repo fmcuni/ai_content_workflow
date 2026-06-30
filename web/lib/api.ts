@@ -558,6 +558,12 @@ export const topicBatchesApi = {
       `${TOPIC_BATCHES_BASE}/${batchId}/candidates/${candidateId}/skip`,
       { method: "POST", body: JSON.stringify({ editor_email: editorEmail }) },
     ),
+  // Re-run dedup + hot for a candidate whose verdict errored (last_error set).
+  retryVerdict: (batchId: string, candidateId: string) =>
+    http<TopicCandidate>(
+      `${TOPIC_BATCHES_BASE}/${batchId}/candidates/${candidateId}/retry-verdict`,
+      { method: "POST" },
+    ),
   close: (batchId: string) =>
     http<TopicBatch>(`${TOPIC_BATCHES_BASE}/${batchId}/close`, { method: "POST" }),
   delete: (batchId: string) =>

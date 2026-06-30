@@ -17,6 +17,7 @@ import type {
   TopicCandidate,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useRetryVerdict } from "@/lib/useRetryVerdict";
 import { VerdictBadge } from "./VerdictBadge";
 
 const DEFAULT_PERSONA = "bowtie-editor";
@@ -124,6 +125,8 @@ export function CandidateGrid({ batch }: CandidateGridProps) {
       });
     },
   });
+
+  const retryMut = useRetryVerdict(batch.batch_id);
 
   function skipAllExisting() {
     const targets = candidates.filter(
@@ -238,6 +241,8 @@ export function CandidateGrid({ batch }: CandidateGridProps) {
               onPatchServer={(body) => schedulePatch(c.candidate_id, body)}
               onSkip={() => skipMut.mutate(c.candidate_id)}
               skipping={skipMut.isPending && skipMut.variables === c.candidate_id}
+              onRetry={() => retryMut.mutate(c.candidate_id)}
+              retrying={retryMut.isPending && retryMut.variables === c.candidate_id}
             />
           ))}
         </div>
@@ -316,6 +321,8 @@ interface CandidateRowProps {
   onPatchServer: (body: Parameters<typeof topicBatchesApi.patchCandidate>[2]) => void;
   onSkip: () => void;
   skipping: boolean;
+  onRetry: () => void;
+  retrying: boolean;
 }
 
 function CandidateRow({
@@ -328,6 +335,8 @@ function CandidateRow({
   onPatchServer,
   onSkip,
   skipping,
+  onRetry,
+  retrying,
 }: CandidateRowProps) {
   const c = candidate;
   if (!local) return null;
@@ -458,12 +467,24 @@ function CandidateRow({
           <VerdictBadge kind="hot" verdict={c.hot_topic} note={c.hot_topic_note} />
           {c.existing_search_debug && <Stage1DebugChip d={c.existing_search_debug} />}
           {errored && (
-            <span
-              title={c.last_error ?? "error"}
-              className="font-mono text-[10px] uppercase tracking-[0.14em] text-accent-deep border border-accent/40 px-1.5 py-[1px] bg-accent/[0.06] line-clamp-1 max-w-[130px]"
-            >
-              err · {(c.last_error ?? "").slice(0, 20)}
-            </span>
+            <div className="flex items-center gap-1.5 max-w-[130px]">
+              <span
+                title={c.last_error ?? "error"}
+                className="font-mono text-[10px] uppercase tracking-[0.14em] text-accent-deep border border-accent/40 px-1.5 py-[1px] bg-accent/[0.06] line-clamp-1"
+              >
+                err · {(c.last_error ?? "").slice(0, 20)}
+              </span>
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={retrying}
+                title="Re-run verdict"
+                aria-label="Retry verdict"
+                className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint border border-rule px-1.5 py-[1px] hover:text-accent-deep hover:border-accent/40 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              >
+                {retrying ? "↻" : "retry"}
+              </button>
+            </div>
           )}
         </div>
 

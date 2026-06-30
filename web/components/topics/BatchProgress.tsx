@@ -1,6 +1,7 @@
 "use client";
 import type { BatchStatus, TopicBatch, TopicCandidate } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useRetryVerdict } from "@/lib/useRetryVerdict";
 import { VerdictBadge } from "./VerdictBadge";
 
 interface BatchProgressProps {
@@ -43,6 +44,7 @@ function phaseStateForStatus(status: BatchStatus, phase: Phase): "pending" | "ru
 export function BatchProgress({ batch }: BatchProgressProps) {
   const candidates = batch.candidates ?? [];
   const expected = batch.topic_count;
+  const retryMut = useRetryVerdict(batch.batch_id);
 
   return (
     <section aria-labelledby="batch-progress-title" className="space-y-6">
@@ -115,6 +117,8 @@ export function BatchProgress({ batch }: BatchProgressProps) {
                 key={c?.candidate_id ?? `slot-${i}`}
                 candidate={c}
                 index={i}
+                onRetry={c ? () => retryMut.mutate(c.candidate_id) : undefined}
+                retrying={retryMut.isPending && retryMut.variables === c?.candidate_id}
               />
             );
           })}
@@ -127,9 +131,13 @@ export function BatchProgress({ batch }: BatchProgressProps) {
 function CandidateRowSkeleton({
   candidate,
   index,
+  onRetry,
+  retrying,
 }: {
   candidate?: TopicCandidate;
   index: number;
+  onRetry?: () => void;
+  retrying?: boolean;
 }) {
   const verdictsPending =
     candidate && (candidate.existing == null || candidate.hot_topic == null);
@@ -176,12 +184,26 @@ function CandidateRowSkeleton({
           note={candidate?.hot_topic_note ?? null}
         />
         {errored && (
-          <span
-            title={candidate?.last_error ?? "error"}
-            className="font-mono text-[10px] uppercase tracking-[0.14em] text-accent-deep border border-accent/40 px-1.5 py-[1px] bg-accent/[0.06]"
-          >
-            err
-          </span>
+          <>
+            <span
+              title={candidate?.last_error ?? "error"}
+              className="font-mono text-[10px] uppercase tracking-[0.14em] text-accent-deep border border-accent/40 px-1.5 py-[1px] bg-accent/[0.06]"
+            >
+              err
+            </span>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={retrying}
+                title="Re-run verdict"
+                aria-label="Retry verdict"
+                className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint border border-rule px-1.5 py-[1px] hover:text-accent-deep hover:border-accent/40 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              >
+                {retrying ? "↻" : "retry"}
+              </button>
+            )}
+          </>
         )}
       </div>
     </li>

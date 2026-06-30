@@ -7,6 +7,9 @@ import { pgJson, pgTimestampToIso, toJsonb } from "../db/serialize";
 import { corsPreflight, resolveCorsOrigin, withCors } from "../http/cors";
 import { requireRole } from "../auth/authz";
 import type { AuthVars } from "../auth/middleware";
+import { DoGeminiClient } from "../gemini/do_client";
+import type { GeminiClient } from "../gemini/types";
+import { analyseCandidateVerdict } from "../agents/analyse_candidate";
 
 // ---------------------------------------------------------------------------
 // Env extension
@@ -40,6 +43,18 @@ const PROMOTE_MODES = ["create", "refresh"] as const;
 type PromoteMode = (typeof PROMOTE_MODES)[number];
 
 const DEFAULT_PERSONA = "bowtie-editor";
+
+// Gemini config for the inline retry-verdict path (mirrors refresh.ts /
+// TopicExpansionWorkflow).
+const DEFAULT_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_THINKING_LEVEL = "HIGH";
+
+function geminiClient(env: Env): GeminiClient {
+  return new DoGeminiClient(env.GEMINI_PROXY, {
+    model: env.GEMINI_MODEL ?? DEFAULT_MODEL,
+    thinkingLevel: DEFAULT_THINKING_LEVEL,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Request body types (mirror content_tool/api/schemas.py)
@@ -678,6 +693,80 @@ topicBatchesRouter.post("/:id/candidates/:cid/skip", async (c) => {
         { detail: `candidate already resolved (status=${result.status})` },
         409,
       );
+    }
+    return c.json(
+      { detail: `batch is in terminal status '${result.status}'` },
+      409,
+    );
+  }
+  if (result.candidate === undefined) {
+    return c.json({ detail: "candidate not found" }, 404);
+  }
+  return c.json(toCandidateOut(result.candidate));
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/candidates/:cid/retry-verdict — re-run dedup + hot for a single
+// candidate whose verdict errored, without re-running the whole batch. Runs the
+// agents inline in the request (same pattern as refresh.ts scanArticle); one
+// candidate's subrequest load is well within the per-invocation budget. A
+// `failed` batch (all candidates had errored) is lifted back to
+// `ready_for_review` once a retry succeeds.
+// ---------------------------------------------------------------------------
+topicBatchesRouter.post("/:id/candidates/:cid/retry-verdict", async (c) => {
+  const batchId = c.req.param("id");
+  const candidateId = c.req.param("cid");
+
+  // One connection spans the (slow) Gemini call — acceptable for a manual,
+  // low-frequency recovery action.
+  const result = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    const batch = (await selectBatch(sql, batchId))[0];
+    if (batch === undefined) return { error: "batch_not_found" as const };
+    // `done` is the only status with nothing left to review; `failed` is
+    // explicitly retryable (recovering from it is the point).
+    if (batch.status === "done") {
+      return { error: "terminal" as const, status: batch.status };
+    }
+    const cand = (await selectCandidate(sql, batchId, candidateId))[0];
+    if (cand === undefined) return { error: "candidate_not_found" as const };
+    if (RESOLVED_CANDIDATE_STATUSES.has(cand.status)) {
+      return { error: "resolved" as const, status: cand.status };
+    }
+    if (cand.last_error === null) {
+      return { error: "not_errored" as const };
+    }
+
+    const ok = await analyseCandidateVerdict(
+      sql,
+      geminiClient(c.env),
+      candidateId,
+      batch.persona_default,
+    );
+    if (ok && batch.status === "failed") {
+      await sql`
+        UPDATE content_tool.topic_batches SET status = 'ready_for_review'
+        WHERE batch_id = ${batchId} AND status = 'failed'
+      `;
+    }
+    const refreshed = (await selectCandidate(sql, batchId, candidateId))[0];
+    return { ok: true as const, candidate: refreshed };
+  });
+
+  if ("error" in result) {
+    if (result.error === "batch_not_found") {
+      return c.json({ detail: "topic batch not found" }, 404);
+    }
+    if (result.error === "candidate_not_found") {
+      return c.json({ detail: "candidate not found" }, 404);
+    }
+    if (result.error === "resolved") {
+      return c.json(
+        { detail: `candidate already resolved (status=${result.status})` },
+        409,
+      );
+    }
+    if (result.error === "not_errored") {
+      return c.json({ detail: "candidate verdict is not in an errored state" }, 409);
     }
     return c.json(
       { detail: `batch is in terminal status '${result.status}'` },

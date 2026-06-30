@@ -23,8 +23,11 @@ import { toJsonb } from "../db/serialize";
 import { DoGeminiClient } from "../gemini/do_client";
 import type { GeminiClient } from "../gemini/types";
 import { runTopicGen } from "../agents/topic_gen";
-import { runTopicDedup } from "../agents/topic_dedup";
-import { runTopicHot } from "../agents/topic_hot";
+import {
+  analyseCandidateVerdict,
+  resolveVoice,
+  toStringArray,
+} from "../agents/analyse_candidate";
 
 const DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_THINKING_LEVEL = "HIGH";
@@ -39,19 +42,9 @@ const DEFAULT_THINKING_LEVEL = "HIGH";
  */
 const CONCURRENCY_CAP = 3;
 
-// Terminal fallback when neither the candidate nor the batch names a voice. The
-// topic agents resolve their prompt under this voice (Phase 0 resolution rule:
-// candidate.persona_slug || batch.persona_default || DEFAULT_VOICE). Mirrors
-// content_tool/graph/topic_expansion.py.
-const DEFAULT_VOICE = "bowtie-editor";
-
-/** First non-empty voice slug, else DEFAULT_VOICE (mirrors `_resolve_voice`). */
-function resolveVoice(...candidates: (string | null | undefined)[]): string {
-  for (const candidate of candidates) {
-    if (candidate) return candidate;
-  }
-  return DEFAULT_VOICE;
-}
+// DEFAULT_VOICE / resolveVoice / toStringArray / analyseCandidateVerdict now
+// live in ../agents/analyse_candidate so the retry-verdict REST route shares
+// the exact same logic.
 
 interface Params {
   batchId: string;
@@ -86,12 +79,6 @@ interface BatchRow {
 interface GeneratedTopic {
   topic: string;
   keywords: string[];
-}
-
-interface CandidateRow {
-  topic: string;
-  keywords: unknown;
-  persona_slug: string | null;
 }
 
 export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
@@ -249,61 +236,10 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
     candidateId: string,
     personaDefault: string | null,
   ): Promise<string> {
-    return this.withSql<string>(async (sql) => {
-      const rows = await sql<CandidateRow[]>`
-        SELECT topic, keywords, persona_slug FROM content_tool.topic_candidates
-        WHERE candidate_id = ${candidateId}::uuid LIMIT 1
-      `;
-      const cand = rows[0];
-      if (cand === undefined) {
-        throw new Error(`candidate not found: ${candidateId}`);
-      }
-      const topic = cand.topic;
-      const keywords = toStringArray(cand.keywords);
-      // Phase 0 resolution rule: candidate.persona_slug || batch default || fallback.
-      const voiceSlug = resolveVoice(cand.persona_slug, personaDefault);
-
-      const gemini = this.geminiClient();
-      try {
-        const [dedup, hot] = await Promise.all([
-          runTopicDedup(sql, gemini, { topic, keywords, voiceSlug }),
-          runTopicHot(sql, gemini, { topic, keywords, voiceSlug }),
-        ]);
-        // One greppable line per candidate so an empty-candidate "no" is
-        // explainable from `wrangler tail` without a DB dive (mirrors the
-        // Python structlog line); the full struct is persisted below.
-        console.log(
-          `topic_existing_search.diagnostics topic=${JSON.stringify(topic)} ` +
-            `existing=${dedup.output.existing} ` +
-            `grounding_chunks=${dedup.stage1.grounding_chunks} ` +
-            `bowtie_hits=${dedup.stage1.bowtie_hits} ` +
-            `resolve_failures=${dedup.stage1.resolve_failures} ` +
-            `filtered_out=${dedup.stage1.filtered_out} ` +
-            `attempt_cap_hit=${dedup.stage1.attempt_cap_hit} ` +
-            `grounding_empty=${dedup.stage1.grounding_empty} ` +
-            `second_pass=${dedup.stage1.second_pass}`,
-        );
-        await sql`
-          UPDATE content_tool.topic_candidates
-          SET existing = ${dedup.output.existing},
-              existing_note = ${dedup.output.existing_note},
-              existing_url = ${dedup.output.existing_url},
-              existing_search_debug = ${toJsonb(sql, dedup.stage1)},
-              hot_topic = ${hot.output.hot_topic},
-              hot_topic_note = ${hot.output.hot_topic_note},
-              last_error = NULL
-          WHERE candidate_id = ${candidateId}::uuid
-        `;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        await sql`
-          UPDATE content_tool.topic_candidates
-          SET last_error = ${message}
-          WHERE candidate_id = ${candidateId}::uuid
-        `;
-      }
-      return "ok";
-    });
+    await this.withSql(async (sql) =>
+      analyseCandidateVerdict(sql, this.geminiClient(), candidateId, personaDefault),
+    );
+    return "ok";
   }
 
   // -------------------------------------------------------------------------
@@ -382,18 +318,4 @@ export class TopicExpansionWorkflow extends WorkflowEntrypoint<Env, Params> {
       thinkingLevel: DEFAULT_THINKING_LEVEL,
     });
   }
-}
-
-/** JSONB array column → string[] (postgres.js returns jsonb as raw text under fetch_types:false). */
-function toStringArray(value: unknown): string[] {
-  let candidate: unknown = value;
-  if (typeof candidate === "string") {
-    try {
-      candidate = JSON.parse(candidate);
-    } catch {
-      return [];
-    }
-  }
-  if (!Array.isArray(candidate)) return [];
-  return candidate.filter((v): v is string => typeof v === "string");
 }

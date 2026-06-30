@@ -268,6 +268,10 @@ app.get("/publish-targets/:id/readiness", requireRole("admin"));
 app.post("/topic-batches", requireRole("author"));
 app.post("/topic-batches/:id/promote", requireRole("author"));
 app.post("/topic-batches/:id/candidates/:cid/skip", requireRole("author"));
+app.post(
+  "/topic-batches/:id/candidates/:cid/retry-verdict",
+  requireRole("author"),
+);
 app.post("/topic-batches/:id/close", requireRole("author"));
 app.delete("/topic-batches/:id", requireRole("admin"));
 
