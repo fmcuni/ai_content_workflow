@@ -362,3 +362,48 @@ describe("findPostBySlug query shape", () => {
     expect(result.kind).toBe("not_found");
   });
 });
+
+describe("fetchPostByUrl slug encoding", () => {
+  // Regression: a percent-encoded CJK slug (the zh Bowtie blog) must be decoded
+  // ONCE so URLSearchParams encodes it a single time. The pre-fix code passed the
+  // raw "%E7%B4%AB..." segment straight in, double-encoding it ("%25E7%25B4%25AB")
+  // so WP matched nothing → refresh created a duplicate post (slug-2).
+  it("case 15: decodes a CJK URL slug and queries WP single-encoded (not double)", async () => {
+    const fetchMock = sequencedFetch(
+      jsonResponse([
+        {
+          id: 110536,
+          slug: "紫蘇油",
+          link: "https://wp.example.com/blog/zh/營養貼士/紫蘇油/",
+          title: { rendered: "紫蘇油" },
+          content: { rendered: "<p>c</p>" },
+          modified_gmt: "2026-06-02T00:00:00",
+          status: "publish",
+          author: 4,
+          categories: [9],
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const post = await makeClient().fetchPostByUrl(
+      "https://wp.example.com/blog/zh/%E7%87%9F%E9%A4%8A%E8%B2%BC%E5%A3%AB/%E7%B4%AB%E8%98%87%E6%B2%B9/",
+    );
+
+    expect(post?.id).toBe(110536);
+    const url = String(fetchMock.mock.calls[0]![0]);
+    // Correctly single-encoded — never the double-encoded "%25..." that broke it.
+    expect(url).toContain("slug=%E7%B4%AB%E8%98%87%E6%B2%B9");
+    expect(url).not.toContain("%25");
+    expect(decodeURIComponent(url)).toContain("slug=紫蘇油");
+  });
+
+  it("case 16: returns null for a slugless URL without throwing", async () => {
+    const fetchMock = sequencedFetch(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const post = await makeClient().fetchPostByUrl("https://wp.example.com/");
+    expect(post).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

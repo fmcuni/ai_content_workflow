@@ -1,5 +1,6 @@
 import type { Env } from "../index";
 import { stripAnchorSpans } from "../util/strip_anchors";
+import { slugFromUrl } from "../util/url_slug";
 import type {
   FetchedPost,
   PublishPayload,
@@ -491,9 +492,13 @@ export class WordPressClient {
    * GET /wp/v2/posts?slug=<slug>&_fields=...
    */
   async fetchPostByUrl(articleUrl: string): Promise<FetchedPost | null> {
-    const parsed = new URL(articleUrl);
-    const slug = parsed.pathname.replace(/\/$/, "").split("/").pop() ?? "";
-    if (!slug) return null;
+    // Decode the trailing path segment via slugFromUrl. A percent-encoded CJK
+    // slug (the entire zh Bowtie blog) must be decoded ONCE here, otherwise the
+    // URLSearchParams below re-encodes the "%" bytes and WP receives a
+    // double-encoded slug that matches nothing — so refresh never finds the
+    // existing post and publish mints a duplicate (the "創建新文章 / slug-2" bug).
+    const slug = slugFromUrl(articleUrl);
+    if (slug === null || slug === "") return null;
 
     const params = new URLSearchParams({
       slug,

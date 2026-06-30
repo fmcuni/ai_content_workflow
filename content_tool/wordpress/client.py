@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -388,7 +388,11 @@ class WordPressClient:
         GET /wp/v2/posts?slug=<slug>&_fields=...
         """
         parsed = urlparse(article_url)
-        slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        # Decode the trailing segment: a percent-encoded CJK slug (the zh Bowtie
+        # blog) must be unquoted ONCE here, else httpx re-encodes the "%" bytes
+        # and WP gets a double-encoded slug that matches nothing — refresh then
+        # never finds the existing post and publish mints a duplicate.
+        slug = unquote(parsed.path.rstrip("/").rsplit("/", 1)[-1])
         if not slug:
             return None
 
