@@ -92,4 +92,26 @@ describe("resolvePostIdForSlug", () => {
       4175,
     );
   });
+
+  it("does NOT force a create for a percent-encoded CJK slug that matches the URL", () => {
+    // run.wp_slug is stored percent-encoded; the URL slug decodes to 紫蘇油.
+    // Before the fix, encoded-vs-decoded mismatched → spurious create (紫蘇油-2).
+    expect(
+      resolvePostIdForSlug(
+        86556,
+        "https://www.bowtie.com.hk/blog/zh/營養貼士/紫蘇油/",
+        "%e7%b4%ab%e8%98%87%e6%b2%b9",
+      ),
+    ).toBe(86556);
+  });
+
+  it("still forces a create when a CJK slug genuinely changed", () => {
+    expect(
+      resolvePostIdForSlug(
+        86556,
+        "https://www.bowtie.com.hk/blog/zh/營養貼士/紫蘇油/",
+        "%e6%a9%84%e6%ac%96%e6%b2%b9", // 橄欖油 — a different slug
+      ),
+    ).toBeNull();
+  });
 });

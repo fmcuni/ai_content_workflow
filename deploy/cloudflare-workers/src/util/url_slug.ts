@@ -7,6 +7,15 @@
  * surface the freshly published URL) rather than overwrite the existing one.
  */
 
+/** Percent-decode a slug segment, best-effort (malformed input passes through). */
+function decodeSlugSegment(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 /**
  * Last non-empty path segment of a URL/path = the CMS slug, best-effort.
  * Handles trailing slash, query, hash, and bare paths. Returns null if none.
@@ -39,7 +48,12 @@ export function resolvePostIdForSlug<T extends string | number>(
   newSlugRaw: string | null,
 ): T | null {
   const existingPostIdPresent = existingPostId !== null && (existingPostId as unknown) !== "";
-  const newSlug = (newSlugRaw ?? "").trim();
+  // Normalize both sides to decoded form before comparing. `slugFromUrl` already
+  // decodes; `newSlugRaw` (run.wp_slug) is stored percent-encoded for CJK slugs
+  // (e.g. "%e7%b4%ab..."), so a raw compare always mismatched the decoded URL
+  // slug ("紫蘇油") and forced a spurious CREATE — a duplicate "紫蘇油-2" post
+  // instead of updating the existing one. Decode is idempotent for ASCII slugs.
+  const newSlug = decodeSlugSegment((newSlugRaw ?? "").trim());
   const existingSlug = slugFromUrl(existingUrl);
   if (existingPostIdPresent && existingSlug !== null && newSlug !== "" && newSlug !== existingSlug) {
     return null;
