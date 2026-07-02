@@ -452,15 +452,20 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               >
                 {cmsKindAbbrev(cmsKind)} #{existingPost.data.wp_post_id} ↗
               </ExternalLink>
-              <button
-                type="button"
-                onClick={handleRereadClick}
-                disabled={refresh.isPending}
-                className="ml-2 font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
-              >
-                {refresh.isPending ? "↻ Reading…" : `↻ Re-read from ${cmsKindAbbrev(cmsKind)}`}
-              </button>
             </>
+          )}
+          {/* Re-read is offered for any run with a source URL — not gated on a
+              resolved snapshot — so an empty/stale snapshot (e.g. a fetch that
+              predated the CJK-slug fix) can be recovered from the UI. */}
+          {run.data?.article_url && (
+            <button
+              type="button"
+              onClick={handleRereadClick}
+              disabled={refresh.isPending}
+              className="ml-2 font-mono text-[11px] text-ink-faint hover:text-ink uppercase tracking-wider disabled:opacity-50"
+            >
+              {refresh.isPending ? "↻ Reading…" : `↻ Re-read from ${cmsKindAbbrev(cmsKind)}`}
+            </button>
           )}
         </>
       }
