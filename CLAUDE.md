@@ -98,6 +98,16 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 - Parity gate: `node deploy/cloudflare-workers/parity/check-parity.mjs` diffs the TS
   backend against the Python reference over read-only routes.
 
+### Alt account (manual deploy only)
+
+A second Cloudflare account (franco.ma@bowtie.com.hk, `franco-ma.workers.dev`)
+hosts compute-only duplicates: `alt` mirrors prod (same prod Supabase/WP data)
+and `alt-dev` mirrors dev (dev Supabase). URLs: `bowtie-content-tool-{poc,web}[-dev].franco-ma.workers.dev`.
+Deploy manually with the alt creds (`CF_ALT_API_TOKEN`/`CF_ALT_ACCOUNT_ID` in
+gitignored `.env.local`): backend `npx wrangler deploy --env alt|alt-dev`, web
+`node scripts/deploy-web.mjs alt|alt-dev`. **CI never deploys alt targets** —
+keep them in step with prod/dev by redeploying after notable releases.
+
 ### Dev environment (Workers) — develop here first
 
 A parallel, isolated dev stack mirrors prod via wrangler named environments
