@@ -64,8 +64,9 @@ Two Workers on the `fmc` account (`*.fmc.workers.dev`):
 
 ### Portability / alternatives (e.g. AWS)
 
-The app is **Postgres-native** — no PostgREST, Supabase Auth, or `supabase-js` (auth is
-`better-auth` in our own migrations). So it runs on **any managed Postgres 16**: Amazon RDS
+The app's **data access is Postgres-native** — no PostgREST or Data API (auth is
+Supabase Auth/GoTrue; `supabase-js` is used only for the browser session). So the data
+layer runs on **any managed Postgres 16**: Amazon RDS
 for PostgreSQL or Aurora PostgreSQL-Compatible, Neon (pairs naturally with Hyperdrive/Workers),
 Google Cloud SQL, or Azure Database for PostgreSQL. **Portable, but not drop-in** — the
 `baseline.sql` dump carries unused Supabase-only artifacts that error on vanilla Postgres.

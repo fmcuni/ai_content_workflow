@@ -5,7 +5,8 @@
 (`bowtie-content-tool-poc` + `bowtie-content-tool-web`) deployed by
 `.github/workflows/deploy-workers.yml`. The Python backend in `content_tool/` was
 **not** deleted — it remains the desktop Tauri sidecar, runs the evals, and is used
-for local dev.
+for local dev. *(Amendment: the Tauri desktop app was later retired and removed;
+the Python backend is retained for evals + local dev only.)*
 **Spec:** [`../specs/2026-05-31-workers-native-backend-design.md`](../specs/2026-05-31-workers-native-backend-design.md)
 
 Staged Python→TypeScript port onto Cloudflare Workers (free plan). Each phase ends

@@ -147,7 +147,7 @@ false }`) — still a direct SQL connection, no PostgREST/supabase-js.
 | `src/run-stream.ts` | `RunStream` **Durable Object** — one per run; persists ordered events and streams them to the browser over SSE. |
 | `src/gemini/` | Gemini client. `GeminiProxy` is a **US-pinned Durable Object** that egresses Gemini calls from a US region because Google AI Studio geo-blocks the Asia/HK colo. Thoughts/thinking are streamed back through this DO by `runId`. |
 | `src/db/` | Typed query layer over `postgres.js` (mirrors the SQLAlchemy models). Includes a **canonical JSON serializer** that must stay byte-identical to the Python one (prompt-SHA parity). |
-| `src/auth/` | better-auth (email/password) + the `@bowtie.com.hk` email-domain gate + role authorization (`viewer < editor < admin`). SSE auth uses one-time tickets. |
+| `src/auth/` | Supabase Auth (GoTrue) JWT verification (JWKS) + role authorization (`viewer < author < reviewer < admin`, invite-only via `content_tool.app_user`). SSE auth uses one-time tickets. |
 | `src/http/` | CORS (`cors.ts`) — needed because the browser opens SSE **directly** against the backend Worker cross-origin. |
 | `src/config/`, `src/source_policy/` | TS loaders for the shared YAML config (pricing, refresh, prompt graph, source policy). |
 | `src/wordpress/`, `src/compliance/`, `src/agents/`, `src/sse/`, `src/util/` | TS counterparts of the matching Python packages. |
@@ -165,8 +165,9 @@ restart while paused at a gate.
 
 ### 4.3 RBAC
 
-Roles are **Workers-authoritative** (`viewer < editor < admin`). A `viewer` is a
-*content editor* — they may edit/save existing-run content but may **not**
+Roles are **Workers-authoritative** (`viewer < author < reviewer < admin`;
+legacy stored `editor` is coerced to `reviewer`). A `viewer` may edit/save
+existing-run content but may **not**
 create/regenerate runs, decide HITL gates, or publish. `BOOTSTRAP_ADMIN_EMAILS`
 is the break-glass list that is always treated as `admin` (set to
 `franco.ma@bowtie.com.hk` in prod).
@@ -189,7 +190,7 @@ breaking changes from earlier versions.
 | `voices/`, `voices/[slug]` | Editorial personas + per-voice glossary. |
 | `prompts/`, `prompts/[templateId]` | Prompt-template editor + history, and the "Source Policy" tab. |
 | `admin/users` | User/role management (admin only). |
-| `login`, `signup`, `verify` | better-auth email/password flow + `@bowtie.com.hk` gate. |
+| `login`, `signup`, `verify` | Supabase Auth (GoTrue) Google OAuth flow — `/signup` redirects (invite-only), `/verify` exchanges the PKCE code. |
 
 ### 5.2 How the frontend talks to the backend
 

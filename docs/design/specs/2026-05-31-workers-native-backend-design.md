@@ -14,7 +14,8 @@ deploy via `.github/workflows/deploy-workers.yml`.
 
 Re-platform the Python backend to a **Workers-native TypeScript** app that runs on
 the Cloudflare **free** plan (no containers, no Workers Paid). The database stays
-on Supabase. The desktop (Tauri) release is unaffected.
+on Supabase. The desktop (Tauri) release is unaffected. *(Amendment: the Tauri
+desktop app was later retired and removed.)*
 
 ## What the PoC proved (2026-05-31)
 
