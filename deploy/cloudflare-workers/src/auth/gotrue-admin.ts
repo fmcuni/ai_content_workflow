@@ -15,8 +15,7 @@
  *     malformed base can never produce a surprising request target.
  *
  * GoTrue endpoints (relative to `${SUPABASE_URL}/auth/v1`):
- *   POST   /invite                       — send an invite email           {email}
- *   POST   /admin/users                  — create a user                  {email,password?,email_confirm}
+ *   POST   /admin/users                  — create a user (NO email sent)  {email,password?,email_confirm}
  *   DELETE /admin/users/:id              — delete a user
  *   PUT    /admin/users/:id              — update (ban/unban)             {ban_duration}
  *   POST   /admin/users/:id/logout       — revoke all sessions
@@ -184,14 +183,6 @@ function extractGoTrueMessage(parsed: unknown): string | null {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-
-/** Send an invite email to `email`. Returns the created/invited GoTrue user. */
-export async function inviteUser(env: GoTrueAdminEnv, email: string): Promise<GoTrueUser> {
-  const cfg = resolveConfig(env);
-  const validEmail = requireEmail(email);
-  const user = await adminFetch(cfg, "POST", "/invite", { email: validEmail });
-  return user as GoTrueUser;
-}
 
 /**
  * Create a user. Admin-created accounts are pre-confirmed so the user can sign

@@ -108,7 +108,6 @@ vi.mock("../db/client", () => ({
 // Mock the GoTrue admin wrapper so no network call is made. Each fn records its
 // call so the route tests can assert the right admin operation was invoked.
 const gotrue = {
-  inviteUser: vi.fn(),
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   updateUser: vi.fn(),
@@ -119,7 +118,6 @@ vi.mock("../auth/gotrue-admin", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    inviteUser: (...a: unknown[]) => gotrue.inviteUser(...a),
     createUser: (...a: unknown[]) => gotrue.createUser(...a),
     deleteUser: (...a: unknown[]) => gotrue.deleteUser(...a),
     updateUser: (...a: unknown[]) => gotrue.updateUser(...a),
@@ -342,17 +340,22 @@ describe("Supabase provider: GET /admin/users", () => {
   });
 });
 
-describe("Supabase provider: POST /admin/users (create + invite)", () => {
-  it("invites + inserts app_user, audits, returns 201", async () => {
-    gotrue.inviteUser.mockResolvedValue({ id: "new1", email: "new@b.com" });
+describe("Supabase provider: POST /admin/users (create — no email is sent)", () => {
+  it("creates + inserts app_user, audits, returns 201 confirmed", async () => {
+    gotrue.createUser.mockResolvedValue({
+      id: "new1",
+      email: "new@b.com",
+      email_confirmed_at: "2026-07-06T00:00:00Z",
+    });
     const res = await req(appWith("admin@bowtie.com.hk", "self1"), "POST", "/admin/users", {
       email: "new@b.com",
       role: "author",
     }, supabaseEnv());
     expect(res.status).toBe(201);
-    expect(gotrue.inviteUser).toHaveBeenCalledOnce();
+    expect(gotrue.createUser).toHaveBeenCalledOnce();
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.role).toBe("author");
+    expect(json.confirmed).toBe(true); // admin-created users are pre-confirmed
     expect(auditCalls.some((a) => a.event === "rbac.user_create")).toBe(true);
   });
 
@@ -362,7 +365,7 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
       role: "superuser",
     }, supabaseEnv());
     expect(res.status).toBe(400);
-    expect(gotrue.inviteUser).not.toHaveBeenCalled();
+    expect(gotrue.createUser).not.toHaveBeenCalled();
   });
 
   it("rejects a missing email with 400", async () => {
@@ -370,10 +373,10 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("adopts an existing GoTrue identity when the invite says already-registered", async () => {
+  it("adopts an existing GoTrue identity when the create says already-registered", async () => {
     // Google OAuth auto-creates identities, so a previously deleted user who
-    // signed in again must be re-addable: invite fails → adopt by email.
-    gotrue.inviteUser.mockRejectedValue(
+    // signed in again must be re-addable: create fails → adopt by email.
+    gotrue.createUser.mockRejectedValue(
       new GoTrueAdminError(
         "gotrue_error",
         "A user with this email address has already been registered",
@@ -399,7 +402,7 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
   });
 
   it("surfaces the GoTrue error when already-registered but the identity is unfindable", async () => {
-    gotrue.inviteUser.mockRejectedValue(
+    gotrue.createUser.mockRejectedValue(
       new GoTrueAdminError(
         "gotrue_error",
         "A user with this email address has already been registered",
@@ -415,7 +418,7 @@ describe("Supabase provider: POST /admin/users (create + invite)", () => {
   });
 
   it("does NOT adopt on unrelated GoTrue errors (still surfaces them)", async () => {
-    gotrue.inviteUser.mockRejectedValue(new GoTrueAdminError("network_error", "down", 502));
+    gotrue.createUser.mockRejectedValue(new GoTrueAdminError("network_error", "down", 502));
     const res = await req(appWith("admin@bowtie.com.hk"), "POST", "/admin/users", {
       email: "x@b.com",
     }, supabaseEnv());
@@ -556,17 +559,17 @@ describe("Supabase provider: admin-domain rule", () => {
     expect(res.status).toBe(422);
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.error).toBe("admin_domain_forbidden");
-    expect(gotrue.inviteUser).not.toHaveBeenCalled();
+    expect(gotrue.createUser).not.toHaveBeenCalled();
   });
 
   it("allows creating an admin with an eligible bowtie email (201)", async () => {
-    gotrue.inviteUser.mockResolvedValue({ id: "new1", email: "boss@bowtie.com.sg" });
+    gotrue.createUser.mockResolvedValue({ id: "new1", email: "boss@bowtie.com.sg" });
     const res = await req(appWith("admin@bowtie.com.hk", "self1"), "POST", "/admin/users", {
       email: "boss@bowtie.com.sg",
       role: "admin",
     }, supabaseEnv());
     expect(res.status).toBe(201);
-    expect(gotrue.inviteUser).toHaveBeenCalledOnce();
+    expect(gotrue.createUser).toHaveBeenCalledOnce();
     const json = (await res.json()) as Record<string, unknown>;
     expect(json.role).toBe("admin");
   });

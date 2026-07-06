@@ -83,7 +83,7 @@ function UserRow({ user }: { user: AdminUserDetail }) {
         </p>
         <p className="mt-0.5 font-mono text-[11px] tracking-wider text-ink-faint truncate">
           {user.email}
-          {user.confirmed === false && <span className="ml-2 text-accent-deep">invited</span>}
+          {user.confirmed === false && <span className="ml-2 text-accent-deep">pending</span>}
         </p>
       </div>
 
@@ -140,7 +140,7 @@ function UserRow({ user }: { user: AdminUserDetail }) {
 /** Email shape mirror of the backend wrapper's guard (defense in depth). */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** "Create user" dialog: invite a new user with a chosen role. */
+/** "Create user" dialog: provision a new user with a chosen role (no email is sent). */
 function CreateUserDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [email, setEmail] = useState("");
@@ -158,7 +158,7 @@ function CreateUserDialog({ onClose }: { onClose: () => void }) {
   const mut = useMutation({
     mutationFn: () => adminUsersApi.create({ email: email.trim(), role }),
     onSuccess: (u) => {
-      toast.success(`Invite sent to ${u.email}`);
+      toast.success(`User created — ${u.email} can now sign in with Google`);
       qc.invalidateQueries({ queryKey: USERS_QUERY_KEY });
       onClose();
     },
@@ -197,7 +197,7 @@ function CreateUserDialog({ onClose }: { onClose: () => void }) {
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <header className="flex items-center justify-between">
             <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint">
-              Invite · New user
+              Create · New user
             </p>
             <button
               type="button"
@@ -211,8 +211,8 @@ function CreateUserDialog({ onClose }: { onClose: () => void }) {
           </header>
 
           <p className="text-[13px] text-ink-soft leading-relaxed">
-            An invite email is sent immediately; the invitee then signs in with Google using
-            this address. The account starts with the role you pick here; you can change it
+            No email is sent — let the person know they can sign in with Google using this
+            address. The account starts with the role you pick here; you can change it
             afterwards.
           </p>
 
@@ -279,7 +279,7 @@ function CreateUserDialog({ onClose }: { onClose: () => void }) {
               disabled={mut.isPending || !email}
               className="bg-ink text-paper px-4 py-2 text-[12px] tracking-wider uppercase disabled:opacity-40"
             >
-              {mut.isPending ? "Inviting…" : "Send invite"}
+              {mut.isPending ? "Creating…" : "Create"}
             </button>
           </footer>
         </form>

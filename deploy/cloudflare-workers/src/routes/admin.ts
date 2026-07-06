@@ -39,7 +39,6 @@ import {
   createUser,
   deleteUser,
   findUserByEmail,
-  inviteUser,
   listUsers,
   updateUser,
 } from "../auth/gotrue-admin";
@@ -199,16 +198,18 @@ adminRouter.post("/users", async (c) => {
   }
 
   try {
-    // Invite sends the email AND creates the GoTrue user in one step. When the
-    // GoTrue identity already exists, ADOPT it instead of failing: Google OAuth
-    // auto-creates an identity for anyone who signs in, so a previously deleted
-    // (or never-provisioned) user who tried to log in would otherwise be
-    // impossible to (re-)add — GoTrue rejects the invite with
+    // Admin-create the GoTrue user directly (pre-confirmed, NO email is sent —
+    // GoTrue's shared email rate limit made /invite 502, and provisioning never
+    // needed the email: Google OAuth auto-links on the verified address). When
+    // the GoTrue identity already exists, ADOPT it instead of failing: Google
+    // OAuth auto-creates an identity for anyone who signs in, so a previously
+    // deleted (or never-provisioned) user who tried to log in would otherwise be
+    // impossible to (re-)add — GoTrue rejects the create with
     // "A user with this email address has already been registered".
     let gotrueUser: GoTrueUser;
     let adoptedExisting = false;
     try {
-      gotrueUser = await inviteUser(c.env, email);
+      gotrueUser = await createUser(c.env, email);
     } catch (e: unknown) {
       if (!(e instanceof GoTrueAdminError) || !isAlreadyRegistered(e)) throw e;
       const existing = await findUserByEmail(c.env, email);
@@ -253,7 +254,7 @@ adminRouter.post("/users", async (c) => {
       name: inserted.display_name,
       role: (inserted.role ?? role) as Role,
       status: inserted.status ?? "active",
-      confirmed: adoptedExisting ? isConfirmed(gotrueUser) : false,
+      confirmed: isConfirmed(gotrueUser),
     };
     return c.json(out, 201);
   } catch (e: unknown) {

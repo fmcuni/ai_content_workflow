@@ -64,7 +64,7 @@ describe("AdminUsersPage", () => {
     expect(screen.getByText("target@bowtie.com.hk")).toBeInTheDocument();
   });
 
-  it("opens the Create user dialog and invites a new user", async () => {
+  it("opens the Create user dialog and creates a new user (no email sent)", async () => {
     adminUsersApi.list.mockResolvedValue([]);
     adminUsersApi.create.mockResolvedValue(user({ id: "new1", email: "new@bowtie.com.hk", role: "author" }));
     renderPage();
@@ -78,7 +78,7 @@ describe("AdminUsersPage", () => {
       target: { value: "new@bowtie.com.hk" },
     });
     fireEvent.change(screen.getByLabelText("Role"), { target: { value: "author" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() =>
       expect(adminUsersApi.create).toHaveBeenCalledWith({

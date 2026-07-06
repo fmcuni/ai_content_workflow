@@ -14,7 +14,6 @@ import {
   GoTrueAdminError,
   createUser,
   deleteUser,
-  inviteUser,
   listUsers,
   updateUser,
   DISABLE_BAN_DURATION,
@@ -61,7 +60,7 @@ describe("fail-closed when unconfigured", () => {
   it("throws a typed not_configured error and makes NO fetch", async () => {
     const spy = vi.fn();
     vi.stubGlobal("fetch", spy);
-    await expect(inviteUser({}, "a@b.com")).rejects.toMatchObject({
+    await expect(createUser({}, "a@b.com")).rejects.toMatchObject({
       code: "not_configured",
       status: 501,
     });
@@ -70,13 +69,13 @@ describe("fail-closed when unconfigured", () => {
 
   it("rejects a blank service_role key", async () => {
     await expect(
-      inviteUser({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "  " }, "a@b.com"),
+      createUser({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "  " }, "a@b.com"),
     ).rejects.toMatchObject({ code: "not_configured" });
   });
 
   it("rejects a malformed SUPABASE_URL", async () => {
     await expect(
-      inviteUser({ SUPABASE_URL: "not a url", SUPABASE_SERVICE_ROLE_KEY: KEY }, "a@b.com"),
+      createUser({ SUPABASE_URL: "not a url", SUPABASE_SERVICE_ROLE_KEY: KEY }, "a@b.com"),
     ).rejects.toMatchObject({ code: "not_configured" });
   });
 });
@@ -84,10 +83,10 @@ describe("fail-closed when unconfigured", () => {
 describe("service_role key handling", () => {
   it("sends the key in apikey + Authorization headers and nowhere else", async () => {
     mockFetch(200, { id: "u1", email: "a@b.com" });
-    await inviteUser(env, "a@b.com");
+    await createUser(env, "a@b.com");
     expect(calls).toHaveLength(1);
     const call = calls[0]!;
-    expect(call.url).toBe("https://proj.supabase.co/auth/v1/invite");
+    expect(call.url).toBe("https://proj.supabase.co/auth/v1/admin/users");
     expect(call.headers.apikey).toBe(KEY);
     expect(call.headers.Authorization).toBe(`Bearer ${KEY}`);
     // The body must NOT carry the key.
@@ -98,7 +97,7 @@ describe("service_role key handling", () => {
     mockFetch(403, { msg: "not allowed" });
     let thrown: unknown;
     try {
-      await inviteUser(env, "a@b.com");
+      await createUser(env, "a@b.com");
     } catch (e) {
       thrown = e;
     }
@@ -114,7 +113,7 @@ describe("input validation (before any fetch)", () => {
   it("rejects an invalid email", async () => {
     const spy = vi.fn();
     vi.stubGlobal("fetch", spy);
-    await expect(inviteUser(env, "not-an-email")).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(createUser(env, "not-an-email")).rejects.toMatchObject({ code: "invalid_input" });
     expect(spy).not.toHaveBeenCalled();
   });
 
