@@ -103,10 +103,11 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 A second Cloudflare account (franco.ma@bowtie.com.hk, `franco-ma.workers.dev`)
 hosts compute-only duplicates: `alt` mirrors prod (same prod Supabase/WP data)
 and `alt-dev` mirrors dev (dev Supabase). URLs: `bowtie-content-tool-{poc,web}[-dev].franco-ma.workers.dev`.
-Deploy manually with the alt creds (`CF_ALT_API_TOKEN`/`CF_ALT_ACCOUNT_ID` in
-gitignored `.env.local`): backend `npx wrangler deploy --env alt|alt-dev`, web
-`node scripts/deploy-web.mjs alt|alt-dev`. **CI never deploys alt targets** —
-keep them in step with prod/dev by redeploying after notable releases.
+**CI deploys all four alt Workers** on push to main (`deploy-workers.yml` alt
+steps run after the fmc prod deploys; GH secrets `CF_ALT_API_TOKEN`/
+`CF_ALT_ACCOUNT_ID`/`SUPABASE_ANON_KEY_DEV`). Manual fallback with the same
+creds from gitignored `.env.local`: backend `npx wrangler deploy --env alt|alt-dev`,
+web `node scripts/deploy-web.mjs alt|alt-dev`.
 
 ### Dev environment (Workers) — develop here first
 
