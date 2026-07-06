@@ -14,6 +14,22 @@ Avoid:
 - pasting full logs into context
 - re-reading the same file after small edits unless needed
 
+## Model Routing
+
+Use subagents when they keep the main Fable context cleaner or make the work safer.
+
+- Use Fable for planning, architecture, task split, and final judgment.
+- Use `codebase-scout` for broad repo scans, logs, search, and read-only investigation.
+- Use `sonnet-builder` for routine implementation, refactors, tests, and scoped file edits.
+- Use `opus-reviewer` for hard debugging, risky logic, security-sensitive code, migrations, complex state, or pre-merge review.
+
+Effort guide:
+- Fable: high by default, xhigh only for genuinely hard tasks.
+- Sonnet: medium for building, low for scouting.
+- Opus: xhigh only for deep review.
+
+Subagents should return concise findings: files inspected or changed, validation run, risks, and next steps. Do not dump huge logs unless requested.
+
 # Project Instructions
 
 Bowtie AI Content Tool — LangGraph-based article update pipeline with HITL
@@ -98,7 +114,7 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 - Parity gate: `node deploy/cloudflare-workers/parity/check-parity.mjs` diffs the TS
   backend against the Python reference over read-only routes.
 
-### Alt account (manual deploy only)
+### Alt account (CI-deployed)
 
 A second Cloudflare account (franco.ma@bowtie.com.hk, `franco-ma.workers.dev`)
 hosts compute-only duplicates: `alt` mirrors prod (same prod Supabase/WP data)
