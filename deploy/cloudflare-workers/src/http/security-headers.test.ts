@@ -71,6 +71,8 @@ describe("security-headers constant", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.supabase.co");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.fmc.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("wss://*.fmc.workers.dev");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://*.franco-ma.workers.dev");
+    expect(CONTENT_SECURITY_POLICY).toContain("wss://*.franco-ma.workers.dev");
   });
 
   it("isWebSocketUpgrade detects an upgrade by webSocket handle or 101 status", () => {

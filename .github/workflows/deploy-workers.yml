@@ -124,6 +124,22 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: npm run cf:deploy
 
+      # 2026-07-06: a CI-built frontend artifact deployed "green" while every
+      # server-rendered route hung until the CPU limit (login was down for all
+      # logged-out users). Fail the job loudly if the just-deployed Worker
+      # can't serve /login quickly.
+      - name: Smoke-check prod frontend (/login must 200)
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
+              "https://bowtie-content-tool-web.fmc.workers.dev/login" || echo 000)
+            [ "$code" = "200" ] && exit 0
+            echo "attempt $i: /login returned $code; retrying"
+            sleep 10
+          done
+          echo "FAIL: prod /login did not return 200 — bad artifact deployed"
+          exit 1
+
       # Alt-account frontends (deploy-web.mjs resolves web/env.<target>.public
       # itself, so these run from the repo root).
       - name: Deploy frontend Worker (alt account, alt)
@@ -140,3 +156,15 @@ jobs:
           # alt-dev builds against the DEV Supabase project.
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
         run: node scripts/deploy-web.mjs alt-dev
+
+      - name: Smoke-check alt frontends (/login must 200)
+        run: |
+          fail=0
+          for host in bowtie-content-tool-web.franco-ma.workers.dev \
+                      bowtie-content-tool-web-dev.franco-ma.workers.dev; do
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
+              "https://$host/login" || echo 000)
+            echo "$host /login → $code"
+            [ "$code" = "200" ] || fail=1
+          done
+          exit $fail

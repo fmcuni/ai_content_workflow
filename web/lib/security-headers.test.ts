@@ -37,6 +37,8 @@ describe("security-headers", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.supabase.co");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.fmc.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("wss://*.fmc.workers.dev");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://*.franco-ma.workers.dev");
+    expect(CONTENT_SECURITY_POLICY).toContain("wss://*.franco-ma.workers.dev");
   });
 
   it("CSP allows inline scripts (documented hydration fallback) and inline styles", () => {

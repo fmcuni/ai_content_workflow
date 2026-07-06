@@ -24,7 +24,9 @@ export const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co https://*.fmc.workers.dev wss://*.fmc.workers.dev",
+  // Both known Cloudflare accounts (fmc + alt/franco-ma) are allowlisted;
+  // derive from the Worker's own origin instead if a third account ever appears.
+  "connect-src 'self' https://*.supabase.co https://*.fmc.workers.dev wss://*.fmc.workers.dev https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
