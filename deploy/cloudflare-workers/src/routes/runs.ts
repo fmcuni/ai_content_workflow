@@ -8,7 +8,6 @@ import { runApplyEdits, type ApplyEditComment } from "../agents/apply_edits";
 import { DoGeminiClient } from "../gemini/do_client";
 import {
   buildMeta,
-  detectSeoPlugin,
   WordPressClient,
   WordPressError,
 } from "../wordpress/client";
@@ -1184,16 +1183,9 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
   const featuredMedia = ov.wp_featured_media_id ?? run.wp_featured_media_id;
   const publishAt = ov.wp_publish_at ?? run.wp_publish_at;
 
-  // SEO plugin detection is best-effort: dry-publish must never fail just
-  // because WP is unreachable. Fall back to no SEO description key.
-  let seoPlugin: Awaited<ReturnType<typeof detectSeoPlugin>> = null;
-  if (c.env.WP_BASE_URL) {
-    try {
-      seoPlugin = await detectSeoPlugin(c.env);
-    } catch {
-      seoPlugin = null;
-    }
-  }
+  // All WP targets run Yoast (operator decision 2026-07-06) — the old OPTIONS
+  // probe could get an empty 2xx from the CDN and crash publishes.
+  const seoPlugin: SeoPlugin = "yoast";
 
   const schemaJsonld =
     render.schema_jsonld !== null && render.schema_jsonld !== undefined
@@ -2397,13 +2389,8 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
     return c.json({ detail: "WordPress client not configured" }, 503);
   }
 
-  // SEO plugin detection is best-effort — a WP outage must not block the push.
-  let seoPlugin: SeoPlugin | null = null;
-  try {
-    seoPlugin = await detectSeoPlugin(targetEnv);
-  } catch {
-    seoPlugin = null;
-  }
+  // All WP targets run Yoast (operator decision 2026-07-06).
+  const seoPlugin: SeoPlugin = "yoast";
 
   const schemaJsonld =
     render.schema_jsonld !== null && render.schema_jsonld !== undefined

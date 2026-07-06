@@ -44,7 +44,6 @@ import { runAudit } from "../agents/audit";
 import {
   WordPressClient,
   buildMeta,
-  detectSeoPlugin,
   type PublishPayload,
   type SeoPlugin,
 } from "../wordpress/client";
@@ -877,11 +876,10 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     const targetEnv = buildTargetEnv(this.env, target);
 
-    // SEO plugin detection is a network probe — its own durable step. Detect
-    // against the resolved target instance, not always the default WP.
-    const seoPlugin = await step.do("detect-seo", async () =>
-      detectSeoPlugin(targetEnv),
-    );
+    // All WP targets run Yoast (operator decision 2026-07-06). The old
+    // detect-seo OPTIONS probe could get an empty 2xx from the CDN and
+    // hard-fail the whole publish (run ac2c6720, 2026-07-06).
+    const seoPlugin: SeoPlugin = "yoast";
 
     await step.do("publish", async () =>
       this.withSql(async (sql) => {
@@ -892,7 +890,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         const meta = buildMeta(
           render.meta_description,
           toObjectArrayOrNull(render.schema_jsonld),
-          seoPlugin as SeoPlugin | null,
+          seoPlugin,
         );
 
         // Resolve the target post id. Refresh updates the existing post (from

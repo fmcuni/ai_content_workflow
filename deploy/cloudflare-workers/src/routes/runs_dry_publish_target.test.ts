@@ -142,13 +142,6 @@ vi.mock("../db/client", () => ({
     fn(makeFakeSql()),
 }));
 vi.mock("../gemini/do_client", () => ({ DoGeminiClient: class {} }));
-// detectSeoPlugin hits the network; stub it so dry-publish stays offline.
-vi.mock("../wordpress/client", async () => {
-  const actual = await vi.importActual<typeof import("../wordpress/client")>(
-    "../wordpress/client",
-  );
-  return { ...actual, detectSeoPlugin: async () => null };
-});
 
 import { Hono } from "hono";
 import runsRouter from "./runs";
