@@ -1,4 +1,5 @@
 import { defineCloudflareConfig } from "@opennextjs/cloudflare";
+import staticAssetsIncrementalCache from "@opennextjs/cloudflare/overrides/incremental-cache/static-assets-incremental-cache";
 
 // OpenNext → Cloudflare Workers adapter config for the Bowtie AI Content Tool
 // frontend (free-plan, workers-native deployment).
@@ -6,7 +7,15 @@ import { defineCloudflareConfig } from "@opennextjs/cloudflare";
 // This UI is effectively a client-rendered SPA: TanStack Query talks to the
 // backend Worker over the `/api/*` rewrite (REST) and opens SSE streams
 // directly against it. There is no ISR / `'use cache'` surface that needs a
-// real incremental cache, so we run with defaults — no R2 bucket, KV namespace,
-// or DO queue bindings required. Add an incremental-cache override here only if
-// server-rendered, revalidated routes are introduced later.
-export default defineCloudflareConfig();
+// real (writable) incremental cache — so the prerender data is served from the
+// read-only, build-time static-assets cache (no R2/KV/DO bindings), and
+// `enableCacheInterception` lets requests that reach the Next handler (e.g.
+// RSC client-nav) answer from that cache WITHOUT loading the full NextServer —
+// a per-request CPU win on the free plan's 10ms cap. Incompatible with PPR;
+// revisit if PPR or revalidated routes are ever introduced.
+// (Most document requests never get here at all — worker-entry.mjs serves
+// prerendered HTML straight from ASSETS; see web/worker-entry.mjs.)
+export default defineCloudflareConfig({
+  incrementalCache: staticAssetsIncrementalCache,
+  enableCacheInterception: true,
+});

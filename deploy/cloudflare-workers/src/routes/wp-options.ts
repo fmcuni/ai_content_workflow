@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { getSql } from "../db/client";
+import { getSql, isConnectionError, resetSqlCache } from "../db/client";
 import { queryWpCategories, queryWpUsers } from "../db/wp";
 import type { WpOptionItem } from "../db/wp";
 import { getPublishTargetForVoice } from "../db/publish_targets";
@@ -10,8 +10,11 @@ const wpOptionsRouter = new Hono<{ Bindings: Env }>();
 // These options feed the author/category pickers on the HITL_2 publish panel —
 // the last screen before pushing to WordPress. A single transient DB-connection
 // blip (observed as an intermittent cold-start 500 on the first hit) would leave
-// that picker empty at the worst possible moment, so each lookup is retried with
-// a FRESH connection per attempt. A persistent failure still surfaces as a 500.
+// that picker empty at the worst possible moment, so each lookup is retried. The
+// client itself is the request-scoped cache (src/db/client.ts) — a retry only
+// rebuilds a fresh connection when the failure looks connection-flavored
+// (resetSqlCache() below), rather than unconditionally discarding a socket
+// that may still be fine. A persistent failure still surfaces as a 500.
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 100;
 
@@ -51,7 +54,7 @@ async function resolveAuthRef(
 
 async function fetchOptionsWithRetry(
   env: Env,
-  ctx: { waitUntil: (p: Promise<unknown>) => void },
+  _ctx: { waitUntil: (p: Promise<unknown>) => void },
   run: (sql: ReturnType<typeof getSql>) => Promise<WpOptionItem[]>,
 ): Promise<WpOptionItem[]> {
   let lastErr: unknown;
@@ -61,10 +64,12 @@ async function fetchOptionsWithRetry(
       return await run(sql);
     } catch (err) {
       lastErr = err;
-    } finally {
-      // Close the (possibly broken) socket after the response; a retry opens a
-      // new one rather than reusing a connection that just failed.
-      ctx.waitUntil(sql.end().catch(() => undefined));
+      if (isConnectionError(err)) {
+        // Drop the shared cached client so the retry (or the next request,
+        // whichever comes first) builds a fresh one instead of reusing a
+        // socket that just failed.
+        resetSqlCache(env.HYPERDRIVE.connectionString);
+      }
     }
     if (attempt < MAX_ATTEMPTS) {
       await new Promise((resolve) => setTimeout(resolve, attempt * RETRY_BASE_MS));

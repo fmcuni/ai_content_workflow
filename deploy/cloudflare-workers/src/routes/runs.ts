@@ -58,10 +58,14 @@ const WP_DEFAULT_PAGE_TEMPLATE = "";
 // Statuses where the LangGraph is still actively driving the run.
 // Ledger shows ALL runs — nothing is auto-removed by age. The list is sorted
 // newest-first, so a low cap silently drops the OLDEST runs, which reads like a
-// time-based dismissal. Keep this high enough to cover every run; runs only
-// leave the ledger by an explicit human action, never by a timer. Overridable
-// per-request via `?limit=`.
-const DEFAULT_LIST_LIMIT = 2000;
+// time-based dismissal. Runs only leave the ledger by an explicit human action,
+// never by a timer — but 2000 rows through the LEFT JOIN LATERAL below was
+// costing ~47ms of CPU per request (vs a ~10ms budget on the free plan). 200
+// covers every realistic "recent work" view; older runs are still reachable via
+// `?limit=` (hard-capped at MAX_LIST_LIMIT so a client can't repeat the same
+// blowup).
+const DEFAULT_LIST_LIMIT = 200;
+const MAX_LIST_LIMIT = 500;
 
 // HITL_2 request_changes cap — must match the Python guard.
 const HITL_2_MAX_ITERATIONS = 3;
@@ -464,7 +468,9 @@ runsRouter.post("/", requireRole("author"), async (c) => {
 runsRouter.get("/", async (c) => {
   const statusFilter = c.req.query("status") ?? null;
   const limitRaw = parseInt(c.req.query("limit") ?? String(DEFAULT_LIST_LIMIT), 10);
-  const limit = Number.isFinite(limitRaw) ? Math.max(limitRaw, 1) : DEFAULT_LIST_LIMIT;
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(limitRaw, 1), MAX_LIST_LIMIT)
+    : DEFAULT_LIST_LIMIT;
 
   const rows = await withDb(c.env, c.executionCtx, (sql: Sql) => {
     // Columns are qualified with `runs.` because the topic_candidates join below

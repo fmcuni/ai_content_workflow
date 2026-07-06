@@ -217,6 +217,10 @@ export class RefreshScanWorkflow extends WorkflowEntrypoint<Env, RefreshScanPara
     }
   }
 
+  /** Runs `fn` against the shared per-isolate cached client (src/db/client.ts)
+   * — no longer opens/closes a connection per call; self-heals the cache on a
+   * connection-flavored error before the platform's own step retry re-runs
+   * this. */
   private async withSql<T>(fn: (sql: ReturnType<typeof getSql>) => Promise<T>): Promise<T> {
     const sql = getSql(this.env);
     try {

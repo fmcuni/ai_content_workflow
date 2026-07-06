@@ -1323,7 +1323,11 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     });
   }
 
-  /** Open a short-lived connection, run `fn`, and close the socket afterwards. */
+  /** Runs `fn` against the shared per-isolate cached client (src/db/client.ts)
+   * — no longer opens/closes a connection per call. A Workflow step that fails
+   * on a connection-flavored error evicts the cache before propagating, so the
+   * platform's own step retry rebuilds a fresh client instead of retrying the
+   * same dead socket. */
   private async withSql<T>(fn: (sql: ReturnType<typeof getSql>) => Promise<T>): Promise<T> {
     const sql = getSql(this.env);
     try {

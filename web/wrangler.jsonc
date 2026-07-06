@@ -15,7 +15,11 @@
   //   NEXT_PUBLIC_API_BASE=https://bowtie-content-tool.<acct>.workers.dev npm run cf:deploy
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bowtie-content-tool-web",
-  "main": ".open-next/worker.js",
+  // Custom fast-path entry in front of OpenNext's handler — see worker-entry.mjs
+  // for why (every route is prerendered; most requests never need the full
+  // Next server). Falls through to .open-next/worker.js (dynamic import) for
+  // anything it can't answer directly. Applies to every env below (inherited).
+  "main": "worker-entry.mjs",
   "compatibility_date": "2026-05-30",
   "compatibility_flags": [
     // Node.js APIs used by the Next.js server runtime under OpenNext.
@@ -30,7 +34,12 @@
   // Static assets (Next build output) served by the Worker.
   "assets": {
     "directory": ".open-next/assets",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    // __prerender/* holds the materialized page shells served by
+    // worker-entry.mjs via env.ASSETS.fetch — force those paths through the
+    // Worker so direct GETs to /__prerender/*.html can't bypass the crawler
+    // 403 / cookie gate (the entry 404s them; ASSETS.fetch still works).
+    "run_worker_first": ["/__prerender/*"]
   },
   // Dev environment — parallel frontend Worker `bowtie-content-tool-web-dev`,
   // deployed with `npm run cf:deploy:dev`. `assets`, `main`, `compatibility_*`
