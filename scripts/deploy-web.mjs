@@ -4,6 +4,11 @@
 //
 //   node scripts/deploy-web.mjs prod   ->  bowtie-content-tool-web
 //   node scripts/deploy-web.mjs dev    ->  bowtie-content-tool-web-dev (--env dev)
+//   node scripts/deploy-web.mjs alt    ->  bowtie-content-tool-web on the ALT
+//     Cloudflare account (--env alt; pass CLOUDFLARE_API_TOKEN/_ACCOUNT_ID for
+//     that account — see CF_ALT_* in .env.local)
+//   node scripts/deploy-web.mjs alt-dev -> bowtie-content-tool-web-dev on the
+//     ALT account (dev Supabase values, anon key from .env.dev.local)
 //
 // WHY THIS EXISTS
 // ---------------
@@ -31,10 +36,15 @@ const WEB_DIR = join(REPO_ROOT, "web");
 const ANON_KEY = "NEXT_PUBLIC_SUPABASE_ANON_KEY";
 
 const target = process.argv[2];
-if (target !== "prod" && target !== "dev") {
-  console.error(`usage: node scripts/deploy-web.mjs <prod|dev>  (got: ${target ?? "nothing"})`);
+if (!["prod", "dev", "alt", "alt-dev"].includes(target)) {
+  console.error(
+    `usage: node scripts/deploy-web.mjs <prod|dev|alt|alt-dev>  (got: ${target ?? "nothing"})`,
+  );
   process.exit(1);
 }
+// Dev-like targets build against the dev Supabase project; their anon key
+// lives in .env.dev.local under the DEV_ prefix.
+const isDevLike = target === "dev" || target === "alt-dev";
 
 /** Parse a KEY=VALUE env file into an object. Ignores blanks/`#` comments,
  *  splits on the FIRST `=`, and strips one layer of surrounding quotes. */
@@ -70,22 +80,21 @@ const publicEnv = parseEnvFile(publicFile);
 // 2. Resolve the anon key. CI passes it via the environment (GH secret). Locally
 //    fall back to the gitignored .env file for the target. Never printed.
 //    NOTE the local dev file stores it under DEV_SUPABASE_ANON_KEY (DEV_ prefix).
-const localEnvFile = join(REPO_ROOT, target === "dev" ? ".env.dev.local" : ".env.local");
+const localEnvFile = join(REPO_ROOT, isDevLike ? ".env.dev.local" : ".env.local");
 const localEnv = parseEnvFile(localEnvFile);
 const anon =
   process.env[ANON_KEY] ||
   process.env[`${ANON_KEY}_${target.toUpperCase()}`] ||
   localEnv[ANON_KEY] ||
-  (target === "dev" ? localEnv.DEV_SUPABASE_ANON_KEY : undefined);
+  (isDevLike ? localEnv.DEV_SUPABASE_ANON_KEY : undefined);
 
 if (!anon) {
-  const localHint =
-    target === "dev"
-      ? "add DEV_SUPABASE_ANON_KEY=... to .env.dev.local"
-      : "add NEXT_PUBLIC_SUPABASE_ANON_KEY=... to .env.local";
+  const localHint = isDevLike
+    ? "add DEV_SUPABASE_ANON_KEY=... to .env.dev.local"
+    : "add NEXT_PUBLIC_SUPABASE_ANON_KEY=... to .env.local";
   console.error(
     `${ANON_KEY} not found.\n` +
-      `  CI:    set the ${ANON_KEY}${target === "dev" ? "_DEV" : ""} GH Actions secret.\n` +
+      `  CI:    set the ${ANON_KEY}${isDevLike ? "_DEV" : ""} GH Actions secret.\n` +
       `  local: ${localHint}.`,
   );
   process.exit(1);
@@ -95,7 +104,7 @@ if (!anon) {
 // be baked; the anon key is layered in last.
 const buildEnv = { ...process.env, ...publicEnv, [ANON_KEY]: anon, WEB_BUILD_TARGET: "cloudflare" };
 
-const deployArgs = ["opennextjs-cloudflare", "deploy", ...(target === "dev" ? ["--env", "dev"] : [])];
+const deployArgs = ["opennextjs-cloudflare", "deploy", ...(target === "prod" ? [] : ["--env", target])];
 
 console.log(`Deploying frontend Worker [${target}]`);
 for (const k of Object.keys(publicEnv)) console.log(`  ${k}=${publicEnv[k]}`);

@@ -152,6 +152,149 @@
 	// BEFORE first deploy, replace the two placeholders below (SUPABASE_URL +
 	// hyperdrive id) and set the dev secrets — see docs/dev-environment-runbook.md.
 	"env": {
+		// Alt account — a second deployment of this SAME backend on the separate
+		// franco.ma@bowtie.com.hk Cloudflare account (compute-only duplicate:
+		// shares prod's Supabase DB/auth, Gemini key, and WordPress). Deploy with
+		//   CLOUDFLARE_API_TOKEN=$CF_ALT_API_TOKEN CLOUDFLARE_ACCOUNT_ID=$CF_ALT_ACCOUNT_ID \
+		//     npx wrangler deploy --env alt
+		// Worker/Workflow/DO names match prod — no clash across accounts. The
+		// Hyperdrive id is account-scoped, so alt has its OWN config pointing at
+		// the SAME prod Supabase DB.
+		"alt": {
+			"name": "bowtie-content-tool-poc",
+			// Cron disabled: prod already runs the daily refresh-scan against the
+			// shared DB — a second schedule would double-run scans + Gemini spend.
+			"triggers": {
+				"crons": []
+			},
+			"workflows": [
+				{
+					"name": "production",
+					"binding": "PRODUCTION",
+					"class_name": "ProductionWorkflow"
+				},
+				{
+					"name": "topic-expansion",
+					"binding": "TOPIC_EXPANSION",
+					"class_name": "TopicExpansionWorkflow"
+				},
+				{
+					"name": "refresh-scan",
+					"binding": "REFRESH_SCAN",
+					"class_name": "RefreshScanWorkflow"
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "RUN_STREAM",
+						"class_name": "RunStream"
+					},
+					{
+						"name": "GEMINI_PROXY",
+						"class_name": "GeminiProxy"
+					},
+					{
+						"name": "RUN_DOC",
+						"class_name": "RunDoc"
+					}
+				]
+			},
+			"vars": {
+				"GEMINI_MODEL": "gemini-3.1-pro-preview",
+				// Browser-direct SSE allow-origin: the alt frontend Worker.
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev",
+				"PERSIST_THINKING": "on",
+				// Same PROD Supabase project (shared DB + auth).
+				"SUPABASE_URL": "https://gfpkqsiyeslscgsuehmj.supabase.co"
+			},
+			// Alt-account Hyperdrive → the SAME prod Supabase DB.
+			"hyperdrive": [
+				{
+					"binding": "HYPERDRIVE",
+					"id": "0875862f2f964a2cb7f1b69094f3818b"
+				}
+			],
+			// Separate account → counters can't collide with prod; ids local to alt.
+			"ratelimits": [
+				{
+					"name": "RATE_LIMITER_MUTATION",
+					"namespace_id": "2001",
+					"simple": {
+						"limit": 30,
+						"period": 60
+					}
+				}
+			]
+		},
+		// Alt account's DEV environment — same shape as env.dev (dev Supabase
+		// DB + auth), deployed to the franco.ma@bowtie.com.hk account. Deploy:
+		//   CLOUDFLARE_API_TOKEN=$CF_ALT_API_TOKEN CLOUDFLARE_ACCOUNT_ID=$CF_ALT_ACCOUNT_ID \
+		//     npx wrangler deploy --env alt-dev
+		"alt-dev": {
+			"name": "bowtie-content-tool-poc-dev",
+			"triggers": {
+				"crons": []
+			},
+			"workflows": [
+				{
+					"name": "production-dev",
+					"binding": "PRODUCTION",
+					"class_name": "ProductionWorkflow"
+				},
+				{
+					"name": "topic-expansion-dev",
+					"binding": "TOPIC_EXPANSION",
+					"class_name": "TopicExpansionWorkflow"
+				},
+				{
+					"name": "refresh-scan-dev",
+					"binding": "REFRESH_SCAN",
+					"class_name": "RefreshScanWorkflow"
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "RUN_STREAM",
+						"class_name": "RunStream"
+					},
+					{
+						"name": "GEMINI_PROXY",
+						"class_name": "GeminiProxy"
+					},
+					{
+						"name": "RUN_DOC",
+						"class_name": "RunDoc"
+					}
+				]
+			},
+			"vars": {
+				"GEMINI_MODEL": "gemini-3.1-pro-preview",
+				// Browser-direct SSE allow-origin: the alt-account DEV frontend Worker.
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.franco-ma.workers.dev",
+				"PERSIST_THINKING": "on",
+				// Same DEV Supabase project as env.dev (shared dev DB + auth).
+				"SUPABASE_URL": "https://ovxvhxwmqeccjudhyfbh.supabase.co"
+			},
+			// Alt-account Hyperdrive → the SAME dev Supabase DB as env.dev.
+			"hyperdrive": [
+				{
+					"binding": "HYPERDRIVE",
+					"id": "230e538bb55d4385bca5ec9f9f3e2cc1"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RATE_LIMITER_MUTATION",
+					"namespace_id": "3001",
+					"simple": {
+						"limit": 30,
+						"period": 60
+					}
+				}
+			]
+		},
 		"dev": {
 			"name": "bowtie-content-tool-poc-dev",
 			// Disable the daily refresh-scan cron in dev. `crons: []` disables it;
