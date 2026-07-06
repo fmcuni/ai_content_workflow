@@ -19,6 +19,7 @@ import { refreshRouter } from "./routes/refresh";
 import { adminRouter } from "./routes/admin";
 import { requireAuth, type AuthVars } from "./auth/middleware";
 import { loadRole, requireRole } from "./auth/authz";
+import { runWithSqlContext } from "./db/client";
 import { mintTicket } from "./auth/ticket";
 import { blockKnownCrawlers, ROBOTS_TXT } from "./http/bot-guard";
 import { applySecurityHeaders, isWebSocketUpgrade } from "./http/security-headers";
@@ -169,6 +170,15 @@ export function makeRateLimitMiddleware(
 }
 
 const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
+
+// Scope the request-local DB client cache (src/db/client.ts getSql) to
+// exactly this request's async call graph. Registered FIRST so every
+// downstream middleware/handler — including requireAuth's loadRole and any
+// route's withDb — runs inside the same AsyncLocalStorage store and reuses
+// one postgres.js client instead of rebuilding one per getSql() call. Must
+// `return next()` (not `await next(); return`) so the continuation itself
+// (and anything scheduled from it) still executes inside `sqlContext.run`.
+app.use("*", (_c, next) => runWithSqlContext(() => next()));
 
 // --- Security headers (CSP + hardening) ------------------------------------
 // Stamp the shared CSP + hardening headers onto every response. Registered
@@ -355,6 +365,16 @@ app.route("/refresh", refreshRouter);
 // src/routes/admin.ts. Registered after the gate above (it is not a public path).
 app.use("/admin/*", requireRole("admin"));
 app.route("/admin", adminRouter);
+
+// No custom app.onError: the getSql() cache is now request-scoped (see
+// runWithSqlContext above), so a connection-flavored error can't leak into a
+// later, unrelated request the way a module-scope cache could — the store
+// (and any dead client in it) is simply dropped when this request's promise
+// chain finishes. The per-request self-heal still lives at the call site
+// that can retry within the SAME request (src/routes/wp-options.ts). That
+// leaves nothing for a custom handler to add here, so we keep Hono's default
+// errorHandler (logs + mirrors HTTPException responses) instead of
+// duplicating it.
 
 // The default export carries BOTH the HTTP handler (Hono) and the Cron Trigger
 // `scheduled` handler. The cron fires the refresh-scan Workflow (CMS Stage 0);

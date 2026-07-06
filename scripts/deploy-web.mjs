@@ -116,4 +116,9 @@ function run(cmd, args) {
 }
 
 run("npx", ["opennextjs-cloudflare", "build"]);
+// Copies the already-prerendered HTML into .open-next/assets/__prerender/ so
+// the custom worker-entry.mjs fast path can serve pages without invoking the
+// Next handler. Must run after build, before deploy. See
+// web/scripts/materialize-prerender.mjs.
+run("node", ["scripts/materialize-prerender.mjs"]);
 run("npx", deployArgs);

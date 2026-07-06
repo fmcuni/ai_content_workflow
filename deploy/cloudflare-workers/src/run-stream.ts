@@ -193,6 +193,9 @@ export class RunStream extends DurableObject<Env> {
     // Persist OUTSIDE the block: the PG round-trip must not stall new appends.
     // ON CONFLICT (stream_id, seq) DO NOTHING keeps this idempotent against a
     // retry that re-inserts rows a prior attempt may have partially committed.
+    // A DO alarm runs outside any request's AsyncLocalStorage scope (see
+    // src/db/client.ts), so getSql() here always builds a fresh, uncached
+    // client — this alarm owns its full lifecycle and must close it itself.
     const sql = getSql(this.env);
     try {
       await persistEvents(sql, snapshot);
