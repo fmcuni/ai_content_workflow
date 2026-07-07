@@ -36,10 +36,14 @@
 	],
 	// Cron Trigger (free plan) — periodic refresh scan (CMS Stage 0). Daily 02:00 UTC.
 	// The scheduled() handler in src/index.ts kicks the REFRESH_SCAN Workflow.
+	// Cron DISABLED here: both accounts run as independent mirrors (each web
+	// fronts its own account's backend), but the daily refresh-scan must run on
+	// exactly ONE of them — they share the prod DB, and a second schedule would
+	// double-run scans + Gemini spend. It runs on franco-ma (env.alt) since
+	// 2026-07-07. Swap the "0 2 * * *" entry between this block and env.alt to
+	// move ownership.
 	"triggers": {
-		"crons": [
-			"0 2 * * *"
-		]
+		"crons": []
 	},
 	"durable_objects": {
 		"bindings": [
@@ -100,8 +104,10 @@
 		"GEMINI_MODEL": "gemini-3.1-pro-preview",
 		// SSE CORS allow-origin: the deployed frontend Worker (browser-direct SSE to
 		// /runs/:id/events and /topic-batches/:id/events). REST goes via Next rewrites
-		// (server-side, no CORS). See src/http/cors.ts.
-		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev",
+		// (server-side, no CORS). See src/http/cors.ts. The alt-account web mirror
+		// also fronts THIS backend (workflow/DO state lives on one account), so its
+		// origin is allow-listed too.
+		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev,https://bowtie-content-tool-web.franco-ma.workers.dev",
 		// Verbose per-step event log: persist raw *.thinking events too. Default
 		// ON; set "0"/"false"/"off" to stream thinking live but skip persisting it
 		// to content_tool.run_event_logs. Read by the RunStream DO.
@@ -162,10 +168,13 @@
 		// the SAME prod Supabase DB.
 		"alt": {
 			"name": "bowtie-content-tool-poc",
-			// Cron disabled: prod already runs the daily refresh-scan against the
-			// shared DB — a second schedule would double-run scans + Gemini spend.
+			// The daily refresh-scan cron runs HERE (and is disabled on the fmc
+			// block above) — the accounts are independent mirrors, but exactly
+			// one may run the scan against the shared DB.
 			"triggers": {
-				"crons": []
+				"crons": [
+					"0 2 * * *"
+				]
 			},
 			"workflows": [
 				{
@@ -202,8 +211,9 @@
 			},
 			"vars": {
 				"GEMINI_MODEL": "gemini-3.1-pro-preview",
-				// Browser-direct SSE allow-origin: the alt frontend Worker.
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev",
+				// Browser-direct SSE allow-origin: BOTH prod-tier frontend Workers
+				// (account-agnostic — the allowlist never changes on failover).
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev,https://bowtie-content-tool-web.fmc.workers.dev",
 				"PERSIST_THINKING": "on",
 				// Same PROD Supabase project (shared DB + auth).
 				"SUPABASE_URL": "https://gfpkqsiyeslscgsuehmj.supabase.co"
@@ -271,8 +281,9 @@
 			},
 			"vars": {
 				"GEMINI_MODEL": "gemini-3.1-pro-preview",
-				// Browser-direct SSE allow-origin: the alt-account DEV frontend Worker.
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.franco-ma.workers.dev",
+				// Browser-direct SSE allow-origin: BOTH dev-tier frontend Workers
+				// (account-agnostic — the allowlist never changes on failover).
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.franco-ma.workers.dev,https://bowtie-content-tool-web-dev.fmc.workers.dev",
 				"PERSIST_THINKING": "on",
 				// Same DEV Supabase project as env.dev (shared dev DB + auth).
 				"SUPABASE_URL": "https://ovxvhxwmqeccjudhyfbh.supabase.co"
@@ -343,8 +354,9 @@
 			},
 			"vars": {
 				"GEMINI_MODEL": "gemini-3.1-pro-preview",
-				// Browser-direct SSE allow-origin: the DEV frontend Worker.
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.fmc.workers.dev",
+				// Browser-direct SSE allow-origin: the DEV frontend Worker (+ the
+				// alt-account dev web mirror, which fronts this backend too).
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.fmc.workers.dev,https://bowtie-content-tool-web-dev.franco-ma.workers.dev",
 				"PERSIST_THINKING": "on",
 				// REPLACE with the dev Supabase project URL (JWKS issuer for the dev
 				// GoTrue tokens). Must match NEXT_PUBLIC_SUPABASE_URL baked into the
