@@ -21,6 +21,11 @@ import { buildGhostCreds, ghostAdminBase, buildGhostSchemaHead } from "../publis
 import { wrapNonNativeHtmlForGhost } from "../publishers/ghost_html";
 import { checkPublishGuards } from "../util/publish_guards";
 import { restartGuard } from "./run_guards";
+import type {
+  Hitl2Comment as WorkflowHitl2Comment,
+  Params as ProductionParams,
+  RescueGate,
+} from "../workflows/production";
 import type { AuthVars } from "../auth/middleware";
 import { resolveActorIdentity } from "./identity";
 import { requireRole } from "../auth/authz";
@@ -46,7 +51,33 @@ import {
 
 // TODO: integration agent adds PRODUCTION to Env
 interface RunsEnv extends Env {
-  PRODUCTION: Workflow<{ runId: string }>;
+  PRODUCTION: Workflow<ProductionParams>;
+}
+
+/**
+ * Cross-deployment rescue fallback. Workflow instances are account-local, so a
+ * run started on another deployment (e.g. the sunset fmc account) has no
+ * instance here and `get(runId).sendEvent` throws instance.not_found — but the
+ * pipeline state (outline, drafts, renders, the just-claimed decision) all
+ * lives in the shared Postgres DB. Adopt the run by creating a fresh instance
+ * on THIS deployment with the decision injected via params; the workflow skips
+ * every already-persisted step and continues from the gate (no Gemini re-runs).
+ * Returns false when the create itself fails (caller un-claims + 409s as before).
+ */
+async function rescueRunHere(env: RunsEnv, runId: string, rescue: RescueGate): Promise<boolean> {
+  try {
+    await env.PRODUCTION.create({ id: runId, params: { runId, rescue } });
+    return true;
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Duplicate-id create → a concurrent request already adopted this run here.
+    // That sibling's instance is consuming the SAME persisted claim, so report
+    // success: rolling back the claim now would null approved_by/decision while
+    // the publish proceeds (compliance log would record approver "unknown").
+    if (/already.?exist|duplicate/i.test(message)) return true;
+    console.warn(`[rescue] create failed for run ${runId}: ${message}`);
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -652,6 +683,18 @@ runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
     const instance = await env.PRODUCTION.get(runId);
     await instance.restart(fromStep ? { from: fromStep } : undefined);
   } catch (e: unknown) {
+    // Cross-deployment fallback: no instance on this account → create a fresh
+    // one (full replay from the start). A `from` step CANNOT be honored — there
+    // is no cached step state here to reuse — so refuse rather than silently
+    // replaying everything the operator asked to skip.
+    if (fromStep === undefined) {
+      try {
+        await env.PRODUCTION.create({ id: runId, params: { runId } });
+        return c.json({ ok: true, rescued: true });
+      } catch {
+        // fall through to the failure compensation below
+      }
+    }
     const message = e instanceof Error ? e.message : String(e);
     // Compensate: hand the run back to `failed` so the operator can retry.
     await withDb(c.env, c.executionCtx, async (sql: Sql) => {
@@ -731,18 +774,21 @@ runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
   }
 
   const env = c.env as RunsEnv;
+  const hitl1Payload = {
+    decision,
+    edited_outline: (body.edited_outline ?? null) as object | null,
+    new_route: body.new_route ?? null,
+    notes: body.notes ?? null,
+  };
   try {
     const instance = await env.PRODUCTION.get(runId);
-    await instance.sendEvent({
-      type: "hitl_1",
-      payload: {
-        decision,
-        edited_outline: body.edited_outline ?? null,
-        new_route: body.new_route ?? null,
-        notes: body.notes ?? null,
-      },
-    });
+    await instance.sendEvent({ type: "hitl_1", payload: hitl1Payload });
   } catch (e: unknown) {
+    // Cross-deployment rescue: adopt the run on this deployment instead of
+    // bouncing the operator with a 409 (see rescueRunHere).
+    if (await rescueRunHere(env, runId, { gate: "hitl_1", payload: hitl1Payload })) {
+      return c.json({ ok: true, rescued: true });
+    }
     const message = e instanceof Error ? e.message : String(e);
     // Compensate: the gate claim above already recorded hitl_1_decision, but the
     // status column is untouched by it (only the workflow's own step transitions
@@ -937,28 +983,38 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
   }
 
   const env = c.env as RunsEnv;
+  const hitl2Payload = {
+    decision,
+    notes: body.notes ?? null,
+    comments: comments as unknown as WorkflowHitl2Comment[],
+    edited_html_body: body.edited_html_body ?? null,
+    edited_seo_title: body.edited_seo_title ?? null,
+    edited_meta_description: body.edited_meta_description ?? null,
+    wp_publish_status: body.wp_publish_status ?? null,
+    wp_author_id: body.wp_author_id ?? null,
+    wp_category_ids: body.wp_category_ids ?? null,
+    wp_tag_ids: body.wp_tag_ids ?? null,
+    wp_featured_media_id: body.wp_featured_media_id ?? null,
+    wp_slug: body.wp_slug ?? null,
+    wp_excerpt: body.wp_excerpt ?? null,
+    wp_publish_at: body.wp_publish_at ?? null,
+  };
   try {
     const instance = await env.PRODUCTION.get(runId);
-    await instance.sendEvent({
-      type: "hitl_2",
-      payload: {
-        decision,
-        notes: body.notes ?? null,
-        comments,
-        edited_html_body: body.edited_html_body ?? null,
-        edited_seo_title: body.edited_seo_title ?? null,
-        edited_meta_description: body.edited_meta_description ?? null,
-        wp_publish_status: body.wp_publish_status ?? null,
-        wp_author_id: body.wp_author_id ?? null,
-        wp_category_ids: body.wp_category_ids ?? null,
-        wp_tag_ids: body.wp_tag_ids ?? null,
-        wp_featured_media_id: body.wp_featured_media_id ?? null,
-        wp_slug: body.wp_slug ?? null,
-        wp_excerpt: body.wp_excerpt ?? null,
-        wp_publish_at: body.wp_publish_at ?? null,
-      },
-    });
+    await instance.sendEvent({ type: "hitl_2", payload: hitl2Payload });
   } catch (e: unknown) {
+    // Cross-deployment rescue: adopt the run on this deployment instead of
+    // bouncing the operator with a 409 (see rescueRunHere). The iteration seeds
+    // the adopted workflow's HITL_2 round counter (step labels + revision cap).
+    if (
+      await rescueRunHere(env, runId, {
+        gate: "hitl_2",
+        payload: hitl2Payload,
+        iteration: guard.priorIteration,
+      })
+    ) {
+      return c.json({ ok: true, rescued: true });
+    }
     const message = e instanceof Error ? e.message : String(e);
     // Compensate: the gate claim above recorded the decision (and, for
     // request_changes, incremented hitl_2_iteration) but never touches the

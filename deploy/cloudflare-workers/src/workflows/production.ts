@@ -79,8 +79,23 @@ const WP_DEFAULT_PAGE_TEMPLATE = "";
 // cap as `step.sleep`. This is "effectively never" for our purposes.
 const HITL_TIMEOUT = "1 year";
 
-interface Params {
+/**
+ * Cross-deployment rescue: the gate the run is parked at plus the
+ * already-claimed decision, injected at `create()` time by the resume routes.
+ * Workflow instances are account-local, so a run started on another Cloudflare
+ * account has no instance here — but every pipeline output (outline, drafts,
+ * renders, the claimed HITL decision) lives in the shared Postgres DB. A
+ * rescued instance skips the already-persisted steps and handles the injected
+ * decision directly, so no Gemini step re-runs.
+ */
+export type RescueGate =
+  | { gate: "hitl_1"; payload: Hitl1Payload }
+  | { gate: "hitl_2"; payload: Hitl2Payload; iteration: number };
+
+export interface Params {
   runId: string;
+  /** Set only by the resume routes' instance.not_found fallback. */
+  rescue?: RescueGate;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +196,7 @@ interface RenderRowForPublish {
 
 type Hitl1Decision = "approve" | "edit_outline" | "override_route" | "cancel";
 
-interface Hitl1Payload {
+export interface Hitl1Payload {
   decision: Hitl1Decision;
   notes?: string | null;
   /** edit_outline: the human-edited outline object replacing outlines.payload. */
@@ -193,12 +208,12 @@ interface Hitl1Payload {
 type Hitl2Decision = "approve" | "request_changes" | "reject";
 
 /** One reviewer comment anchored on a span of the draft. */
-interface Hitl2Comment {
+export interface Hitl2Comment {
   anchor_text: string;
   comment: string;
 }
 
-interface Hitl2Payload {
+export interface Hitl2Payload {
   decision: Hitl2Decision;
   notes?: string | null;
   comments?: Hitl2Comment[] | null;
@@ -220,10 +235,10 @@ interface AuditFindingLike {
 
 export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
   async run(event: WorkflowEvent<Params>, step: WorkflowStep): Promise<{ runId: string }> {
-    const { runId } = event.payload;
+    const { runId, rescue } = event.payload;
 
     try {
-      await this.runPipeline(runId, step);
+      await this.runPipeline(runId, step, rescue);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       // Persist + surface the failure even when no SSE subscriber is listening
@@ -250,7 +265,11 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
   // Pipeline body — mirrors the create-mode path through the LangGraph root.
   // -------------------------------------------------------------------------
 
-  private async runPipeline(runId: string, step: WorkflowStep): Promise<void> {
+  private async runPipeline(
+    runId: string,
+    step: WorkflowStep,
+    rescue?: RescueGate,
+  ): Promise<void> {
     // --- 1. load-run -------------------------------------------------------
     // `run` is reassigned after refresh gap-analysis backfills chosen_route, so
     // the production loop's writer sees the resolved route (mirrors Python).
@@ -277,89 +296,121 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     const keywords = run.keywords;
     const todayDate = run.today_date.slice(0, 10);
 
-    // --- 2. strategy → outline --------------------------------------------
-    // Refresh mode runs the strategy preamble (fetch_article → gap_analysis)
-    // before the outline; create mode skips straight to the outline. Mirrors
-    // content_tool/graph/strategy.py route_entry (create → "outline";
-    // else → "fetch_article").
-    if (run.start_mode === "refresh") {
-      run = await this.runRefreshStrategy(runId, run, step, keywords, todayDate);
-    } else {
-      await this.statusStep(step, "status-strategy", runId, "strategy");
-      await this.emitStep(step, "emit-outline-start", runId, "strategy.outline.start", {});
-      await step.do("outline", async () =>
-        this.withSql(async (sql) => {
-          const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
-          await runOutline(sql, gemini, {
-            runId,
-            startMode: "create",
-            voiceSlug: run.persona,
-            topic: run.topic,
-            keywords,
-            targetAudience: run.target_audience,
-            acfAdvId: run.acf_adv_id,
-            acfWidgetId: run.acf_widget_id,
-            editNote: run.edit_note,
-            todayDate,
-          });
-          return "ok";
-        }),
-      );
-    }
-    await this.emitStep(step, "emit-outline-done", runId, "strategy.outline.done", {});
+    // --- rescue (cross-deployment adoption) ---------------------------------
+    // This instance may be ADOPTING a run parked at a gate on another account's
+    // deployment (see RescueGate). Everything up to that gate already ran and
+    // persisted to the shared Postgres DB, so skip straight to handling the
+    // injected, already-claimed decision — no Gemini step re-runs.
+    const rescuedHitl1 = rescue?.gate === "hitl_1" ? rescue.payload : null;
+    let injectedHitl2 = rescue?.gate === "hitl_2" ? rescue.payload : null;
+    let hitl2Iteration = rescue?.gate === "hitl_2" ? rescue.iteration : 0;
 
-    // --- 3. HITL_1 ---------------------------------------------------------
-    // Auto-accept skips the human outline gate and proceeds straight to drafting
-    // (HITL_2 still waits). We log the auto-approval so the desk can see the gate
-    // was not acted on manually.
-    if (run.auto_accept_hitl1) {
-      await this.emitStep(step, "emit-hitl1-auto", runId, "hitl.auto_approved", {
-        gate: "hitl_1",
-      });
-      await step.do("apply-hitl1-auto", async () =>
-        this.applyHitl1(runId, { decision: "approve" }),
-      );
-    } else {
-      await this.gateStep(step, "gate-hitl1", runId, "hitl_1", "hitl.interrupted", {
-        next: ["production"],
-      });
-      const d1 = await step.waitForEvent<Hitl1Payload>("await-hitl1", {
-        type: "hitl_1",
-        timeout: HITL_TIMEOUT,
-      });
+    if (rescue !== undefined) {
+      await this.emitStep(step, "emit-rescued", runId, "graph.rescued", { gate: rescue.gate });
+    }
+
+    if (rescuedHitl1 !== null) {
       const cancelled = await step.do("apply-hitl1", async () =>
-        this.applyHitl1(runId, d1.payload),
+        this.applyHitl1(runId, rescuedHitl1),
       );
       if (cancelled) {
-        // Terminal: the operator cancelled at the outline gate.
         await this.emitStep(step, "emit-completed-cancel", runId, "graph.completed", {});
         return;
+      }
+    } else if (rescue === undefined) {
+      // --- 2. strategy → outline ------------------------------------------
+      // Refresh mode runs the strategy preamble (fetch_article → gap_analysis)
+      // before the outline; create mode skips straight to the outline. Mirrors
+      // content_tool/graph/strategy.py route_entry (create → "outline";
+      // else → "fetch_article").
+      if (run.start_mode === "refresh") {
+        run = await this.runRefreshStrategy(runId, run, step, keywords, todayDate);
+      } else {
+        await this.statusStep(step, "status-strategy", runId, "strategy");
+        await this.emitStep(step, "emit-outline-start", runId, "strategy.outline.start", {});
+        await step.do("outline", async () =>
+          this.withSql(async (sql) => {
+            const gemini = this.geminiClient(runId, run.persona, { topic: run.topic ?? undefined, startMode: run.start_mode ?? undefined });
+            await runOutline(sql, gemini, {
+              runId,
+              startMode: "create",
+              voiceSlug: run.persona,
+              topic: run.topic,
+              keywords,
+              targetAudience: run.target_audience,
+              acfAdvId: run.acf_adv_id,
+              acfWidgetId: run.acf_widget_id,
+              editNote: run.edit_note,
+              todayDate,
+            });
+            return "ok";
+          }),
+        );
+      }
+      await this.emitStep(step, "emit-outline-done", runId, "strategy.outline.done", {});
+
+      // --- 3. HITL_1 --------------------------------------------------------
+      // Auto-accept skips the human outline gate and proceeds straight to
+      // drafting (HITL_2 still waits). We log the auto-approval so the desk can
+      // see the gate was not acted on manually.
+      if (run.auto_accept_hitl1) {
+        await this.emitStep(step, "emit-hitl1-auto", runId, "hitl.auto_approved", {
+          gate: "hitl_1",
+        });
+        await step.do("apply-hitl1-auto", async () =>
+          this.applyHitl1(runId, { decision: "approve" }),
+        );
+      } else {
+        await this.gateStep(step, "gate-hitl1", runId, "hitl_1", "hitl.interrupted", {
+          next: ["production"],
+        });
+        const d1 = await step.waitForEvent<Hitl1Payload>("await-hitl1", {
+          type: "hitl_1",
+          timeout: HITL_TIMEOUT,
+        });
+        const cancelled = await step.do("apply-hitl1", async () =>
+          this.applyHitl1(runId, d1.payload),
+        );
+        if (cancelled) {
+          // Terminal: the operator cancelled at the outline gate.
+          await this.emitStep(step, "emit-completed-cancel", runId, "graph.completed", {});
+          return;
+        }
       }
     }
 
     // --- 4 + 5. production loop → HITL_2 → (revise | publish) --------------
-    let hitl2Iteration = 0;
     // refineNotes carried INTO the production loop. On the first pass this is
     // null; on a request_changes revision it carries reviewer comments.
     let reviewerRefineNotes: RefineNote[] | null = null;
 
     for (;;) {
-      await this.runProductionLoop(runId, run, step, hitl2Iteration, reviewerRefineNotes);
+      let payload: Hitl2Payload;
+      if (injectedHitl2 !== null) {
+        // Rescued at HITL_2: the decision was already claimed + persisted (run
+        // row, render edits) by the resume route on this deployment — handle it
+        // directly instead of re-drafting and re-waiting.
+        payload = injectedHitl2;
+        injectedHitl2 = null;
+      } else {
+        await this.runProductionLoop(runId, run, step, hitl2Iteration, reviewerRefineNotes);
 
-      // --- HITL_2 ----------------------------------------------------------
-      await this.gateStep(
-        step,
-        `gate-hitl2-${hitl2Iteration}`,
-        runId,
-        "hitl_2",
-        "hitl.interrupted",
-        { next: ["publish_or_revise"] },
-      );
-      const d2 = await step.waitForEvent<Hitl2Payload>(`await-hitl2-${hitl2Iteration}`, {
-        type: "hitl_2",
-        timeout: HITL_TIMEOUT,
-      });
-      const decision = d2.payload.decision;
+        // --- HITL_2 --------------------------------------------------------
+        await this.gateStep(
+          step,
+          `gate-hitl2-${hitl2Iteration}`,
+          runId,
+          "hitl_2",
+          "hitl.interrupted",
+          { next: ["publish_or_revise"] },
+        );
+        const d2 = await step.waitForEvent<Hitl2Payload>(`await-hitl2-${hitl2Iteration}`, {
+          type: "hitl_2",
+          timeout: HITL_TIMEOUT,
+        });
+        payload = d2.payload;
+      }
+      const decision = payload.decision;
 
       if (decision === "approve") {
         await this.statusStep(step, `status-publishing-${hitl2Iteration}`, runId, "publishing");
@@ -409,7 +460,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
       // Reset the internal audit loop for a fresh revision round and re-enter
       // the production loop WITHOUT a second HITL_1 (mirrors production_revise,
       // which has no interrupt). Build refine notes from reviewer feedback.
-      reviewerRefineNotes = buildReviewerRefineNotes(d2.payload);
+      reviewerRefineNotes = buildReviewerRefineNotes(payload);
       hitl2Iteration += 1;
       await this.statusStep(step, `status-revising-${hitl2Iteration}`, runId, "revising");
     }

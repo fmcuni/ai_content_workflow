@@ -37,9 +37,10 @@ interface FakeRow {
   created_by: string | null;
 }
 
-const state: { row: FakeRow | null; sendEvents: unknown[] } = {
+const state: { row: FakeRow | null; sendEvents: unknown[]; creates: unknown[] } = {
   row: null,
   sendEvents: [],
+  creates: [],
 };
 
 interface Fragment {
@@ -236,8 +237,14 @@ function appWith(authEmail: string | null): AuthApp {
 
 // Same as appWith, but PRODUCTION.get() throws — simulating a workflow instance
 // that doesn't exist on this deployment (e.g. the run was created on a
-// different Cloudflare account sharing the same Postgres DB).
-function appWithMissingInstance(authEmail: string | null): AuthApp {
+// different Cloudflare account sharing the same Postgres DB). The rescue
+// fallback then re-creates the instance HERE; `createError` breaks that too:
+// "fail" exercises the un-claim + 409 compensation path, "exists" simulates a
+// concurrent sibling having already adopted the run (treated as success).
+function appWithMissingInstance(
+  authEmail: string | null,
+  createError?: "fail" | "exists",
+): AuthApp {
   const app = new Hono<{ Variables: AuthVars }>();
   app.use("*", async (c, next) => {
     if (authEmail !== null) c.set("userEmail", authEmail);
@@ -247,7 +254,12 @@ function appWithMissingInstance(authEmail: string | null): AuthApp {
         get: async () => {
           throw new Error("instance.not_found");
         },
-        create: async () => undefined,
+        create: async (opts: unknown) => {
+          if (createError === "fail") throw new Error("workflows.api_error");
+          if (createError === "exists")
+            throw new Error(`instance.already_exists: instance with id already exists`);
+          state.creates.push(opts);
+        },
       },
     };
     await next();
@@ -279,6 +291,7 @@ async function req(
 beforeEach(() => {
   state.row = null;
   state.sendEvents = [];
+  state.creates = [];
 });
 
 // ---------------------------------------------------------------------------
@@ -463,7 +476,7 @@ describe("POST /:id/resume — HITL_1 gate-status guard (FIX 2/3)", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /:id/resume — missing workflow instance", () => {
-  it("returns 409 (not a raw 500) and un-claims the gate so the run is retryable", async () => {
+  it("rescues the run onto this deployment (create with the injected decision) instead of 409", async () => {
     state.row = {
       run_id: "r1",
       status: "hitl_1",
@@ -474,11 +487,40 @@ describe("POST /:id/resume — missing workflow instance", () => {
     };
     const app = appWithMissingInstance("rev@bowtie.com.hk");
     const res = await req(app, "POST", "/r1/resume", { decision: "approve" }, "rev@bowtie.com.hk");
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as { ok: boolean; rescued?: boolean };
+    expect(payload.rescued).toBe(true);
+    expect(state.sendEvents).toHaveLength(0);
+    expect(state.creates).toHaveLength(1);
+    expect(state.creates[0]).toMatchObject({
+      id: "r1",
+      params: {
+        runId: "r1",
+        rescue: { gate: "hitl_1", payload: { decision: "approve" } },
+      },
+    });
+    // The claim STANDS — the adopted instance consumes the persisted decision.
+    expect(state.row.hitl_1_decision).toBe("approve");
+    expect(state.row.status).toBe("hitl_1");
+  });
+
+  it("returns 409 and un-claims the gate when the rescue create also fails", async () => {
+    state.row = {
+      run_id: "r1",
+      status: "hitl_1",
+      hitl_2_iteration: 0,
+      hitl_1_decision: null,
+      approved_by: null,
+      created_by: null,
+    };
+    const app = appWithMissingInstance("rev@bowtie.com.hk", "fail");
+    const res = await req(app, "POST", "/r1/resume", { decision: "approve" }, "rev@bowtie.com.hk");
     expect(res.status).toBe(409);
     const payload = (await res.json()) as { detail: string };
     expect(payload.detail).toContain("workflow instance for this run was not found");
     expect(payload.detail).toContain("instance.not_found");
     expect(state.sendEvents).toHaveLength(0);
+    expect(state.creates).toHaveLength(0);
     // Un-claimed: hitl_1_decision reverted to null, status untouched (still at
     // the gate) — a retry against a healthy deployment can succeed cleanly.
     expect(state.row.hitl_1_decision).toBeNull();
@@ -487,7 +529,7 @@ describe("POST /:id/resume — missing workflow instance", () => {
 });
 
 describe("POST /:id/hitl-2 — missing workflow instance", () => {
-  it("returns 409 and reverts the claimed decision + iteration count", async () => {
+  it("rescues the run with the claimed decision + prior iteration instead of 409", async () => {
     state.row = {
       run_id: "r1",
       status: "hitl_2",
@@ -497,6 +539,85 @@ describe("POST /:id/hitl-2 — missing workflow instance", () => {
       created_by: null,
     };
     const app = appWithMissingInstance("rev@bowtie.com.hk");
+    const res = await req(
+      app,
+      "POST",
+      "/r1/hitl-2",
+      { decision: "request_changes" },
+      "rev@bowtie.com.hk",
+    );
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as { ok: boolean; rescued?: boolean };
+    expect(payload.rescued).toBe(true);
+    expect(state.sendEvents).toHaveLength(0);
+    expect(state.creates).toHaveLength(1);
+    // iteration = the PRE-claim value: it seeds the adopted workflow's local
+    // HITL_2 round counter exactly where the original instance was parked.
+    expect(state.creates[0]).toMatchObject({
+      id: "r1",
+      params: {
+        runId: "r1",
+        rescue: { gate: "hitl_2", iteration: 1, payload: { decision: "request_changes" } },
+      },
+    });
+    // The claim STANDS (incremented iteration is consumed by the new instance).
+    expect(state.row.hitl_2_iteration).toBe(2);
+  });
+
+  it("rescues an APPROVE with the unincremented iteration and keeps approved_by claimed", async () => {
+    state.row = {
+      run_id: "r1",
+      status: "hitl_2",
+      hitl_2_iteration: 1,
+      hitl_1_decision: "approve",
+      approved_by: null,
+      created_by: null,
+    };
+    const app = appWithMissingInstance("rev@bowtie.com.hk");
+    const res = await req(app, "POST", "/r1/hitl-2", { decision: "approve" }, "rev@bowtie.com.hk");
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { rescued?: boolean }).toMatchObject({ rescued: true });
+    expect(state.creates[0]).toMatchObject({
+      id: "r1",
+      params: {
+        runId: "r1",
+        // approve does NOT increment: iteration is the parked round as-is.
+        rescue: { gate: "hitl_2", iteration: 1, payload: { decision: "approve" } },
+      },
+    });
+    // The claim stands — the adopted instance publishes and the compliance log
+    // must see the real approver, not "unknown".
+    expect(state.row.approved_by).toBe("rev@bowtie.com.hk");
+    expect(state.row.hitl_2_iteration).toBe(1);
+  });
+
+  it("treats an already-adopted run (duplicate-id create) as success — no rollback", async () => {
+    state.row = {
+      run_id: "r1",
+      status: "hitl_2",
+      hitl_2_iteration: 0,
+      hitl_1_decision: "approve",
+      approved_by: null,
+      created_by: null,
+    };
+    const app = appWithMissingInstance("rev@bowtie.com.hk", "exists");
+    const res = await req(app, "POST", "/r1/hitl-2", { decision: "approve" }, "rev@bowtie.com.hk");
+    expect(res.status).toBe(200);
+    // A concurrent sibling created the instance; its workflow consumes THIS
+    // claim, so approved_by must survive.
+    expect(state.row.approved_by).toBe("rev@bowtie.com.hk");
+  });
+
+  it("returns 409 and reverts the claimed decision + iteration when the rescue create also fails", async () => {
+    state.row = {
+      run_id: "r1",
+      status: "hitl_2",
+      hitl_2_iteration: 1,
+      hitl_1_decision: "approve",
+      approved_by: null,
+      created_by: null,
+    };
+    const app = appWithMissingInstance("rev@bowtie.com.hk", "fail");
     const res = await req(
       app,
       "POST",
