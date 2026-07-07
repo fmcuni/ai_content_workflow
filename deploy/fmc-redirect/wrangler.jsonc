@@ -1,0 +1,21 @@
+// Redirect stubs replacing the two frontend Workers on the sunset fmc
+// account. Deploy MANUALLY with the fmc-account credentials (CI never
+// touches the fmc account any more):
+//
+//   npx wrangler deploy            # bowtie-content-tool-web  → 301 to franco-ma
+//   npx wrangler deploy --env dev  # bowtie-content-tool-web-dev
+//
+// Deploying under the SAME worker names replaces the old app deployments in
+// place, keeping the workers.dev URLs. The fmc backend Workers
+// (bowtie-content-tool-poc / -poc-dev) are DELETED, not redirected.
+{
+	"$schema": "../cloudflare-workers/node_modules/wrangler/config-schema.json",
+	"name": "bowtie-content-tool-web",
+	"main": "worker.js",
+	"compatibility_date": "2026-05-30",
+	"env": {
+		"dev": {
+			"name": "bowtie-content-tool-web-dev"
+		}
+	}
+}
