@@ -5,7 +5,9 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from content_tool.config import get_settings
 from content_tool.db.models import Article, Draft, FetchedArticle, Render, Run
+from content_tool.publishers.wp_factory import resolve_wp_target
 from content_tool.wordpress.client import (
     SCHEMA_JSONLD_META_KEY,
     WP_DEFAULT_PAGE_TEMPLATE,
@@ -15,6 +17,15 @@ from content_tool.wordpress.client import (
     WordPressError,
 )
 from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
+from content_tool.wordpress.slug import resolve_post_id_for_slug
+
+
+class PublishTargetMismatchError(Exception):
+    """Raised when a refresh publish's resolved target no longer matches the
+    HITL_2 approval pin (issue #15). The approval is voided before this is
+    raised, so a retry re-gates at HITL_2 instead of auto-republishing —
+    retrying cannot fix a stale approval, only a fresh human one can.
+    """
 
 
 async def publish_to_wordpress(
@@ -63,7 +74,63 @@ async def publish_to_wordpress(
         # of creating a duplicate.
         post_id: int | None = run.wp_pushed_post_id
     else:
-        post_id = fa.wp_post_id if fa is not None else None
+        # Base id: a prior push wins over the fetched id (re-push updates that
+        # same post). If the operator changed the slug of an already-published
+        # post, create a NEW post (None id) instead of overwriting the old one —
+        # see resolve_post_id_for_slug. First-push create is unaffected.
+        base_post_id = run.wp_pushed_post_id or (fa.wp_post_id if fa is not None else None)
+        post_id = resolve_post_id_for_slug(base_post_id, run.article_url, run.wp_slug)
+
+        # Target pin (issue #15). A refresh publish that hasn't pushed yet
+        # (wp_pushed_post_id IS NULL) is about to write to the FETCHED post —
+        # the arbitrary-overwrite vector the HITL_2 pin closes — so before
+        # writing we assert the target this step resolved is byte-identical to
+        # the pin recorded at HITL_2 approve. On any divergence (including a
+        # missing pin — e.g. an approval that predates the pin columns) void
+        # the approval and fail BEFORE any WP write, so a restart re-gates at
+        # HITL_2 instead of auto-republishing to the wrong post. Re-pushes to
+        # the run's OWN already-pushed post (wp_pushed_post_id set) are
+        # self-owned and skip this — mirrors both assertPinnedTarget
+        # (deploy/cloudflare-workers/src/workflows/production.ts) and the
+        # narrower re-push guard in the TS /republish route (runs.ts) that
+        # this same function backs (see routes/runs.py::republish).
+        if run.wp_pushed_post_id is None:
+            settings = get_settings()
+            target = await resolve_wp_target(
+                session=session,
+                persona_slug=run.persona,
+                default_client=wp_client,
+                default_label=settings.wp_target,
+            )
+            expected_post_id = None if post_id is None else str(post_id)
+            pinned = (
+                run.approved_target_kind == "wordpress"
+                and run.approved_post_id == expected_post_id
+                and run.approved_target_label == target.label
+            )
+            if not pinned:
+                await session.execute(update(Run).where(Run.run_id == run_id).values(
+                    hitl_2_decision=None,
+                    approved_at=None,
+                    approved_by=None,
+                    approved_target_kind=None,
+                    approved_post_id=None,
+                    approved_target_label=None,
+                ))
+                await session.commit()
+                pin_desc = (
+                    "no pinned target on this approval"
+                    if run.approved_target_kind is None
+                    else (
+                        f"approved {run.approved_target_kind} post "
+                        f"{run.approved_post_id or '<new>'} on {run.approved_target_label}"
+                    )
+                )
+                raise PublishTargetMismatchError(
+                    f"publish target mismatch: {pin_desc}, but this publish resolved "
+                    f"wordpress post {expected_post_id or '<new>'} on {target.label} — "
+                    "approval voided; re-run the publish preview and approve again"
+                )
     # Honor the operator's status choice for both create and refresh runs
     # (defaulting to draft) so a "publish" selection is never silently demoted.
     status = run.wp_publish_status or "draft"

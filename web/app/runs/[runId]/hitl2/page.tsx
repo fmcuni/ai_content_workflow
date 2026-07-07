@@ -26,7 +26,7 @@ import { useApplyEdits } from "@/lib/useApplyEdits";
 import { stripCommentSpan } from "@/lib/comment-anchor";
 import { cmsKindAbbrev, cmsKindName } from "@/lib/cms-kind-helpers";
 import { useRunCmsKind } from "@/lib/use-run-cms-kind";
-import { buildDryRequest, buildSnapshotIn, snapshotKey } from "@/lib/run-editor/form";
+import { buildDryRequest, buildSnapshotIn, confirmedTargetFor, snapshotKey } from "@/lib/run-editor/form";
 import { useWpPayloadPreview } from "@/lib/run-editor/useWpPayloadPreview";
 import { useSnapshotAutosave } from "@/lib/run-editor/useSnapshotAutosave";
 import { useCollabDoc } from "@/lib/run-editor/useCollabDoc";
@@ -47,7 +47,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { api } from "@/lib/api";
+import { api, apiErrorDetail } from "@/lib/api";
 import type { ExistingPost, Hitl2Request, Hitl2Snapshot, Hitl2SnapshotIn } from "@/lib/types";
 
 export default function Hitl2Page({ params }: { params: Promise<{ runId: string }> }) {
@@ -322,22 +322,40 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const atGate = run.data?.status === "hitl_2";
   const gateResolved = run.data != null && !atGate;
 
+  // Target pin (issue #15): a refresh-mode run must confirm the exact CMS
+  // target the operator saw in the loaded WP-payload preview before approving.
+  const isRefreshRun = run.data?.start_mode === "refresh";
+  const targetPreviewReady = !isRefreshRun || wpPayload.payload != null;
+
   const submit = useMutation({
     // Inline AI edits happen at the gate via "Request AI to edit"; the remaining
     // decisions (approve / reject) carry the current edited HTML, no comments.
-    mutationFn: (decision: Hitl2Request["decision"]) =>
-      api.resumeHitl2(runId, {
+    mutationFn: (decision: Hitl2Request["decision"]) => {
+      if (decision === "approve" && isRefreshRun && !wpPayload.payload) {
+        throw new Error("Run publish preview first");
+      }
+      return api.resumeHitl2(runId, {
         ...form,
         decision,
         edited_html_body: collab ? flattenCollabDoc(collab.ydoc) : html,
         comments: [],
         editor_email: editorEmail,
-      }),
+        confirmed_target:
+          decision === "approve" && wpPayload.payload
+            ? confirmedTargetFor(run.data?.start_mode, wpPayload.payload)
+            : undefined,
+      });
+    },
     onSuccess: () => {
       submittedRef.current = true;
       router.push(`/runs/${runId}`);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      // Target pin 409 (issue #15): target changed since the preview — force a
+      // fresh dry-publish before the operator can approve again.
+      if (isRefreshRun) wpPayload.setPayload(null);
+      toast.error(apiErrorDetail(e));
+    },
   });
 
   // --- Autosave + version history -----------------------------------------
@@ -498,6 +516,15 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           </>
         ) : (
           <>
+            {isRefreshRun && (
+              <span className="mr-2 font-mono text-[11px] uppercase tracking-wider text-ink-faint">
+                {wpPayload.payload
+                  ? wpPayload.payload.target_post_id != null
+                    ? `Will UPDATE post #${wpPayload.payload.target_post_id} · ${wpPayload.payload.target_label}`
+                    : `Will CREATE a new post · ${wpPayload.payload.target_label}`
+                  : `Run publish preview first (${cmsKindAbbrev(cmsKind)} payload tab)`}
+              </span>
+            )}
             <RoleButton
               need="hitl2_decide"
               deniedHint="Reviewer role required to reject."
@@ -512,7 +539,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               need="publish"
               deniedHint="Reviewer role required to approve and publish."
               variant="primary"
-              disabled={!renderReady || submit.isPending || !atGate}
+              disabled={!renderReady || submit.isPending || !atGate || !targetPreviewReady}
               onClick={() => submit.mutate("approve")}
             >
               {submit.isPending && submit.variables === "approve"

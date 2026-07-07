@@ -17,6 +17,7 @@ from content_tool.api.schemas import (
     ApplyEditsRequest,
     ApplyEditsResponse,
     ArticleEditRequest,
+    ConfirmedTarget,
     CreateReviewThreadIn,
     CreateRunRequest,
     CreateRunResponse,
@@ -60,7 +61,7 @@ from content_tool.wordpress.client import (
     WordPressClient,
 )
 from content_tool.wordpress.seo_plugin import SeoPlugin, seo_meta_key
-from content_tool.wordpress.slug import canonicalize_slug
+from content_tool.wordpress.slug import canonicalize_slug, resolve_post_id_for_slug
 from content_tool.wordpress.strip_anchors import strip_anchor_spans
 
 logger = logging.getLogger(__name__)
@@ -488,7 +489,7 @@ async def restart_run(
 
 @router.post("/{run_id}/hitl-2")
 async def hitl_2(
-    run_id: UUID, payload: Hitl2Request,
+    run_id: UUID, payload: Hitl2Request, request: Request,
     sf=Depends(get_session_factory),  # noqa: ANN001, B008
     runner=Depends(get_runner),  # noqa: ANN001, B008
 ) -> dict:
@@ -502,6 +503,50 @@ async def hitl_2(
         comments_json = [c.model_dump() for c in (payload.comments or [])]
         is_approve = payload.decision == "approve"
         is_request_changes = payload.decision == "request_changes"
+
+        # Target pin (issue #15). A refresh run overwrites an existing WP post,
+        # so an approve must carry the exact target the reviewer saw in the
+        # dry-publish preview. Re-derive the target the publish step will
+        # resolve — same base-id + slug rules, with the slug this request is
+        # about to store — and 409 BEFORE any write on divergence (the gate is
+        # not claimed). Python mirror of the TS /hitl-2 route
+        # (deploy/cloudflare-workers/src/routes/runs.ts); create-mode approvals
+        # and non-approve decisions skip this and persist NULL pin fields.
+        pin_kind: str | None = None
+        pin_post_id: str | None = None
+        pin_label: str | None = None
+        if is_approve and row.start_mode == "refresh":
+            fa = (await session.execute(
+                select(FetchedArticle).where(FetchedArticle.run_id == run_id)
+            )).scalar_one_or_none()
+            target = await resolve_wp_target(
+                session=session,
+                persona_slug=row.persona,
+                default_client=request.app.state.wp_client,
+                default_label=request.app.state.wp_target,
+            )
+            base_post_id = row.wp_pushed_post_id or (fa.wp_post_id if fa is not None else None)
+            expected_id = resolve_post_id_for_slug(base_post_id, row.article_url, payload.wp_slug)
+            expected = ConfirmedTarget(
+                kind="wordpress",
+                post_id=None if expected_id is None else str(expected_id),
+                label=target.label,
+            )
+            ct = payload.confirmed_target
+            if ct is None or ct.kind != expected.kind or ct.post_id != expected.post_id or ct.label != expected.label:  # noqa: E501
+                raise HTTPException(
+                    409,
+                    detail={
+                        "detail": (
+                            "publish target changed since the preview — re-run the publish "
+                            "preview and approve again (current target: "
+                            f"{expected.kind} post {expected.post_id or '<new>'} on "
+                            f"{expected.label})"
+                        ),
+                        "expected_target": expected.model_dump(),
+                    },
+                )
+            pin_kind, pin_post_id, pin_label = expected.kind, expected.post_id, expected.label
 
         # Cap enforcement is atomic: for request_changes the increment rides a
         # conditional UPDATE (hitl_2_iteration < 3), so two concurrent requests
@@ -519,6 +564,9 @@ async def hitl_2(
             wp_slug=payload.wp_slug,
             wp_excerpt=payload.wp_excerpt,
             wp_publish_at=payload.wp_publish_at,
+            approved_target_kind=pin_kind,
+            approved_post_id=pin_post_id,
+            approved_target_label=pin_label,
         )
         if is_request_changes:
             _CAP = 3
@@ -1324,7 +1372,7 @@ async def republish(
     publish directly (no graph), reusing ``publish_to_wordpress`` so refresh
     runs update their existing post and create runs update their minted draft.
     """
-    from content_tool.agents.publish import publish_to_wordpress
+    from content_tool.agents.publish import PublishTargetMismatchError, publish_to_wordpress
     from content_tool.wordpress.client import WordPressError
 
     wp_client = getattr(request.app.state, "wp_client", None)
@@ -1376,6 +1424,17 @@ async def republish(
         except WordPressError as e:
             logger.warning("WordPress publish failed for run %s: %s", run_id, e)
             raise HTTPException(status_code=502, detail="WordPress upstream error") from e
+        except PublishTargetMismatchError as e:
+            # Target pin (issue #15): a never-pushed refresh republish would
+            # overwrite the fetched post without a matching HITL_2 approval.
+            # The approval was already voided inside publish_to_wordpress; no
+            # WordPress call was made.
+            logger.warning("Publish target mismatch for run %s: %s", run_id, e)
+            raise HTTPException(
+                409,
+                "publish target does not match the pinned HITL_2 approval — re-run the "
+                "publish preview and approve again before re-pushing",
+            ) from e
 
     return {
         "wp_post_id": result["id"],
@@ -1671,17 +1730,24 @@ async def dry_publish(
     if publish_at is not None:
         body["date_gmt"] = publish_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
-    wp_post_id = fa.wp_post_id if fa is not None else None
+    # Base id: a prior push wins over the fetched id (re-push updates that same
+    # post); a changed slug forces a fresh create instead (issue #15) — see
+    # resolve_post_id_for_slug. Mirrors publish_to_wordpress / the TS preview.
+    base_post_id = run.wp_pushed_post_id or (fa.wp_post_id if fa is not None else None)
+    effective_post_id = resolve_post_id_for_slug(base_post_id, run.article_url, slug)
     url = (
-        f"{target_base}/wp-json/wp/v2/posts/{wp_post_id}"
-        if wp_post_id
+        f"{target_base}/wp-json/wp/v2/posts/{effective_post_id}"
+        if effective_post_id
         else f"{target_base}/wp-json/wp/v2/posts"
     )
-    method = "PUT" if wp_post_id else "POST"
+    method = "PUT" if effective_post_id else "POST"
 
     return {
         "target_base_url": target_base,
         "target_label": target_label,
+        # The post this publish would overwrite (None = creates a new post).
+        # The UI echoes it back as hitl-2 `confirmed_target` — the target pin.
+        "target_post_id": None if effective_post_id is None else str(effective_post_id),
         "request_method": method,
         "request_url": url,
         "request_headers": {

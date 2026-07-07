@@ -111,6 +111,17 @@ export const hitl2Schema = z
     edited_html_body: z.string().nullish(),
     edited_seo_title: z.string().nullish(),
     edited_meta_description: z.string().nullish(),
+    // Target pin (issue #15): the exact CMS target the reviewer saw in the
+    // dry-publish preview. REQUIRED to approve a refresh run — the handler
+    // re-resolves the target and 409s on any divergence. post_id null =
+    // "approved as create-new" (slug-change path).
+    confirmed_target: z
+      .object({
+        kind: z.enum(["wordpress", "ghost"]),
+        post_id: z.string().nullable(),
+        label: z.string(),
+      })
+      .optional(),
     ...wpMetaFields,
     ...ghostMetaFields,
   })

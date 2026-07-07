@@ -69,6 +69,14 @@ class Run(Base):
     hitl_2_iteration: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     approved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     approved_by: Mapped[str | None] = mapped_column(String)
+    # Target pin (issue #15): the exact CMS target confirmed at HITL_2 approve
+    # for a refresh run. `approved_post_id` is text (WP ids stringified; Ghost
+    # ids are strings) — NULL with a non-null kind means "approved as
+    # create-new". Cleared on any non-approve decision, a create-mode
+    # approval, or a publish-time mismatch (see agents/publish.py).
+    approved_target_kind: Mapped[str | None] = mapped_column(String)
+    approved_post_id: Mapped[str | None] = mapped_column(String)
+    approved_target_label: Mapped[str | None] = mapped_column(String)
     article_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("content_tool.articles.article_id")
     )
