@@ -28,8 +28,9 @@
  * The Content-Security-Policy value, shared with the Workers backend
  * (deploy/cloudflare-workers/src/http/security-headers.ts) — keep the two in
  * sync. `connect-src` covers same-origin REST plus the cross-origin SSE/REST
- * (`https://*.fmc.workers.dev`), the collab WebSocket (`wss://*.fmc.workers.dev`),
- * and the Supabase Auth (GoTrue) endpoint (`https://*.supabase.co`).
+ * (`https://*.franco-ma.workers.dev`), the collab WebSocket
+ * (`wss://*.franco-ma.workers.dev`), and the Supabase Auth (GoTrue) endpoint
+ * (`https://*.supabase.co`).
  */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -37,9 +38,10 @@ export const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  // Both known Cloudflare accounts (fmc + alt/franco-ma) are allowlisted;
-  // derive from NEXT_PUBLIC_API_BASE instead if a third account ever appears.
-  "connect-src 'self' https://*.supabase.co https://*.fmc.workers.dev wss://*.fmc.workers.dev https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
+  // The `fmc.workers.dev` account was deprecated 2026-07-07 and removed here.
+  // Add the Bowtie Enterprise Account's subdomain when prod migrates there —
+  // derive from NEXT_PUBLIC_API_BASE instead if that's simpler at that point.
+  "connect-src 'self' https://*.supabase.co https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",

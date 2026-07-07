@@ -7,7 +7,7 @@ the **dev** Workers stack itself (instead of asking a human to eyeball).
 
 | Script | Purpose |
 |---|---|
-| `dev-env.mjs` | Loads gitignored `.env.dev.local`; pins everything to the dev Supabase ref (`ovxvhxwmqeccjudhyfbh`) and `*-dev.fmc.workers.dev` — throws on any non-dev target. |
+| `dev-env.mjs` | Loads gitignored `.env.dev.local`; pins everything to the dev Supabase ref (`ovxvhxwmqeccjudhyfbh`) and `*-dev.franco-ma.workers.dev` — throws on any non-dev target. |
 | `provision.mjs` | Idempotent: generates `CLAUDE_DEBUG_EMAIL`/`CLAUDE_DEBUG_PASSWORD` into `.env.dev.local` (first run), creates/password-resets the GoTrue user via the admin API (email pre-confirmed), upserts `content_tool.app_user` with `role=admin` (invite-only authz needs the row), verifies the password grant. |
 | `login.mjs` | Password grant via real `@supabase/supabase-js` (from `web/node_modules`), writes chunked `bowtie-sb-auth.0..n` cookies (mirrors `web/lib/supabase-client.ts`) as Playwright storageState → `.out/state.json`. |
 | `browse.mjs` | Step-driven headless Chromium with guardrails (below). Screenshots/dumps land in `.out/`. |

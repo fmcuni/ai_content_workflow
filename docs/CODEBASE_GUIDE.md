@@ -276,10 +276,13 @@ touch — baseline is large), Conventional Commits with scope.
 
 ## 10. Known cleanup candidates (for the repo move)
 
-- **Personal Cloudflare account references** — `*.fmc.workers.dev` URLs and the
-  Hyperdrive id in `deploy/cloudflare-workers/wrangler.jsonc`, `web/wrangler.jsonc`,
-  and `README.md` point at a personal `fmc` account. They are **not secrets**, but
-  must be repointed when infra moves to a company Cloudflare account.
+- **Personal Cloudflare account references** — as of 2026-07-07 the `fmc`
+  account has been deprecated by Franco; `wrangler.jsonc`/`web/wrangler.jsonc`
+  now point solely at his other personal account (franco-ma.workers.dev,
+  "Bowtie Content SEO" in the dashboard). These URLs and Hyperdrive ids are
+  **not secrets**, but must be repointed (prod only — dev stays put for now)
+  when prod moves to the company-owned Bowtie Enterprise Account. See
+  `docs/secrets-and-ci.md`'s "Migration plan" for the concrete steps.
 - **Root-level local artifacts** (screenshots, `content_tool.dump`) are gitignored
   and will not travel with the repo, but exist in working copies.
 

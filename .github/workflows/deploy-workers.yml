@@ -8,21 +8,34 @@ name: Deploy Workers
 # local dev. The production backend is now the TypeScript Worker in
 # deploy/cloudflare-workers/.
 #
-# Two Workers are deployed on the personal Cloudflare account (fmc.workers.dev):
+# Two Workers are deployed, both on Franco's "Bowtie Content SEO" Cloudflare
+# account (franco-ma.workers.dev):
 #   - Backend  : bowtie-content-tool-poc  (deploy/cloudflare-workers/)
 #   - Frontend : bowtie-content-tool-web  (web/, OpenNext)
 #
-# Required repo secrets (same names the retired workflow used; they already
-# target the fmc account):
-#   CLOUDFLARE_API_TOKEN   — token with Workers Scripts edit
-#   CLOUDFLARE_ACCOUNT_ID  — target Cloudflare account id
-# wrangler reads both from the environment automatically.
+# INTERIM STATE (2026-07-07): this account was previously called "alt" in this
+# repo's history — it hosted a compute-only duplicate of prod while the real
+# prod lived on a separate personal account (fmc.workers.dev, CLOUDFLARE_*
+# secrets). Franco has confirmed franco-ma.workers.dev is the real production
+# the marketing team uses, and is deprecating the fmc account. This workflow
+# has been repointed to use the CF_ALT_* secrets (already provisioned — no new
+# secret needed) as the SOLE deploy target; the old fmc-targeting steps and the
+# separate "alt account" duplicate-deploy steps have been removed.
 #
-# The ALT account (franco.ma@bowtie.com.hk, franco-ma.workers.dev) hosts
-# compute-only duplicates deployed AFTER the fmc prod Workers: `alt` (prod
-# Supabase) and `alt-dev` (dev Supabase). Its secrets:
-#   CF_ALT_API_TOKEN / CF_ALT_ACCOUNT_ID — alt-account wrangler creds
-#   SUPABASE_ANON_KEY_DEV                — dev-project anon key (alt-dev web build)
+# This workflow (and deploy-workers-dev.yml) is a stop-gap. The end goal
+# (tracked in docs/secrets-and-ci.md) is to move deploys to Cloudflare Workers
+# Builds (native git integration), so no Cloudflare credential needs to live in
+# GitHub Actions at all — delete both workflow files once that is set up and
+# verified for all four Workers.
+#
+# Required repo secrets:
+#   CF_ALT_API_TOKEN       — token with Workers Scripts edit, on the
+#                            franco-ma.workers.dev account
+#   CF_ALT_ACCOUNT_ID      — that account's id
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY — public client key, routed through a secret
+#                            for hygiene (frontend build-time var)
+# wrangler reads the CF_ALT_* pair via CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID
+# env vars set per-step below.
 #
 # Runtime secrets (POSTGRES_URL / GEMINI_API_KEY / WP_*) are NOT synced here.
 # They are set once per Worker via `wrangler secret put` and are preserved
@@ -59,7 +72,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: deploy/cloudflare-workers
-# npm install (not ci): the lockfile is generated on macOS and omits the
+        # npm install (not ci): the lockfile is generated on macOS and omits the
         # linux-only optional native deps (@emnapi/*), so strict `npm ci` fails on
         # the ubuntu runner. install resolves the platform deps at deploy time.
         run: npm install --no-audit --no-fund
@@ -68,27 +81,16 @@ jobs:
       # live Worker (catches a broken/half-provisioned env before we deploy).
       - name: Check secret drift (prod)
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
         run: node scripts/check-secrets.mjs
 
       - name: Deploy backend Worker (bowtie-content-tool-poc)
         working-directory: deploy/cloudflare-workers
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
-
-      # Alt-account duplicates deploy after prod so an alt failure never
-      # blocks the canonical deploy.
-      - name: Deploy backend Workers (alt account, alt + alt-dev)
-        working-directory: deploy/cloudflare-workers
-        env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
-        run: |
-          npx wrangler deploy --env alt
-          npx wrangler deploy --env alt-dev
+        run: npx wrangler deploy
 
   deploy-frontend:
     name: Deploy frontend Worker
@@ -105,7 +107,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-# npm install (not ci): the lockfile is generated on macOS and omits the
+        # npm install (not ci): the lockfile is generated on macOS and omits the
         # linux-only optional native deps (@emnapi/*), so strict `npm ci` fails on
         # the ubuntu runner. install resolves the platform deps at deploy time.
         run: npm install --no-audit --no-fund
@@ -118,8 +120,8 @@ jobs:
         # creds are injected. To roll collab back: edit NEXT_PUBLIC_COLLAB_ENABLED
         # in web/env.prod.public and redeploy (or `wrangler rollback`).
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
           # Public client key, routed through an Actions secret for hygiene.
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: npm run cf:deploy
@@ -129,42 +131,4 @@ jobs:
       # logged-out users). Fail the job loudly if the just-deployed Worker
       # can't serve /login quickly.
       - name: Smoke-check prod frontend (/login must 200)
-        run: |
-          for i in 1 2 3; do
-            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
-              "https://bowtie-content-tool-web.fmc.workers.dev/login" || echo 000)
-            [ "$code" = "200" ] && exit 0
-            echo "attempt $i: /login returned $code; retrying"
-            sleep 10
-          done
-          echo "FAIL: prod /login did not return 200 — bad artifact deployed"
-          exit 1
-
-      # Alt-account frontends (deploy-web.mjs resolves web/env.<target>.public
-      # itself, so these run from the repo root).
-      - name: Deploy frontend Worker (alt account, alt)
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-        run: node scripts/deploy-web.mjs alt
-
-      - name: Deploy frontend Worker (alt account, alt-dev)
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
-          # alt-dev builds against the DEV Supabase project.
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
-        run: node scripts/deploy-web.mjs alt-dev
-
-      - name: Smoke-check alt frontends (/login must 200)
-        run: |
-          fail=0
-          for host in bowtie-content-tool-web.franco-ma.workers.dev \
-                      bowtie-content-tool-web-dev.franco-ma.workers.dev; do
-            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
-              "https://$host/login" || echo 000)
-            echo "$host /login → $code"
-            [ "$code" = "200" ] || fail=1
-          done
-          exit $fail
+        run: node scripts/smoke-check.mjs "https://bowtie-content-tool-web.franco-ma.workers.dev/login"

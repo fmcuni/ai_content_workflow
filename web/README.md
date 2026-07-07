@@ -35,9 +35,9 @@ Production hosts this frontend as a Cloudflare Worker built with
 [`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare) (OpenNext).
 
 - **Service:** `bowtie-content-tool-web`
-- **URL:** https://bowtie-content-tool-web.fmc.workers.dev
+- **URL:** https://bowtie-content-tool-web.franco-ma.workers.dev
 - **Backend it talks to:** the Workers-native backend
-  `bowtie-content-tool-poc` (https://bowtie-content-tool-poc.fmc.workers.dev) —
+  `bowtie-content-tool-poc` (https://bowtie-content-tool-poc.franco-ma.workers.dev) —
   REST via Next `rewrites()` (server-side), SSE direct from the browser with CORS.
 
 CI deploys both Workers on push to `main` via
@@ -51,7 +51,7 @@ npm run cf:deploy    # build + deploy the Worker
 
 `NEXT_PUBLIC_API_BASE` is a build-time public var (inlined into the bundle); pass
 it when building, e.g.
-`NEXT_PUBLIC_API_BASE=https://bowtie-content-tool-poc.fmc.workers.dev npm run cf:deploy`.
+`NEXT_PUBLIC_API_BASE=https://bowtie-content-tool-poc.franco-ma.workers.dev npm run cf:deploy`.
 See `wrangler.jsonc` and `open-next.config.ts` for the Worker config.
 
 The same Next build also runs for local dev — Cloudflare is only the production

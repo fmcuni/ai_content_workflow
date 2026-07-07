@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 
 const PY_BASE = (process.env.PY_BASE ?? "http://localhost:8000").replace(/\/$/, "");
 const TS_BASE = (
-  process.env.TS_BASE ?? "https://bowtie-content-tool-poc.fmc.workers.dev"
+  process.env.TS_BASE ?? "https://bowtie-content-tool-poc.franco-ma.workers.dev"
 ).replace(/\/$/, "");
 
 // Costs summary needs a date window; use a wide window so both backends scan the

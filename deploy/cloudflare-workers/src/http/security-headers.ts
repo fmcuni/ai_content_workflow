@@ -9,7 +9,7 @@
 // HTML with inline scripts, but the policy mirrors the web surface for
 // consistency (a single auditable policy string). We NEVER use `'unsafe-eval'`.
 // `connect-src` covers same-origin, the Supabase Auth (GoTrue) endpoint, and
-// the cross-origin SSE/REST + collab WebSocket on `*.fmc.workers.dev`.
+// the cross-origin SSE/REST + collab WebSocket on `*.franco-ma.workers.dev`.
 //
 // STREAMING / WEBSOCKET SAFETY: the middleware stamps these headers by mutating
 // the existing response's `Headers` in place — it does NOT re-wrap the body, so
@@ -24,9 +24,10 @@ export const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  // Both known Cloudflare accounts (fmc + alt/franco-ma) are allowlisted;
-  // derive from the Worker's own origin instead if a third account ever appears.
-  "connect-src 'self' https://*.supabase.co https://*.fmc.workers.dev wss://*.fmc.workers.dev https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
+  // The `fmc.workers.dev` account was deprecated 2026-07-07 and removed here.
+  // Add the Bowtie Enterprise Account's subdomain when prod migrates there —
+  // derive from the Worker's own origin instead if that's simpler at that point.
+  "connect-src 'self' https://*.supabase.co https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",

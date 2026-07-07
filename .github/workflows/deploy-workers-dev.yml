@@ -1,8 +1,9 @@
 name: Deploy Workers (dev)
 
 # Deploys the isolated DEV stack (bowtie-content-tool-poc-dev +
-# bowtie-content-tool-web-dev) to the SAME fmc Cloudflare account, via wrangler
-# named environments (`--env dev`). This is the CI counterpart to the manual
+# bowtie-content-tool-web-dev) to the SAME Cloudflare account as prod (Franco's
+# "Bowtie Content SEO" account, franco-ma.workers.dev), via wrangler named
+# environments (`--env dev`). This is the CI counterpart to the manual
 # `npm run deploy:dev` / `npm run cf:deploy:dev` — it makes dev deploys
 # reproducible so dev stops drifting from main / from the operator's shell.
 #
@@ -14,12 +15,16 @@ name: Deploy Workers (dev)
 # Build-time NEXT_PUBLIC_* values come from the committed SSOT web/env.dev.public
 # (parsed by scripts/deploy-web.mjs) — never hand-typed. The one secret (the dev
 # Supabase anon key) is injected from the NEXT_PUBLIC_SUPABASE_ANON_KEY_DEV repo
-# secret. Cloudflare creds reuse the existing CLOUDFLARE_* secrets.
+# secret. Cloudflare creds use the CF_ALT_* secrets (see deploy-workers.yml for
+# why — the fmc.workers.dev account was deprecated 2026-07-07).
 #
 # NOTE: dev runtime secrets on the -dev Worker (POSTGRES_URL, GEMINI_API_KEY,
 # SUPABASE_SERVICE_ROLE_KEY, WP_*) are set ONCE via `wrangler secret put --env
 # dev` and preserved across deploys — they are NOT synced here (same model as
 # prod).
+#
+# This workflow is a stop-gap — see deploy-workers.yml's header for the plan to
+# move to Cloudflare Workers Builds and retire GitHub-Actions-held secrets.
 
 on:
   workflow_dispatch:
@@ -49,15 +54,15 @@ jobs:
 
       - name: Check secret drift (dev)
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
         run: node scripts/check-secrets.mjs --env dev
 
       - name: Deploy backend Worker (bowtie-content-tool-poc-dev)
         working-directory: deploy/cloudflare-workers
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
         run: npm run deploy:dev
 
   deploy-frontend-dev:
@@ -82,7 +87,7 @@ jobs:
         # web/env.dev.public via scripts/deploy-web.mjs. Only the anon key secret
         # + Cloudflare creds are injected here.
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ALT_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ALT_ACCOUNT_ID }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY_DEV: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY_DEV }}
         run: npm run cf:deploy:dev

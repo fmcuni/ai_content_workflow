@@ -82,11 +82,13 @@ it is just not the production hosting path.
 
 | Component | Service | URL |
 |---|---|---|
-| Backend (TypeScript Worker — Hono + Workflows + Durable Objects, DB via Hyperdrive) | `bowtie-content-tool-poc` | https://bowtie-content-tool-poc.fmc.workers.dev |
-| Frontend (Next.js via `@opennextjs/cloudflare`) | `bowtie-content-tool-web` | https://bowtie-content-tool-web.fmc.workers.dev |
+| Backend (TypeScript Worker — Hono + Workflows + Durable Objects, DB via Hyperdrive) | `bowtie-content-tool-poc` | https://bowtie-content-tool-poc.franco-ma.workers.dev |
+| Frontend (Next.js via `@opennextjs/cloudflare`) | `bowtie-content-tool-web` | https://bowtie-content-tool-web.franco-ma.workers.dev |
 
-- **CI:** `.github/workflows/deploy-workers.yml` deploys both Workers to the
-  personal `fmc` Cloudflare account on push to `main`.
+- **CI:** `.github/workflows/deploy-workers.yml` deploys both Workers to
+  Franco's personal Cloudflare account on push to `main`. This is an interim
+  state pending migration to the company-owned Bowtie Enterprise Account and
+  to Cloudflare Workers Builds — see `docs/secrets-and-ci.md`.
 - **Backend source + deploy runbook:** [`deploy/cloudflare-workers/README.md`](deploy/cloudflare-workers/README.md)
 - **Frontend deploy:** `cd web && npm run cf:deploy` (see [`web/README.md`](web/README.md))
 - **Design docs:** spec `docs/design/specs/2026-05-31-workers-native-backend-design.md`,

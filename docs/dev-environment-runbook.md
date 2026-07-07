@@ -9,8 +9,8 @@ Durable Object namespaces + Workflows. Deploys are **manual** (no CI).
 |---|---|---|
 | Backend Worker | `bowtie-content-tool-poc` | `bowtie-content-tool-poc-dev` |
 | Frontend Worker | `bowtie-content-tool-web` | `bowtie-content-tool-web-dev` |
-| Backend URL | `…-poc.fmc.workers.dev` | `…-poc-dev.fmc.workers.dev` |
-| Frontend URL | `…-web.fmc.workers.dev` | `…-web-dev.fmc.workers.dev` |
+| Backend URL | `…-poc.franco-ma.workers.dev` | `…-poc-dev.franco-ma.workers.dev` |
+| Frontend URL | `…-web.franco-ma.workers.dev` | `…-web-dev.franco-ma.workers.dev` |
 | Database | prod Supabase (`gfpkqsiyeslscgsuehmj`) | **separate dev Supabase project** |
 | Refresh-scan cron | `0 2 * * *` | **disabled** (`crons: []`) |
 | WordPress | prod creds | **same as prod** ⚠️ dev approvals publish to **live** sites |
@@ -33,8 +33,8 @@ the reproducible recipe (and what to do if you tear down and rebuild).
 |---|---|
 | Dev Supabase project | `bowtie-content-tool-dev` — ref **`ovxvhxwmqeccjudhyfbh`** (`ap-southeast-1`) |
 | Dev Hyperdrive | `bowtie-poc-db-dev` — id **`98015877c2cc48f4b047f340129df945`** |
-| Backend Worker | https://bowtie-content-tool-poc-dev.fmc.workers.dev (`/health` → ok) |
-| Frontend Worker | https://bowtie-content-tool-web-dev.fmc.workers.dev (→ `/login`) |
+| Backend Worker | https://bowtie-content-tool-poc-dev.franco-ma.workers.dev (`/health` → ok) |
+| Frontend Worker | https://bowtie-content-tool-web-dev.franco-ma.workers.dev (→ `/login`) |
 | Migrations + seed | all 30 applied + personas seeded |
 | Backend secrets | 16 set (DB→dev; GEMINI/WP/VHIS101_WP→prod values; AUTH_SECRET fresh; LANGFUSE off) |
 | Local secrets file | `.env.dev.local` (gitignored) — dev DB password, anon + service_role keys, POSTGRES_URL |
@@ -53,8 +53,8 @@ dev project. Enable it in the dev Supabase dashboard
    client as prod** — add `https://ovxvhxwmqeccjudhyfbh.supabase.co/auth/v1/callback`
    to that client's Authorized redirect URIs in Google Cloud, then paste the same
    client id + secret into dev Supabase.
-2. **Auth → URL Configuration** — Site URL `https://bowtie-content-tool-web-dev.fmc.workers.dev`;
-   add `https://bowtie-content-tool-web-dev.fmc.workers.dev/verify` (and `/**`) to
+2. **Auth → URL Configuration** — Site URL `https://bowtie-content-tool-web-dev.franco-ma.workers.dev`;
+   add `https://bowtie-content-tool-web-dev.franco-ma.workers.dev/verify` (and `/**`) to
    the redirect allow-list.
 
 Email/password is already enabled (for the e2e service account). `BOOTSTRAP_ADMIN_EMAILS`
@@ -119,7 +119,7 @@ Then, in the dev project's dashboard:
 1. **Auth → Providers → Google** — enable, with a Google Cloud OAuth Web client
    whose authorized redirect URI is `https://<dev-ref>.supabase.co/auth/v1/callback`.
 2. **Auth → URL Configuration** — add the dev web origin's `/verify` to the
-   redirect allow-list: `https://bowtie-content-tool-web-dev.fmc.workers.dev/verify`.
+   redirect allow-list: `https://bowtie-content-tool-web-dev.franco-ma.workers.dev/verify`.
 3. **Auth → Signing Keys** — enable **asymmetric (RS256/ES256) JWTs**. With
    `AUTH_PROVIDER=supabase` the backend verifies via JWKS and has **no HS256
    fallback** — if this is off, every dev request 401s.
@@ -210,7 +210,7 @@ cd deploy/cloudflare-workers && npm run deploy:dev
 
 # Frontend — NEXT_PUBLIC_* are BUILD-TIME; pass them at deploy time:
 cd ../../web
-NEXT_PUBLIC_API_BASE=https://bowtie-content-tool-poc-dev.fmc.workers.dev \
+NEXT_PUBLIC_API_BASE=https://bowtie-content-tool-poc-dev.franco-ma.workers.dev \
 NEXT_PUBLIC_AUTH_PROVIDER=supabase \
 NEXT_PUBLIC_SUPABASE_URL=https://<dev-ref>.supabase.co \
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<dev anon key> \
@@ -225,9 +225,9 @@ namespaces).
 ## Step 5 — Verify
 
 ```bash
-curl -s https://bowtie-content-tool-poc-dev.fmc.workers.dev/health     # 200
+curl -s https://bowtie-content-tool-poc-dev.franco-ma.workers.dev/health     # 200
 curl -s -o /dev/null -w '%{http_code}\n' \
-  https://bowtie-content-tool-web-dev.fmc.workers.dev                  # 307 → /login
+  https://bowtie-content-tool-web-dev.franco-ma.workers.dev                  # 307 → /login
 ```
 
 Then sign in to the dev web URL with Google (on an email that has an `app_user`

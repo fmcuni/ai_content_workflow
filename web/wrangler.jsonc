@@ -47,21 +47,12 @@
   // is overridden here. The NEXT_PUBLIC_* values (API base, Supabase URL/anon
   // key, collab + auth flags) are BUILD-TIME and passed as env vars at deploy
   // time (see docs/dev-environment-runbook.md), NOT set here.
+  //
+  // Both this Worker and its `dev` environment live on the same Cloudflare
+  // account (Franco's "Bowtie Content SEO" account, franco-ma.workers.dev) —
+  // the account previously used for prod (fmc.workers.dev) was deprecated by
+  // Franco on 2026-07-07, so there is no `alt`/`alt-dev` split anymore.
   "env": {
-    // Alt account — same Worker name, deployed to the separate
-    // franco.ma@bowtie.com.hk Cloudflare account (compute-only prod duplicate).
-    // Deploy: CLOUDFLARE_API_TOKEN=$CF_ALT_API_TOKEN CLOUDFLARE_ACCOUNT_ID=$CF_ALT_ACCOUNT_ID \
-    //   node scripts/deploy-web.mjs alt
-    "alt": {
-      "name": "bowtie-content-tool-web",
-      "workers_dev": true
-    },
-    // Alt account's DEV frontend — same Worker name as fmc dev, deployed to the
-    // franco.ma@bowtie.com.hk account via `node scripts/deploy-web.mjs alt-dev`.
-    "alt-dev": {
-      "name": "bowtie-content-tool-web-dev",
-      "workers_dev": true
-    },
     "dev": {
       "name": "bowtie-content-tool-web-dev",
       "workers_dev": true

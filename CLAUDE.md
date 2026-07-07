@@ -100,13 +100,20 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 
 | Service | Source | URL |
 |---|---|---|
-| Backend | `deploy/cloudflare-workers/` (`bowtie-content-tool-poc`) | `https://bowtie-content-tool-poc.fmc.workers.dev` |
-| Frontend | `web/` via `@opennextjs/cloudflare` (`bowtie-content-tool-web`) | `https://bowtie-content-tool-web.fmc.workers.dev` |
+| Backend | `deploy/cloudflare-workers/` (`bowtie-content-tool-poc`) | `https://bowtie-content-tool-poc.franco-ma.workers.dev` |
+| Frontend | `web/` via `@opennextjs/cloudflare` (`bowtie-content-tool-web`) | `https://bowtie-content-tool-web.franco-ma.workers.dev` |
 
-- CI: `.github/workflows/deploy-workers.yml` deploys both to the `fmc` Cloudflare
-  account on push to `main` (secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).
-  Runtime secrets (`POSTGRES_URL`, `GEMINI_API_KEY`, `WP_*`) are set once via
-  `wrangler secret put` and preserved across deploys.
+- CI: `.github/workflows/deploy-workers.yml` deploys both on push to `main`, to
+  Franco's personal Cloudflare account ("Bowtie Content SEO" in the dashboard,
+  franco-ma.workers.dev), via the `CF_ALT_API_TOKEN`/`CF_ALT_ACCOUNT_ID` secrets
+  (wrangler reads them as `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`). This
+  is an **interim state**: the account previously used for prod
+  (`fmc.workers.dev`) was deprecated by Franco on 2026-07-07 after he confirmed
+  franco-ma.workers.dev is the account the marketing team actually uses. See
+  `docs/secrets-and-ci.md`'s "Migration plan" for the move to Cloudflare
+  Workers Builds + the company-owned Bowtie Enterprise Account (tracked from
+  Slack thread `#CQE60PTQC`). Runtime secrets (`POSTGRES_URL`, `GEMINI_API_KEY`,
+  `WP_*`) are set once via `wrangler secret put` and preserved across deploys.
 - The Python backend (`content_tool/`) is **retained** — it runs the `evals/`
   suite and is used for local dev. It is no longer the production hosting path.
   (The old Worker+Containers stack — `deploy/cloudflare/`, `Dockerfile.cf-*` — and
@@ -114,27 +121,16 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 - Parity gate: `node deploy/cloudflare-workers/parity/check-parity.mjs` diffs the TS
   backend against the Python reference over read-only routes.
 
-### Alt account (CI-deployed)
-
-A second Cloudflare account (franco.ma@bowtie.com.hk, `franco-ma.workers.dev`)
-hosts compute-only duplicates: `alt` mirrors prod (same prod Supabase/WP data)
-and `alt-dev` mirrors dev (dev Supabase). URLs: `bowtie-content-tool-{poc,web}[-dev].franco-ma.workers.dev`.
-**CI deploys all four alt Workers** on push to main (`deploy-workers.yml` alt
-steps run after the fmc prod deploys; GH secrets `CF_ALT_API_TOKEN`/
-`CF_ALT_ACCOUNT_ID`/`SUPABASE_ANON_KEY_DEV`). Manual fallback with the same
-creds from gitignored `.env.local`: backend `npx wrangler deploy --env alt|alt-dev`,
-web `node scripts/deploy-web.mjs alt|alt-dev`.
-
 ### Dev environment (Workers) — develop here first
 
 A parallel, isolated dev stack mirrors prod via wrangler named environments
-(`env.dev` in both `wrangler.jsonc`). **Prefer building + verifying in dev before
-touching prod.**
+(`env.dev` in both `wrangler.jsonc`), on the **same** Cloudflare account as
+prod (above). **Prefer building + verifying in dev before touching prod.**
 
 | Service | Dev Worker | Dev URL |
 |---|---|---|
-| Backend | `bowtie-content-tool-poc-dev` | `https://bowtie-content-tool-poc-dev.fmc.workers.dev` |
-| Frontend | `bowtie-content-tool-web-dev` | `https://bowtie-content-tool-web-dev.fmc.workers.dev` |
+| Backend | `bowtie-content-tool-poc-dev` | `https://bowtie-content-tool-poc-dev.franco-ma.workers.dev` |
+| Frontend | `bowtie-content-tool-web-dev` | `https://bowtie-content-tool-web-dev.franco-ma.workers.dev` |
 
 - **Deploy dev (manual):** `npm run deploy:dev` (backend) / `npm run cf:deploy:dev`
   (web, with `NEXT_PUBLIC_*` for dev). CI deploys **prod only**.
@@ -163,7 +159,7 @@ node scripts/claude-debug/browse.mjs '[{"goto":"/runs"},{"shotView":"runs.png"}]
   role=admin on the dev Supabase project); creds auto-managed in gitignored
   `.env.dev.local` (`CLAUDE_DEBUG_EMAIL`/`CLAUDE_DEBUG_PASSWORD`).
 - **DEV-ONLY by decision** — do NOT provision a prod variant. Guardrails are
-  client-side: navigation pinned to `*-dev.fmc.workers.dev`; all non-GET
+  client-side: navigation pinned to `*-dev.franco-ma.workers.dev`; all non-GET
   requests to `resume|publish|republish` paths or non-dev hosts are aborted at
   the network layer (HITL_2 approve/publish can never fire; WordPress is shared
   with prod). Do not weaken these guards.

@@ -34,12 +34,16 @@ read it from the gitignored `.env*` file.
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | all deploy workflows | Pin to least-privilege (Workers Scripts:Edit on the fmc account) |
-| `CLOUDFLARE_ACCOUNT_ID` | all deploy workflows | |
+| `CF_ALT_API_TOKEN` | all deploy workflows | Franco's "Bowtie Content SEO" Cloudflare account (franco-ma.workers.dev) — the **only** account in use since the `fmc.workers.dev` account was deprecated 2026-07-07. Historically the "alt" account name; both workflows now use this pair as the sole target |
+| `CF_ALT_ACCOUNT_ID` | all deploy workflows | |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `deploy-workers.yml` (prod web build) | public client key |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY_DEV` | `deploy-workers-dev.yml` (dev web build) | public client key |
 | `GEMINI_API_KEY` | `nightly-evals.yml` | LLM-judge pass |
 | `POSTGRES_URL` | `nightly-evals.yml` | prod Supabase conn string for evals |
+
+> `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` (the old `fmc.workers.dev`
+> creds) are no longer referenced by any workflow and can be deleted from repo
+> secrets once the deprecated account is fully wound down.
 
 > The `bowtie-ins` mirror holds **no** secrets; every deploy/evals job is gated
 > `if: github.repository_owner == 'fmcuni'` so the mirror never runs red.
@@ -103,15 +107,17 @@ the same change.
 
 ---
 
-## Governance risk (for escalation to Bowtie — NOT yet actioned)
+## Governance risk (in progress — see #CQE60PTQC on Slack)
 
 The production stack currently runs through **personal** accounts:
 
 - **Canonical repo** is a personal GitHub fork (`fmcuni/ai_content_workflow`),
   not the org (`bowtie-ins`). All deploy + evals secrets live there.
-- **Cloudflare account** is personal (`fmc.workers.dev`). It holds the prod
-  deploy token and — via Worker secrets — the **Supabase `service_role` key**,
-  WordPress app passwords, and the Gemini key.
+- **Cloudflare account** is personal (Franco's "Bowtie Content SEO" account,
+  franco-ma.workers.dev — as of 2026-07-07 this is the *only* Cloudflare
+  account in use; the previous `fmc.workers.dev` account has been deprecated).
+  It holds the prod deploy token and — via Worker secrets — the **Supabase
+  `service_role` key**, WordPress app passwords, and the Gemini key.
 - **Supabase** prod project is reachable with the same personal-account creds.
 
 Even though the tool handles only public content, concentrating prod deploy keys
@@ -120,24 +126,44 @@ control risk (bus factor, offboarding, audit). **Raise with the relevant Bowtie
 team** (IT / security) before this tool takes on any private data or external
 collaborators.
 
-### Suggested migration outline (when approved)
+### Migration plan (in progress)
 
-1. Create/confirm a **Bowtie-owned** GitHub home for the repo under `bowtie-ins`
-   (or a dedicated org), make it canonical, retire the personal fork as a mirror.
-2. Move CI to a **Bowtie-owned Cloudflare account**; reissue
-   `CLOUDFLARE_API_TOKEN` scoped least-privilege; re-run `wrangler secret put`
-   for all backend secrets on the new account.
-3. Rotate every secret during the move (treat the old personal-account copies as
-   exposed): Supabase service-role + anon, Gemini, WordPress app passwords,
-   `AUTH_SECRET`.
-4. Adopt **GitHub Environments** (`production`, `dev`) with environment-scoped
-   secrets + a required-reviewer protection rule on `production`, so a dev
-   workflow can't read prod secrets and prod deploys gain an approval gate.
-5. Re-point `supabase` project ownership / link to the Bowtie org.
+CI/CD is also moving fully off GitHub Actions secrets — per Gabriel's call,
+Cloudflare **Workers Builds** (native git integration) replaces `wrangler
+deploy` invoked from GH Actions, since each Worker's build-time API token is
+then generated and held entirely by Cloudflare, never a GitHub secret.
 
-### Interim guardrail (no account move needed)
+1. **Prod** moves to the company-owned **Bowtie Enterprise Account**
+   (`49e489ec5d8bc26e6ae71632052b1add` — already hosts other Bowtie internal
+   tools like `bowtie-drop`). This needs a new Hyperdrive config (Hyperdrive is
+   account-scoped) and a full secret rotation (see below) on the new account.
+2. **Dev** stays on Franco's account for now (decided for speed) — revisit once
+   prod migration is proven out.
+3. For each of the 4 Workers, connect it to this GitHub repo via **Settings →
+   Builds → Connect** in the Cloudflare dashboard, with a root directory of
+   `deploy/cloudflare-workers` (backend) or `web` (frontend), a deploy command
+   of `npx wrangler deploy` (or `npx wrangler deploy --env dev` for the dev
+   Worker), and the one build-time secret
+   (`NEXT_PUBLIC_SUPABASE_ANON_KEY[_DEV]`) set as a Cloudflare-side build
+   variable instead of a GitHub secret. Chain `node ../../scripts/smoke-check.mjs
+   <url>/login` onto the frontend deploy command (see `scripts/smoke-check.mjs`).
+4. Once all 4 Workers build+deploy successfully via Workers Builds, **delete**
+   `.github/workflows/deploy-workers.yml` and `deploy-workers-dev.yml`, and
+   remove the (by-then-unused) `CF_ALT_*` / `CLOUDFLARE_*` / anon-key GH secrets.
+5. Rotate every backend secret during the prod account move (treat the old
+   personal-account copies as exposed): Supabase service-role + anon, Gemini,
+   WordPress app passwords, `AUTH_SECRET`.
+6. Set GitHub branch protection on `main` requiring review before merge — this
+   is now the production approval gate (there's no GitHub deploy step left to
+   gate with a required-reviewer Environment).
+7. Separately (not blocking the above): decide the canonical GitHub repo home
+   (`bowtie-ins` vs the personal `fmcuni` fork), and re-point `supabase`
+   project ownership to the Bowtie org.
 
-Wrap the prod deploy in a GitHub `production` Environment with a required
-reviewer, and scope `CLOUDFLARE_*` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` to it. This
-adds an approval gate and blast-radius isolation while staying on the current
-accounts.
+### Interim state (as of 2026-07-07)
+
+`deploy-workers.yml` / `deploy-workers-dev.yml` still run via GitHub Actions,
+now pointed at the single real account (`CF_ALT_API_TOKEN`/`CF_ALT_ACCOUNT_ID`
+— the `fmc.workers.dev` creds are unused). This is a stop-gap kept only because
+the deprecated `fmc` account would otherwise have broken CI outright; it should
+be replaced by the Workers Builds plan above, not treated as the end state.

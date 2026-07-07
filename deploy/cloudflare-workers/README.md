@@ -11,11 +11,13 @@ This replaced the retired "Worker + 2 Containers" stack (formerly in
 no longer the production hosting path.
 
 - **Service:** `bowtie-content-tool-poc`
-- **URL:** https://bowtie-content-tool-poc.fmc.workers.dev
-- **Account:** personal `fmc` Cloudflare account
+- **URL:** https://bowtie-content-tool-poc.franco-ma.workers.dev
+- **Account:** Franco's personal Cloudflare account ("Bowtie Content SEO" in
+  the dashboard) — interim state pending migration to the company-owned
+  Bowtie Enterprise Account, see `docs/secrets-and-ci.md`.
 
 The frontend is a separate Worker — `web/` built with `@opennextjs/cloudflare`
-(`bowtie-content-tool-web`, https://bowtie-content-tool-web.fmc.workers.dev).
+(`bowtie-content-tool-web`, https://bowtie-content-tool-web.franco-ma.workers.dev).
 
 ## What it runs
 

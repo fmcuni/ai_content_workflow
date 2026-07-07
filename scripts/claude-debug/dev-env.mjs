@@ -5,7 +5,7 @@
 // the parser in web/tests/e2e/support/test-env.ts.
 //
 // Hard guardrail: every URL this module hands out is pinned to the DEV stack
-// (Supabase ref ovxvhxwmqeccjudhyfbh, *-dev.fmc.workers.dev Workers). The
+// (Supabase ref ovxvhxwmqeccjudhyfbh, *-dev.franco-ma.workers.dev Workers). The
 // loaders throw if a configured value points anywhere else, so the downstream
 // scripts cannot be aimed at prod by editing the env file alone.
 
@@ -22,8 +22,8 @@ export const STATE_FILE = path.join(OUT_DIR, "state.json");
 
 export const DEV_SUPABASE_REF = "ovxvhxwmqeccjudhyfbh";
 export const DEV_SUPABASE_URL = `https://${DEV_SUPABASE_REF}.supabase.co`;
-export const DEV_WEB_HOST = "bowtie-content-tool-web-dev.fmc.workers.dev";
-export const DEV_API_HOST = "bowtie-content-tool-poc-dev.fmc.workers.dev";
+export const DEV_WEB_HOST = "bowtie-content-tool-web-dev.franco-ma.workers.dev";
+export const DEV_API_HOST = "bowtie-content-tool-poc-dev.franco-ma.workers.dev";
 export const DEV_WEB_URL = `https://${DEV_WEB_HOST}`;
 export const DEV_API_URL = `https://${DEV_API_HOST}`;
 
