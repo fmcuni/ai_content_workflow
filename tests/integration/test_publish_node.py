@@ -8,6 +8,7 @@ from httpx import Response
 from sqlalchemy import select
 
 from content_tool.agents.publish import publish_to_wordpress
+from content_tool.config import get_settings
 from content_tool.db.models import (
     Article,
     Draft,
@@ -18,6 +19,12 @@ from content_tool.db.models import (
     Run,
 )
 from content_tool.wordpress.client import WordPressClient
+
+# Target pin (issue #15): a never-pushed refresh publish now asserts the
+# HITL_2 approval pin before writing to WordPress (see agents/publish.py).
+# These fixtures pre-date the pin, so seed a matching one — the default
+# target (no persona-assigned publish_target row) resolves to this label.
+_DEFAULT_LABEL = get_settings().wp_target
 
 
 @pytest.mark.asyncio
@@ -30,6 +37,8 @@ async def test_publish_node_updates_runs(db_session):
         today_date=date(2026, 5, 21), chosen_route="small_refresh",
         wp_publish_status="draft", wp_category_ids=[42], wp_author_id=5,
         approved_at=datetime.utcnow(), approved_by="e@x.com",
+        approved_target_kind="wordpress", approved_post_id="98785",
+        approved_target_label=_DEFAULT_LABEL,
     ))
     await db_session.commit()
     db_session.add(FetchedArticle(run_id=run_id, wp_post_id=98785, wp_categories=[],
@@ -82,6 +91,8 @@ async def test_publish_node_survives_transient_infra_block(db_session):
         today_date=date(2026, 5, 21), chosen_route="small_refresh",
         wp_publish_status="draft", wp_category_ids=[42], wp_author_id=5,
         approved_at=datetime.utcnow(), approved_by="e@x.com",
+        approved_target_kind="wordpress", approved_post_id="98785",
+        approved_target_label=_DEFAULT_LABEL,
     ))
     await db_session.commit()
     db_session.add(FetchedArticle(run_id=run_id, wp_post_id=98785, wp_categories=[],
@@ -150,6 +161,8 @@ async def test_publish_node_stamps_last_persisted_at_on_refresh(db_session):
         acf_adv_id=1, acf_widget_id=2, persona="bowtie-editor",
         today_date=date(2026, 5, 21), chosen_route="small_refresh",
         wp_publish_status="draft",
+        approved_target_kind="wordpress", approved_post_id="55501",
+        approved_target_label=_DEFAULT_LABEL,
     ))
     await db_session.commit()
     db_session.add(FetchedArticle(run_id=run_id, wp_post_id=55501, wp_categories=[],
@@ -254,6 +267,8 @@ async def test_publish_node_forwards_wp_publish_at_as_date_gmt(db_session):
         wp_publish_status="future", wp_category_ids=[42], wp_author_id=5,
         wp_publish_at=publish_at,
         approved_at=datetime.utcnow(), approved_by="e@x.com",
+        approved_target_kind="wordpress", approved_post_id="98785",
+        approved_target_label=_DEFAULT_LABEL,
     ))
     await db_session.commit()
     db_session.add(FetchedArticle(run_id=run_id, wp_post_id=98785, wp_categories=[],
@@ -302,6 +317,8 @@ async def test_publish_node_ships_schema_jsonld_as_meta_not_body(db_session):
         today_date=date(2026, 5, 21), chosen_route="small_refresh",
         wp_publish_status="draft", wp_category_ids=[42], wp_author_id=5,
         approved_at=datetime.utcnow(), approved_by="e@x.com",
+        approved_target_kind="wordpress", approved_post_id="98785",
+        approved_target_label=_DEFAULT_LABEL,
     ))
     await db_session.commit()
     db_session.add(FetchedArticle(run_id=run_id, wp_post_id=98785, wp_categories=[],

@@ -134,6 +134,21 @@ class ReviewResolveIn(BaseModel):
     editor_name: str | None = None
 
 
+class ConfirmedTarget(BaseModel):
+    """The publish target the reviewer saw in the dry-publish preview.
+
+    Echoed back on HITL_2 approve of a refresh run so the server can verify it
+    still matches what publish will actually resolve (issue #15 "target pin")
+    before accepting the approval. Python mirror of the TS ``ConfirmedTarget``
+    (``deploy/cloudflare-workers/src/routes/runs.schemas.ts``) — kept as
+    ``"wordpress" | "ghost"`` for schema parity even though Ghost is TS-only.
+    """
+
+    kind: Literal["wordpress", "ghost"]
+    post_id: str | None = None
+    label: str
+
+
 class Hitl2Request(BaseModel):
     decision: Literal["approve", "request_changes", "reject"]
     # Authenticated approver identity (email). In production the Workers backend
@@ -153,6 +168,9 @@ class Hitl2Request(BaseModel):
     wp_slug: str | None = None
     wp_excerpt: str | None = None
     wp_publish_at: datetime | None = None
+    # Target pin (issue #15): required on approve of a refresh run — see the
+    # /hitl-2 route for the mismatch check.
+    confirmed_target: ConfirmedTarget | None = None
 
 
 class Hitl2SnapshotIn(BaseModel):
@@ -336,6 +354,9 @@ class DryPublishRequest(BaseModel):
 class DryPublishResponse(BaseModel):
     target_base_url: str
     target_label: str                    # staging | production
+    # The post this publish would overwrite (None = creates a new post). The
+    # UI echoes it back as hitl-2 `confirmed_target` — the target pin (#15).
+    target_post_id: str | None = None
     request_method: Literal["PUT", "POST"]
     request_url: str
     request_headers: dict[str, str]

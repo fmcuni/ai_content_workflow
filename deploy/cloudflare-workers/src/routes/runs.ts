@@ -175,6 +175,16 @@ interface Hitl2Body {
   ghost_author_ids?: string[] | null;
   ghost_tags?: string[] | null;
   feature_image_url?: string | null;
+  // Target pin (issue #15): required to approve a refresh run. post_id null =
+  // "approved as create-new" (slug-change path).
+  confirmed_target?: ConfirmedTarget;
+}
+
+/** The CMS target the reviewer saw in the dry-publish preview. */
+interface ConfirmedTarget {
+  kind: "wordpress" | "ghost";
+  post_id: string | null;
+  label: string;
 }
 
 interface DryPublishBody {
@@ -317,6 +327,12 @@ interface RunPublishMetaRow {
   wp_publish_status: string | null;
   wp_publish_at: string | null;
   wp_category_ids: unknown;
+  // Target-pin inputs (issue #15): what the publish step will use to resolve
+  // the post it overwrites, re-derived here at approve time.
+  start_mode: string;
+  wp_pushed_post_id: number | null;
+  cms_post_id: string | null;
+  article_url: string | null;
 }
 
 interface RunDryPublishRow {
@@ -655,13 +671,21 @@ runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
   }
 
   const claim = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+    // Read the failure context BEFORE the claim clears `error`: a publish
+    // target-mismatch failure (issue #15) voided the HITL_2 approval, and a
+    // plain restart would replay the CACHED approve event straight into the
+    // same pin failure. Detected below, it restarts FROM the HITL_2 gate so
+    // the operator re-previews and re-approves instead.
+    const pre = await sql<{ error: unknown; hitl_2_iteration: number }[]>`
+      SELECT error, hitl_2_iteration FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
+    `;
     const claimed = await sql<{ run_id: string }[]>`
       UPDATE content_tool.runs
       SET status = 'pending', error = NULL
       WHERE run_id = ${runId} AND status = 'failed'
       RETURNING run_id
     `;
-    if (claimed.length > 0) return { ok: true as const };
+    if (claimed.length > 0) return { ok: true as const, pre: pre[0] ?? null };
     // Lost the claim — the row is missing (404) or not in `failed` state (409;
     // also covers an already-claimed concurrent restart, now `pending`).
     const rows = await sql<{ status: string }[]>`
@@ -676,6 +700,13 @@ runsRouter.post("/:id/restart", requireRole("author"), async (c) => {
       return c.json({ detail: "run not found" }, 404);
     }
     return c.json({ detail: "only failed runs can be restarted" }, 409);
+  }
+
+  if (fromStep === undefined && claim.pre !== null) {
+    const err = pgJson<{ message?: string } | null>(claim.pre.error);
+    if (typeof err?.message === "string" && err.message.includes("publish target mismatch")) {
+      fromStep = { name: `gate-hitl2-${claim.pre.hitl_2_iteration}` };
+    }
   }
 
   const env = c.env as RunsEnv;
@@ -852,9 +883,11 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
     // stored on the run, checked against the voice's resolved CMS (Ghost vs
     // WordPress). A run NOT paused at the gate skips this and falls through to
     // the claim, which returns not_at_gate (409).
+    let pin: ConfirmedTarget | null = null;
     if (decision === "approve" && current.status === HITL_2_GATE_STATUS) {
       const metaRows = await sql<RunPublishMetaRow[]>`
-        SELECT persona, wp_publish_status, wp_publish_at, wp_category_ids
+        SELECT persona, wp_publish_status, wp_publish_at, wp_category_ids,
+               start_mode, wp_pushed_post_id, cms_post_id, article_url
         FROM content_tool.runs WHERE run_id = ${runId} LIMIT 1
       `;
       const meta = metaRows[0];
@@ -868,6 +901,47 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
         });
         if (detail !== null) {
           return { error: "invalid_publish" as const, detail };
+        }
+
+        // Target pin (issue #15). A refresh run overwrites an existing CMS
+        // post, so the approve must carry the exact target the reviewer saw in
+        // the dry-publish preview. Re-derive the target the publish step will
+        // resolve — same base-id + slug rules, with the slug this claim is
+        // about to store — and 409 on any divergence instead of approving.
+        // The verified pin is persisted by the claim UPDATE below; the publish
+        // step asserts against it before writing.
+        if (meta.start_mode === "refresh") {
+          const faRows = await sql<{ wp_post_id: number | null; cms_post_id: string | null }[]>`
+            SELECT wp_post_id, cms_post_id FROM content_tool.fetched_articles
+            WHERE run_id = ${runId} LIMIT 1
+          `;
+          const fa = faRows[0];
+          const basePostId =
+            target.kind === "ghost"
+              ? (meta.cms_post_id ?? fa?.cms_post_id ?? null)
+              : (meta.wp_pushed_post_id ?? fa?.wp_post_id ?? null);
+          const expectedId = resolvePostIdForSlug(
+            basePostId,
+            meta.article_url,
+            body.wp_slug ?? null,
+          );
+          const expected: ConfirmedTarget = {
+            // ResolvedTarget.kind is a plain string; anything non-ghost
+            // publishes via the WordPress path (mirrors the publish dispatch).
+            kind: target.kind === "ghost" ? "ghost" : "wordpress",
+            post_id: expectedId === null ? null : String(expectedId),
+            label: target.label,
+          };
+          const ct = body.confirmed_target;
+          if (
+            ct === undefined ||
+            ct.kind !== expected.kind ||
+            ct.post_id !== expected.post_id ||
+            ct.label !== expected.label
+          ) {
+            return { error: "target_mismatch" as const, expected };
+          }
+          pin = expected;
         }
       }
     }
@@ -920,7 +994,10 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
         wp_publish_at = ${body.wp_publish_at ?? null},
         ghost_author_ids = ${body.ghost_author_ids == null ? null : toJsonb(sql, body.ghost_author_ids)},
         ghost_tags = ${body.ghost_tags == null ? null : toJsonb(sql, body.ghost_tags)},
-        feature_image_url = ${body.feature_image_url ?? null}
+        feature_image_url = ${body.feature_image_url ?? null},
+        approved_target_kind = ${pin?.kind ?? null},
+        approved_post_id = ${pin?.post_id ?? null},
+        approved_target_label = ${pin?.label ?? null}
       WHERE run_id = ${runId}
         AND status = ${HITL_2_GATE_STATUS} ${capGuard}
     `;
@@ -977,6 +1054,20 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
       // categories on a Ghost target). The gate was NOT claimed.
       return c.json({ detail: guard.detail }, 422);
     }
+    if (guard.error === "target_mismatch") {
+      // Target pin (issue #15): the confirmed target is missing or no longer
+      // matches what this run would publish to. The gate was NOT claimed.
+      const exp = guard.expected;
+      return c.json(
+        {
+          detail:
+            `publish target changed since the preview — re-run the publish preview and approve ` +
+            `again (current target: ${exp.kind} post ${exp.post_id ?? "<new>"} on ${exp.label})`,
+          expected_target: exp,
+        },
+        409,
+      );
+    }
     // not_at_gate — the run is not paused at HITL_2 (already decided, or a
     // concurrent request already claimed the gate).
     return c.json({ detail: "run is not awaiting a HITL_2 decision" }, 409);
@@ -1028,7 +1119,10 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
             hitl_2_notes = NULL,
             hitl_2_iteration = ${guard.priorIteration},
             approved_at = NULL,
-            approved_by = NULL
+            approved_by = NULL,
+            approved_target_kind = NULL,
+            approved_post_id = NULL,
+            approved_target_label = NULL
         WHERE run_id = ${runId}
       `;
     });
@@ -1252,6 +1346,9 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
       target_base_url: apiBase,
       target_label: target.label,
       kind: "ghost",
+      // The post this publish would overwrite (null = creates a new post).
+      // The UI echoes it back as hitl-2 `confirmed_target` — the target pin.
+      target_post_id: ghostPostId ?? null,
       request_method: ghostPostId ? "PUT" : "POST",
       request_url: apiBase
         ? ghostPostId
@@ -1350,6 +1447,9 @@ runsRouter.post("/:id/dry-publish", requireRole("reviewer"), async (c) => {
     target_base_url: targetEnv.WP_BASE_URL ?? null,
     target_label: target.label,
     kind: "wordpress",
+    // The post this publish would overwrite (null = creates a new post).
+    // The UI echoes it back as hitl-2 `confirmed_target` — the target pin.
+    target_post_id: effectivePostId === null ? null : String(effectivePostId),
     request_method: method,
     request_url: url,
     request_headers: {
@@ -1642,6 +1742,10 @@ interface RepublishRunRow {
   wp_featured_media_id: number | null;
   wp_slug: string | null;
   wp_excerpt: string | null;
+  // Target pin recorded at HITL_2 approve (issue #15).
+  approved_target_kind: string | null;
+  approved_post_id: string | null;
+  approved_target_label: string | null;
 }
 
 interface RepublishRenderRow {
@@ -1909,21 +2013,44 @@ runsRouter.post("/:id/existing-post/refresh", requireRole("reviewer"), async (c)
 
   const found = post;
   const updated = await withDb(c.env, c.executionCtx, async (sql: Sql) => {
-    const faRows = await sql<{ run_id: string }[]>`
-      SELECT run_id FROM content_tool.fetched_articles WHERE run_id = ${runId} LIMIT 1
+    const faRows = await sql<{ run_id: string; wp_post_id: number | null }[]>`
+      SELECT run_id, wp_post_id FROM content_tool.fetched_articles WHERE run_id = ${runId} LIMIT 1
     `;
-    if (faRows[0] === undefined) {
+    const fa = faRows[0];
+    if (fa === undefined) {
       return false;
     }
     const categories = found.categories.map((cid) => ({ id: cid }));
+    // wp_post_id is cached too (it identifies the post a refresh publish
+    // overwrites) — the re-read must not leave a stale id behind.
     await sql`
       UPDATE content_tool.fetched_articles
-      SET wp_categories = ${toJsonb(sql, categories)},
+      SET wp_post_id = ${found.id},
+          wp_categories = ${toJsonb(sql, categories)},
           wp_author_id = ${found.author},
           wp_slug = ${found.slug},
           wp_link = ${found.link}
       WHERE run_id = ${runId}
     `;
+    // Target pin (issue #15): this re-read can change which post a pending
+    // refresh publish would overwrite. Void a not-yet-published approval so
+    // the operator re-previews + re-approves against the new target; the
+    // publish step's pin assert is the backstop. Published runs keep their
+    // approval audit trail.
+    if (fa.wp_post_id !== found.id) {
+      await sql`
+        UPDATE content_tool.runs
+        SET hitl_2_decision = NULL,
+            approved_at = NULL,
+            approved_by = NULL,
+            approved_target_kind = NULL,
+            approved_post_id = NULL,
+            approved_target_label = NULL
+        WHERE run_id = ${runId}
+          AND hitl_2_decision = 'approve'
+          AND status <> 'published'
+      `;
+    }
     return true;
   });
   if (!updated) {
@@ -2440,7 +2567,8 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
     const runRows = await sql<RepublishRunRow[]>`
       SELECT
         start_mode, persona, created_by, wp_pushed_post_id, wp_publish_status, wp_author_id,
-        wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt
+        wp_category_ids, wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt,
+        approved_target_kind, approved_post_id, approved_target_label
       FROM content_tool.runs
       WHERE run_id = ${runId}
       LIMIT 1
@@ -2477,6 +2605,20 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
         SELECT wp_post_id FROM content_tool.fetched_articles WHERE run_id = ${runId} LIMIT 1
       `;
       fetchedPostId = faRows[0]?.wp_post_id ?? null;
+
+      // Target pin (issue #15): a never-pushed refresh republish writes to the
+      // FETCHED post — the same arbitrary-overwrite vector the HITL_2 pin
+      // closes, so it needs the same gate. Require the pinned approval to name
+      // exactly this post; a missing or divergent pin fails closed. Re-pushes
+      // to the run's own wp_pushed_post_id are self-owned and need no pin.
+      const target = await resolvePublishTarget(sql, run.persona ?? "", c.env.WP_TARGET ?? "");
+      const pinnedOk =
+        run.approved_target_kind === (target.kind === "ghost" ? "ghost" : "wordpress") &&
+        run.approved_post_id === (fetchedPostId === null ? null : String(fetchedPostId)) &&
+        run.approved_target_label === target.label;
+      if (!pinnedOk) {
+        return { error: "target_mismatch" as const };
+      }
     }
     return { run, render, fetchedPostId, targetEnv };
   });
@@ -2487,6 +2629,16 @@ runsRouter.post("/:id/republish", requireRole("reviewer"), async (c) => {
     }
     if (data.error === "target") {
       return c.json({ detail: "WordPress client not configured" }, 503);
+    }
+    if (data.error === "target_mismatch") {
+      return c.json(
+        {
+          detail:
+            "publish target does not match the pinned HITL_2 approval — re-run the publish " +
+            "preview and approve again before re-pushing",
+        },
+        409,
+      );
     }
     return c.json({ detail: "run has no render to publish" }, 409);
   }

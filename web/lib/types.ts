@@ -457,11 +457,24 @@ export interface DryPublishRequest {
   feature_image_url?: string | null;
 }
 
+/**
+ * The CMS post a publish would write to (issue #15 target pin). `null` means
+ * the publish would CREATE a new post; a value means it would UPDATE that post.
+ * Echoed back verbatim as `Hitl2Request.confirmed_target` on refresh-mode approve.
+ */
+export interface ConfirmedTarget {
+  kind: PublishTargetKind;
+  post_id: string | null;
+  label: string;
+}
+
 export interface DryPublishResponse {
   target_base_url: string | null;
   target_label: string;
   /** CMS kind the preview targets. Absent on older backends → treat as WP. */
   kind?: PublishTargetKind;
+  /** The post this publish would UPDATE, or null if it would CREATE a new one. */
+  target_post_id: string | null;
   request_method: "PUT" | "POST";
   request_url: string;
   request_headers: Record<string, string>;
@@ -497,6 +510,9 @@ export interface Hitl2Request {
   ghost_author_ids?: string[] | null;
   ghost_tags?: string[] | null;
   feature_image_url?: string | null;
+  // Target pin (issue #15): required for approve on a refresh-mode run, taken
+  // verbatim from the latest dry-publish response. Omitted for create-mode runs.
+  confirmed_target?: ConfirmedTarget;
 }
 
 /**

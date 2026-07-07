@@ -6,12 +6,15 @@
  */
 import type {
   ArticleEditRequest,
+  ConfirmedTarget,
   DryPublishRequest,
+  DryPublishResponse,
   Hitl2Comment,
   Hitl2Request,
   Hitl2Snapshot,
   Hitl2SnapshotIn,
   Hitl2SnapshotTrigger,
+  StartMode,
 } from "@/lib/types";
 
 export type WpPublishStatus = "draft" | "future" | "publish";
@@ -87,6 +90,23 @@ export function buildDryRequest(html: string, form: Hitl2Request): DryPublishReq
     ghost_author_ids: form.ghost_author_ids ?? null,
     ghost_tags: form.ghost_tags ?? null,
     feature_image_url: form.feature_image_url ?? null,
+  };
+}
+
+/**
+ * Target pin (issue #15): a refresh-mode approve must echo back the exact CMS
+ * target the reviewer saw in the dry-publish preview. `undefined` for
+ * create-mode runs — the backend requires the field to be absent there.
+ */
+export function confirmedTargetFor(
+  startMode: StartMode | undefined,
+  dryResult: DryPublishResponse,
+): ConfirmedTarget | undefined {
+  if (startMode !== "refresh") return undefined;
+  return {
+    kind: dryResult.kind ?? "wordpress",
+    post_id: dryResult.target_post_id,
+    label: dryResult.target_label,
   };
 }
 

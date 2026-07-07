@@ -27,6 +27,13 @@
 
 import { WorkflowEntrypoint, type WorkflowStep } from "cloudflare:workers";
 import type { WorkflowEvent } from "cloudflare:workers";
+import { NonRetryableError } from "cloudflare:workflows";
+
+import {
+  pinnedTargetMatches,
+  pinMismatchMessage,
+  type ResolvedPublishTarget,
+} from "./target_pin";
 
 import type { Env } from "../index";
 import { getSql } from "../db/client";
@@ -180,6 +187,11 @@ interface Hitl2PersistRow {
   ghost_author_ids: unknown;
   ghost_tags: unknown;
   feature_image_url: string | null;
+  // Target pin recorded at HITL_2 approve (issue #15) — the exact CMS target
+  // the reviewer confirmed. The publish steps assert against it before writing.
+  approved_target_kind: string | null;
+  approved_post_id: string | null;
+  approved_target_label: string | null;
 }
 
 interface RenderRowForPublish {
@@ -961,6 +973,17 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           );
         }
 
+        // Refresh overwrites an existing post — the resolved target must be the
+        // exact one the reviewer confirmed at approve (issue #15). Fails closed
+        // BEFORE any CMS write. Create runs publish a new post: nothing to pin.
+        if (isRefresh) {
+          await this.assertPinnedTarget(sql, runId, hitl2, {
+            kind: "wordpress",
+            postId: postId === null ? null : String(postId),
+            label: target.label,
+          });
+        }
+
         // Honor the operator's status choice for both create and refresh runs
         // (defaulting to draft) so a "publish" selection is never silently
         // demoted to a draft.
@@ -1059,6 +1082,17 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
           );
         }
 
+        // Refresh overwrites an existing post — the resolved target must be the
+        // exact one the reviewer confirmed at approve (issue #15). Fails closed
+        // BEFORE any CMS write. Create runs publish a new post: nothing to pin.
+        if (isRefresh) {
+          await this.assertPinnedTarget(sql, runId, hitl2, {
+            kind: "ghost",
+            postId,
+            label: target.label,
+          });
+        }
+
         const publisher = new GhostPublisher(creds);
         const result = await publisher.upsert({
           postId,
@@ -1090,6 +1124,37 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
         return "ok";
       }),
     );
+  }
+
+  /**
+   * Target-pin assertion (issue #15). A refresh publish overwrites an existing
+   * CMS post, so before writing we assert that the target this step resolved is
+   * byte-identical to the pin recorded at HITL_2 approve. On any divergence
+   * (including a missing pin — e.g. an approval that predates the pin columns)
+   * the approval is voided, so a restart re-gates at HITL_2 instead of
+   * auto-republishing, and the step fails without retries: retrying cannot fix
+   * a stale approval, only a fresh human one can.
+   */
+  private async assertPinnedTarget(
+    sql: ReturnType<typeof getSql>,
+    runId: string,
+    hitl2: Hitl2PersistRow,
+    actual: ResolvedPublishTarget,
+  ): Promise<void> {
+    if (pinnedTargetMatches(hitl2, actual)) {
+      return;
+    }
+    await sql`
+      UPDATE content_tool.runs
+      SET hitl_2_decision = NULL,
+          approved_at = NULL,
+          approved_by = NULL,
+          approved_target_kind = NULL,
+          approved_post_id = NULL,
+          approved_target_label = NULL
+      WHERE run_id = ${runId}::uuid
+    `;
+    throw new NonRetryableError(pinMismatchMessage(hitl2, actual));
   }
 
   /** Existing WP post id captured by fetch_article (refresh target). */
@@ -1271,7 +1336,8 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, Params> {
     const rows = await sql<Hitl2PersistRow[]>`
       SELECT hitl_2_iteration, wp_publish_status, wp_author_id, wp_category_ids,
              wp_tag_ids, wp_featured_media_id, wp_slug, wp_excerpt, wp_publish_at,
-             ghost_author_ids, ghost_tags, feature_image_url
+             ghost_author_ids, ghost_tags, feature_image_url,
+             approved_target_kind, approved_post_id, approved_target_label
       FROM content_tool.runs WHERE run_id = ${runId}::uuid LIMIT 1
     `;
     const row = rows[0];

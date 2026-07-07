@@ -209,6 +209,23 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T;
 }
 
+/**
+ * `http()` throws `Error("<status>: <raw body>")`. When the body is JSON with a
+ * `detail` field (e.g. the 409 target-mismatch response — issue #15), pull that
+ * out for display; otherwise fall back to the raw message.
+ */
+export function apiErrorDetail(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  const body = message.slice(message.indexOf(": ") + 2);
+  try {
+    const parsed = JSON.parse(body) as { detail?: string };
+    if (parsed.detail) return parsed.detail;
+  } catch {
+    // not JSON — fall through to the raw message
+  }
+  return message;
+}
+
 // Persisted per-step event-log query params, shared by the run and
 // topic-batch log endpoints. `since_seq` enables incremental polling.
 export interface LogQueryParams {

@@ -13,9 +13,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { api } from "@/lib/api";
+import { api, apiErrorDetail } from "@/lib/api";
+import { confirmedTargetFor } from "@/lib/run-editor/form";
 import { useWpCategories, useWpUsers } from "@/lib/use-wp-options";
-import type { Hitl2Request, Persona, PublishTarget, RunSummary } from "@/lib/types";
+import type { DryPublishResponse, Hitl2Request, Persona, PublishTarget, RunSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { BriefColumn } from "./BriefColumn";
@@ -145,7 +146,9 @@ export function RunDrawer({
     onClose();
   };
 
-  const approveBody = (): Hitl2Request => {
+  // Target pin (issue #15): refresh runs must carry the exact target the
+  // reviewer saw in the dry-publish preview, taken verbatim from `dryResult`.
+  const approveBody = (dryResult: DryPublishResponse): Hitl2Request => {
     const v = autosave.values;
     return {
       decision: "approve",
@@ -164,10 +167,11 @@ export function RunDrawer({
       ghost_tags: v.ghostTags,
       feature_image_url: v.featureImageUrl || null,
       comments: [],
+      confirmed_target: confirmedTargetFor(r.start_mode, dryResult),
     };
   };
 
-  const [confirmLabel, setConfirmLabel] = useState<string | null>(null);
+  const [dryResult, setDryResult] = useState<DryPublishResponse | null>(null);
   const dry = useMutation({
     // Cancel any debounced metadata save before the publish flow — the resume
     // carries every field, so a late PATCH firing afterwards is pure noise.
@@ -197,17 +201,25 @@ export function RunDrawer({
         toast.error(res.validation_error);
         return;
       }
-      setConfirmLabel(res.target_label);
+      setDryResult(res);
     },
     onError: (e: Error) => toast.error(`Dry-publish failed — ${e.message}`),
   });
   const publish = useMutation({
-    mutationFn: () => api.resumeHitl2(runId, approveBody()),
+    mutationFn: () => {
+      if (!dryResult) throw new Error("Run publish preview first");
+      return api.resumeHitl2(runId, approveBody(dryResult));
+    },
     onSuccess: () => {
-      setConfirmLabel(null);
+      setDryResult(null);
       afterAction("Approved & published");
     },
-    onError: (e: Error) => toast.error(`Publish failed — ${e.message}`),
+    onError: (e: Error) => {
+      // Target pin 409 (issue #15): the target changed since the preview — force
+      // a fresh dry-publish before the operator can approve again.
+      setDryResult(null);
+      toast.error(`Publish failed — ${apiErrorDetail(e)}`);
+    },
   });
   const rejectDraft = useMutation({
     mutationFn: () =>
@@ -392,17 +404,24 @@ export function RunDrawer({
       </aside>
 
       {/* Dry-publish target confirm (spec §6 — preserved before approve-publish) */}
-      <Dialog open={confirmLabel != null} onOpenChange={(o) => !o && setConfirmLabel(null)}>
+      <Dialog open={dryResult != null} onOpenChange={(o) => !o && setDryResult(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Publish to {confirmLabel}?</DialogTitle>
+            <DialogTitle>Publish to {dryResult?.target_label}?</DialogTitle>
             <DialogDescription>
-              This approves the draft and pushes it to <strong>{confirmLabel}</strong> with publish status
+              {r.start_mode === "refresh" && dryResult && (
+                <span className="mb-2 block font-mono text-[11px] uppercase tracking-wider text-ink">
+                  {dryResult.target_post_id != null
+                    ? `Will UPDATE post #${dryResult.target_post_id} · ${dryResult.target_label}`
+                    : `Will CREATE a new post · ${dryResult.target_label}`}
+                </span>
+              )}
+              This approves the draft and pushes it to <strong>{dryResult?.target_label}</strong> with publish status
               “{autosave.values.pubStatus || "draft (default)"}”. Confirm the target before publishing.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setConfirmLabel(null)} disabled={publish.isPending}>
+            <Button variant="secondary" onClick={() => setDryResult(null)} disabled={publish.isPending}>
               Cancel
             </Button>
             <Button variant="primary" onClick={() => publish.mutate()} disabled={publish.isPending}>

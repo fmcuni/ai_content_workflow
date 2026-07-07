@@ -21,6 +21,7 @@ from content_tool.db.models import (
     Run,
 )
 from content_tool.gemini.fake import FakeGeminiClient
+from content_tool.wordpress.client import WordPressClient
 
 
 @pytest.mark.asyncio
@@ -463,7 +464,16 @@ async def test_hitl2_approve_persists_edits_and_approver(postgres_url, monkeypat
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         app.state.session_factory = sf
         app.state.run_executor = _StubExecutor()
+        # lifespan() never ran under a bare ASGITransport, so app.state.wp_client
+        # is unset — wire a minimal one directly (matches other route tests).
+        app.state.wp_client = WordPressClient(
+            "https://wp.example.com", username="u", app_password="p",  # noqa: S106
+        )
+        app.state.wp_target = "staging"
 
+        # Target pin (issue #15): a refresh-run approve must echo back the
+        # target the server will resolve. No FetchedArticle is seeded for this
+        # run, so the expected post_id is None (create-new).
         resp = await ac.post(
             f"/runs/{run_id}/hitl-2",
             json={
@@ -473,6 +483,11 @@ async def test_hitl2_approve_persists_edits_and_approver(postgres_url, monkeypat
                 "edited_seo_title": "EDITED title",
                 "edited_meta_description": "EDITED meta",
                 "wp_publish_status": "draft",
+                "confirmed_target": {
+                    "kind": "wordpress",
+                    "post_id": None,
+                    "label": "staging",
+                },
             },
         )
         assert resp.status_code == 200
