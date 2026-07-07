@@ -45,6 +45,21 @@ read it from the gitignored `.env*` file.
 > creds) are no longer referenced by any workflow and can be deleted from repo
 > secrets once the deprecated account is fully wound down.
 
+### fmc account wind-down checklist
+
+1. **Drain in-flight fmc runs first** — workflow/DO state is account-local, so
+   any run started on the fmc site can only be approved/published at
+   `bowtie-content-tool-web.fmc.workers.dev` (until step 2 replaces it).
+2. Deploy the redirect stubs over both fmc frontend Workers
+   (`deploy/fmc-redirect/`, fmc creds, one-off).
+3. **Delete both fmc backend Workers** (`wrangler delete` for
+   `bowtie-content-tool-poc` and `bowtie-content-tool-poc-dev` with fmc creds).
+   Until deleted they stay live with valid `POSTGRES_URL` (prod Supabase) and
+   `WP_*` secrets — able to write prod data and publish to the shared live CMS.
+4. Delete the `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo secrets.
+5. Optional tidy-up: remove the fmc `/verify` URLs from the Supabase auth
+   redirect allow-lists (prod + dev projects).
+
 > The `bowtie-ins` mirror holds **no** secrets; every deploy/evals job is gated
 > `if: github.repository_owner == 'fmcuni'` so the mirror never runs red.
 

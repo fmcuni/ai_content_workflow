@@ -10,6 +10,11 @@
 // (bowtie-content-tool-poc / -poc-dev) are DELETED, not redirected.
 {
 	"$schema": "../cloudflare-workers/node_modules/wrangler/config-schema.json",
+	// Pinned to the fmc account: these worker NAMES are identical to the live
+	// franco-ma frontends, so an unpinned deploy with franco-ma creds would
+	// overwrite real prod with a self-redirect loop. With the pin, wrangler
+	// errors on mis-targeted creds instead.
+	"account_id": "0e0322441342101a7f545c0e341096b5",
 	"name": "bowtie-content-tool-web",
 	"main": "worker.js",
 	"compatibility_date": "2026-05-30",
