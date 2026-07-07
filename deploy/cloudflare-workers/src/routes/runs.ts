@@ -731,16 +731,37 @@ runsRouter.post("/:id/resume", requireRole("reviewer"), async (c) => {
   }
 
   const env = c.env as RunsEnv;
-  const instance = await env.PRODUCTION.get(runId);
-  await instance.sendEvent({
-    type: "hitl_1",
-    payload: {
-      decision,
-      edited_outline: body.edited_outline ?? null,
-      new_route: body.new_route ?? null,
-      notes: body.notes ?? null,
-    },
-  });
+  try {
+    const instance = await env.PRODUCTION.get(runId);
+    await instance.sendEvent({
+      type: "hitl_1",
+      payload: {
+        decision,
+        edited_outline: body.edited_outline ?? null,
+        new_route: body.new_route ?? null,
+        notes: body.notes ?? null,
+      },
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Compensate: the gate claim above already recorded hitl_1_decision, but the
+    // status column is untouched by it (only the workflow's own step transitions
+    // status off the gate), so clearing the decision here is enough to leave the
+    // run retryable at the same gate — no separate "stuck" status to unwind.
+    await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+      await sql`
+        UPDATE content_tool.runs
+        SET hitl_1_decision = NULL, hitl_1_notes = NULL
+        WHERE run_id = ${runId}
+      `;
+    });
+    return c.json(
+      {
+        detail: `workflow instance for this run was not found on this deployment — the run was started on a different backend deployment (workflow state is account-local); retry from the site where the run was started, or restart the run here (${message})`,
+      },
+      409,
+    );
+  }
 
   return c.json({ ok: true });
 });
@@ -774,6 +795,9 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
     if (current === undefined) {
       return { error: "not_found" as const };
     }
+    // Snapshot BEFORE the claim UPDATE below mutates the counter, so a
+    // sendEvent-failure rollback can restore the exact pre-claim value.
+    const priorIteration = current.hitl_2_iteration;
 
     // Pre-flight publish validation (approve AT the gate only). Reject BEFORE
     // the atomic claim so an invalid approve never mutates run state — the
@@ -892,7 +916,7 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
         `;
       }
     }
-    return { ok: true as const };
+    return { ok: true as const, priorIteration };
   });
 
   if ("error" in guard) {
@@ -913,26 +937,52 @@ runsRouter.post("/:id/hitl-2", requireRole("reviewer"), async (c) => {
   }
 
   const env = c.env as RunsEnv;
-  const instance = await env.PRODUCTION.get(runId);
-  await instance.sendEvent({
-    type: "hitl_2",
-    payload: {
-      decision,
-      notes: body.notes ?? null,
-      comments,
-      edited_html_body: body.edited_html_body ?? null,
-      edited_seo_title: body.edited_seo_title ?? null,
-      edited_meta_description: body.edited_meta_description ?? null,
-      wp_publish_status: body.wp_publish_status ?? null,
-      wp_author_id: body.wp_author_id ?? null,
-      wp_category_ids: body.wp_category_ids ?? null,
-      wp_tag_ids: body.wp_tag_ids ?? null,
-      wp_featured_media_id: body.wp_featured_media_id ?? null,
-      wp_slug: body.wp_slug ?? null,
-      wp_excerpt: body.wp_excerpt ?? null,
-      wp_publish_at: body.wp_publish_at ?? null,
-    },
-  });
+  try {
+    const instance = await env.PRODUCTION.get(runId);
+    await instance.sendEvent({
+      type: "hitl_2",
+      payload: {
+        decision,
+        notes: body.notes ?? null,
+        comments,
+        edited_html_body: body.edited_html_body ?? null,
+        edited_seo_title: body.edited_seo_title ?? null,
+        edited_meta_description: body.edited_meta_description ?? null,
+        wp_publish_status: body.wp_publish_status ?? null,
+        wp_author_id: body.wp_author_id ?? null,
+        wp_category_ids: body.wp_category_ids ?? null,
+        wp_tag_ids: body.wp_tag_ids ?? null,
+        wp_featured_media_id: body.wp_featured_media_id ?? null,
+        wp_slug: body.wp_slug ?? null,
+        wp_excerpt: body.wp_excerpt ?? null,
+        wp_publish_at: body.wp_publish_at ?? null,
+      },
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Compensate: the gate claim above recorded the decision (and, for
+    // request_changes, incremented hitl_2_iteration) but never touches the
+    // `status` column — only the workflow's own step moves it off the gate —
+    // so undoing the claimed fields is enough to leave the run retryable at
+    // the same gate, without double-counting the iteration cap on retry.
+    await withDb(c.env, c.executionCtx, async (sql: Sql) => {
+      await sql`
+        UPDATE content_tool.runs
+        SET hitl_2_decision = NULL,
+            hitl_2_notes = NULL,
+            hitl_2_iteration = ${guard.priorIteration},
+            approved_at = NULL,
+            approved_by = NULL
+        WHERE run_id = ${runId}
+      `;
+    });
+    return c.json(
+      {
+        detail: `workflow instance for this run was not found on this deployment — the run was started on a different backend deployment (workflow state is account-local); retry from the site where the run was started, or restart the run here (${message})`,
+      },
+      409,
+    );
+  }
 
   return c.json({ ok: true });
 });

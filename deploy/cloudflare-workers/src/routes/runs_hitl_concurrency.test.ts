@@ -110,6 +110,23 @@ function makeFakeSql(): unknown {
     }
 
     if (lower.startsWith("update") && row !== null) {
+      // Compensating rollback UPDATEs issued from the sendEvent-failure catch
+      // blocks (no status guard at all — just `WHERE run_id = ...`). Detected
+      // by the literal `= null` columns the handlers write; the iteration
+      // revert value is a bind (not inlined into `text`), so pull it from
+      // `values`.
+      if (lower.includes("hitl_1_decision = null") && lower.includes("hitl_1_notes = null")) {
+        row.hitl_1_decision = null;
+        return { count: 1 };
+      }
+      if (lower.includes("hitl_2_decision = null") && lower.includes("approved_at = null")) {
+        const binds = values.filter((v) => !isFragment(v));
+        const priorIteration = binds.find((v): v is number => typeof v === "number");
+        if (priorIteration !== undefined) row.hitl_2_iteration = priorIteration;
+        row.approved_by = null;
+        return { count: 1 };
+      }
+
       // Evaluate the conditional WHERE guards present in the statement text.
       // Value binds (runId, gate-status literal) are NOT echoed into `text`, so
       // match structurally on the SET column + a `WHERE ... status =` guard.
@@ -211,6 +228,28 @@ function appWith(authEmail: string | null): AuthApp {
   const app = new Hono<{ Variables: AuthVars }>();
   app.use("*", async (c, next) => {
     if (authEmail !== null) c.set("userEmail", authEmail);
+    await next();
+  });
+  app.route("/", runsRouter);
+  return app;
+}
+
+// Same as appWith, but PRODUCTION.get() throws — simulating a workflow instance
+// that doesn't exist on this deployment (e.g. the run was created on a
+// different Cloudflare account sharing the same Postgres DB).
+function appWithMissingInstance(authEmail: string | null): AuthApp {
+  const app = new Hono<{ Variables: AuthVars }>();
+  app.use("*", async (c, next) => {
+    if (authEmail !== null) c.set("userEmail", authEmail);
+    c.env = {
+      ...(c.env as Record<string, unknown>),
+      PRODUCTION: {
+        get: async () => {
+          throw new Error("instance.not_found");
+        },
+        create: async () => undefined,
+      },
+    };
     await next();
   });
   app.route("/", runsRouter);
@@ -415,5 +454,64 @@ describe("POST /:id/resume — HITL_1 gate-status guard (FIX 2/3)", () => {
     const app = appWith("rev@bowtie.com.hk");
     const res = await req(app, "POST", "/missing/resume", { decision: "approve" }, "rev@bowtie.com.hk");
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Missing workflow instance (e.g. run belongs to a different Cloudflare
+// deployment sharing the same Postgres DB) — PRODUCTION.get() throws.
+// ---------------------------------------------------------------------------
+
+describe("POST /:id/resume — missing workflow instance", () => {
+  it("returns 409 (not a raw 500) and un-claims the gate so the run is retryable", async () => {
+    state.row = {
+      run_id: "r1",
+      status: "hitl_1",
+      hitl_2_iteration: 0,
+      hitl_1_decision: null,
+      approved_by: null,
+      created_by: null,
+    };
+    const app = appWithMissingInstance("rev@bowtie.com.hk");
+    const res = await req(app, "POST", "/r1/resume", { decision: "approve" }, "rev@bowtie.com.hk");
+    expect(res.status).toBe(409);
+    const payload = (await res.json()) as { detail: string };
+    expect(payload.detail).toContain("workflow instance for this run was not found");
+    expect(payload.detail).toContain("instance.not_found");
+    expect(state.sendEvents).toHaveLength(0);
+    // Un-claimed: hitl_1_decision reverted to null, status untouched (still at
+    // the gate) — a retry against a healthy deployment can succeed cleanly.
+    expect(state.row.hitl_1_decision).toBeNull();
+    expect(state.row.status).toBe("hitl_1");
+  });
+});
+
+describe("POST /:id/hitl-2 — missing workflow instance", () => {
+  it("returns 409 and reverts the claimed decision + iteration count", async () => {
+    state.row = {
+      run_id: "r1",
+      status: "hitl_2",
+      hitl_2_iteration: 1,
+      hitl_1_decision: "approve",
+      approved_by: null,
+      created_by: null,
+    };
+    const app = appWithMissingInstance("rev@bowtie.com.hk");
+    const res = await req(
+      app,
+      "POST",
+      "/r1/hitl-2",
+      { decision: "request_changes" },
+      "rev@bowtie.com.hk",
+    );
+    expect(res.status).toBe(409);
+    const payload = (await res.json()) as { detail: string };
+    expect(payload.detail).toContain("workflow instance for this run was not found");
+    expect(state.sendEvents).toHaveLength(0);
+    // Un-claimed: iteration reverted to its pre-claim value (1, not 2) so a
+    // retry doesn't double-count against the request_changes cap, and
+    // approved_by stays clear.
+    expect(state.row.hitl_2_iteration).toBe(1);
+    expect(state.row.approved_by).toBeNull();
   });
 });

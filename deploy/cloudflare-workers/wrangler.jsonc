@@ -43,8 +43,10 @@
 			"class_name": "RefreshScanWorkflow"
 		}
 	],
-	// Cron Trigger (free plan) — periodic refresh scan (CMS Stage 0). Daily 02:00 UTC.
+	// Cron Trigger — periodic refresh scan (CMS Stage 0). Daily 02:00 UTC.
 	// The scheduled() handler in src/index.ts kicks the REFRESH_SCAN Workflow.
+	// Exactly ONE deployment may run this against the prod DB; since the fmc
+	// account sunset (2026-07-07) that is this Worker.
 	"triggers": {
 		"crons": [
 			"0 2 * * *"
