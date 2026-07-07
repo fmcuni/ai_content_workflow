@@ -16,21 +16,25 @@ secret hygiene still applies (no secrets in commits, logs, or external tool call
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | Deploy Workers | Token scoped to **Workers Scripts: Edit** on the `fmc` account |
-| `CLOUDFLARE_ACCOUNT_ID` | Deploy Workers | Target Cloudflare account id (`fmc`) |
+| `CF_ALT_API_TOKEN` | Deploy Workers | Token scoped to **Workers Scripts: Edit** on Franco's Cloudflare account (franco-ma.workers.dev) — the only account in use since `fmc.workers.dev` was deprecated 2026-07-07 |
+| `CF_ALT_ACCOUNT_ID` | Deploy Workers | Target Cloudflare account id |
 | `GEMINI_API_KEY` | CI (judge-evals), Nightly Evals | Google AI Studio key; LLM-judge + eval passes |
 | `POSTGRES_URL` | Nightly Evals | **Prod Supabase** connection string (evals read real published runs) |
 
-`wrangler` reads `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` from the env automatically.
+`wrangler` reads `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` env vars, which
+the workflow populates from the `CF_ALT_*` secrets above. This is an interim
+state — see `docs/secrets-and-ci.md`'s "Migration plan" for the move to
+Cloudflare Workers Builds (no Cloudflare credential in GitHub at all) and the
+company-owned Bowtie Enterprise Account for prod.
 
 ## Cloudflare (deploy targets)
 
-Two Workers on the `fmc` account (`*.fmc.workers.dev`):
+Two Workers, both on Franco's personal Cloudflare account (`*.franco-ma.workers.dev`):
 
 | Worker | Source | URL |
 |---|---|---|
-| `bowtie-content-tool-poc` (backend) | `deploy/cloudflare-workers/` | `https://bowtie-content-tool-poc.fmc.workers.dev` |
-| `bowtie-content-tool-web` (frontend) | `web/` (OpenNext) | `https://bowtie-content-tool-web.fmc.workers.dev` |
+| `bowtie-content-tool-poc` (backend) | `deploy/cloudflare-workers/` | `https://bowtie-content-tool-poc.franco-ma.workers.dev` |
+| `bowtie-content-tool-web` (frontend) | `web/` (OpenNext) | `https://bowtie-content-tool-web.franco-ma.workers.dev` |
 
 - Frontend deploys **after** backend (`needs: deploy-backend`).
 - Deploy concurrency group `deploy-workers`, `cancel-in-progress: false` — never cancel an in-flight deploy.
@@ -120,7 +124,7 @@ changes beyond connection config.
 
 ## Infra action items
 
-1. Confirm all four repo secrets exist and target the `fmc` account / prod Supabase.
+1. Confirm all four repo secrets exist and target the Cloudflare account in use / prod Supabase.
 2. Verify per-Worker runtime secrets are set (`wrangler secret list`) and document rotation cadence.
 3. Enable branch protection on `main` (require CI + review).
 4. Monitor nightly-evals success and the `deploy-workers` run on each `main` push.

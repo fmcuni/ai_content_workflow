@@ -4,11 +4,11 @@
 //
 //   node scripts/deploy-web.mjs prod   ->  bowtie-content-tool-web
 //   node scripts/deploy-web.mjs dev    ->  bowtie-content-tool-web-dev (--env dev)
-//   node scripts/deploy-web.mjs alt    ->  bowtie-content-tool-web on the ALT
-//     Cloudflare account (--env alt; pass CLOUDFLARE_API_TOKEN/_ACCOUNT_ID for
-//     that account — see CF_ALT_* in .env.local)
-//   node scripts/deploy-web.mjs alt-dev -> bowtie-content-tool-web-dev on the
-//     ALT account (dev Supabase values, anon key from .env.dev.local)
+//
+// Both targets deploy to the same Cloudflare account (Franco's "Bowtie
+// Content SEO" account, franco-ma.workers.dev) — the fmc.workers.dev account
+// previously used for prod was deprecated 2026-07-07, so the alt/alt-dev
+// targets that used to point at it have been removed.
 //
 // WHY THIS EXISTS
 // ---------------
@@ -36,15 +36,13 @@ const WEB_DIR = join(REPO_ROOT, "web");
 const ANON_KEY = "NEXT_PUBLIC_SUPABASE_ANON_KEY";
 
 const target = process.argv[2];
-if (!["prod", "dev", "alt", "alt-dev"].includes(target)) {
-  console.error(
-    `usage: node scripts/deploy-web.mjs <prod|dev|alt|alt-dev>  (got: ${target ?? "nothing"})`,
-  );
+if (!["prod", "dev"].includes(target)) {
+  console.error(`usage: node scripts/deploy-web.mjs <prod|dev>  (got: ${target ?? "nothing"})`);
   process.exit(1);
 }
-// Dev-like targets build against the dev Supabase project; their anon key
-// lives in .env.dev.local under the DEV_ prefix.
-const isDevLike = target === "dev" || target === "alt-dev";
+// Dev builds against the dev Supabase project; its anon key lives in
+// .env.dev.local under the DEV_ prefix.
+const isDevLike = target === "dev";
 
 /** Parse a KEY=VALUE env file into an object. Ignores blanks/`#` comments,
  *  splits on the FIRST `=`, and strips one layer of surrounding quotes. */

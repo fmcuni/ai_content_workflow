@@ -65,7 +65,7 @@ export interface TestEnv {
 
 let cached: TestEnv | null = null;
 
-const DEFAULT_BASE_URL = "https://bowtie-content-tool-web.fmc.workers.dev";
+const DEFAULT_BASE_URL = "https://bowtie-content-tool-web.franco-ma.workers.dev";
 
 /**
  * Load (once) the e2e credentials from the repo-root `.env.test.local`. Returns

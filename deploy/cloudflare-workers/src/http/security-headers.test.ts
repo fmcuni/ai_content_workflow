@@ -69,8 +69,6 @@ describe("security-headers constant", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("default-src 'self'");
     expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe-eval");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.supabase.co");
-    expect(CONTENT_SECURITY_POLICY).toContain("https://*.fmc.workers.dev");
-    expect(CONTENT_SECURITY_POLICY).toContain("wss://*.fmc.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.franco-ma.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("wss://*.franco-ma.workers.dev");
   });

@@ -15,7 +15,7 @@ import { ensureLoggedIn } from "./support/login";
  * are never printed. Run: npx playwright test --config=playwright.prod.config.ts
  */
 
-const BASE = process.env.E2E_BASE_URL || "https://bowtie-content-tool-web.fmc.workers.dev";
+const BASE = process.env.E2E_BASE_URL || "https://bowtie-content-tool-web.franco-ma.workers.dev";
 const EMAIL = process.env.E2E_EMAIL;
 const PASSWORD = process.env.E2E_PASSWORD;
 

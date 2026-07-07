@@ -35,8 +35,6 @@ describe("security-headers", () => {
   it("CSP connect-src allows self, supabase, and the workers.dev SSE + WS origins", () => {
     expect(CONTENT_SECURITY_POLICY).toMatch(/connect-src[^;]*'self'/);
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.supabase.co");
-    expect(CONTENT_SECURITY_POLICY).toContain("https://*.fmc.workers.dev");
-    expect(CONTENT_SECURITY_POLICY).toContain("wss://*.fmc.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.franco-ma.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("wss://*.franco-ma.workers.dev");
   });

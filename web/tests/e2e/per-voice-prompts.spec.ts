@@ -21,7 +21,7 @@ import { ensureLoggedIn } from "./support/login";
  * they are never printed.
  */
 
-const BASE = process.env.E2E_BASE_URL || "https://bowtie-content-tool-web.fmc.workers.dev";
+const BASE = process.env.E2E_BASE_URL || "https://bowtie-content-tool-web.franco-ma.workers.dev";
 const EMAIL = process.env.E2E_EMAIL;
 const PASSWORD = process.env.E2E_PASSWORD;
 const MUTATE = process.env.PVPL_SMOKE_MUTATE === "1";

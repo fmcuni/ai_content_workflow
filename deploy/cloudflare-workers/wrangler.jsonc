@@ -7,6 +7,15 @@
 	//      progress to the browser via a Durable Object (SSE)
 	//
 	// No containers, no paid plan. The DB stays on Supabase.
+	//
+	// ACCOUNT: both environments below currently live on Franco's personal
+	// Cloudflare account ("Bowtie Content SEO" in the dashboard, subdomain
+	// franco-ma.workers.dev). The account previously used for prod (fmc.workers.dev,
+	// referenced by CI as CLOUDFLARE_ACCOUNT_ID) has been deprecated by Franco
+	// (2026-07-07) — this file no longer has an `alt`/`alt-dev` split because
+	// there is only one real account now. Migrating prod out to the company-owned
+	// Bowtie Enterprise Account is tracked as a separate follow-up (see
+	// docs/secrets-and-ci.md); dev stays on this account for now.
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "bowtie-content-tool-poc",
 	"main": "src/index.ts",
@@ -34,16 +43,14 @@
 			"class_name": "RefreshScanWorkflow"
 		}
 	],
-	// Cron Trigger (free plan) — periodic refresh scan (CMS Stage 0). Daily 02:00 UTC.
+	// Cron Trigger — periodic refresh scan (CMS Stage 0). Daily 02:00 UTC.
 	// The scheduled() handler in src/index.ts kicks the REFRESH_SCAN Workflow.
-	// Cron DISABLED here: both accounts run as independent mirrors (each web
-	// fronts its own account's backend), but the daily refresh-scan must run on
-	// exactly ONE of them — they share the prod DB, and a second schedule would
-	// double-run scans + Gemini spend. It runs on franco-ma (env.alt) since
-	// 2026-07-07. Swap the "0 2 * * *" entry between this block and env.alt to
-	// move ownership.
+	// Exactly ONE deployment may run this against the prod DB; since the fmc
+	// account sunset (2026-07-07) that is this Worker.
 	"triggers": {
-		"crons": []
+		"crons": [
+			"0 2 * * *"
+		]
 	},
 	"durable_objects": {
 		"bindings": [
@@ -104,10 +111,8 @@
 		"GEMINI_MODEL": "gemini-3.1-pro-preview",
 		// SSE CORS allow-origin: the deployed frontend Worker (browser-direct SSE to
 		// /runs/:id/events and /topic-batches/:id/events). REST goes via Next rewrites
-		// (server-side, no CORS). See src/http/cors.ts. The alt-account web mirror
-		// also fronts THIS backend (workflow/DO state lives on one account), so its
-		// origin is allow-listed too.
-		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.fmc.workers.dev,https://bowtie-content-tool-web.franco-ma.workers.dev",
+		// (server-side, no CORS). See src/http/cors.ts.
+		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev",
 		// Verbose per-step event log: persist raw *.thinking events too. Default
 		// ON; set "0"/"false"/"off" to stream thinking live but skip persisting it
 		// to content_tool.run_event_logs. Read by the RunStream DO.
@@ -122,7 +127,7 @@
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",
-			"id": "58b74deb12184195a83526e6b7040a32"
+			"id": "0875862f2f964a2cb7f1b69094f3818b"
 		}
 	],
 	// Rate Limiting bindings (Cloudflare native `ratelimit`). Abuse-prevention
@@ -130,7 +135,7 @@
 	// authenticated user id (else client IP), per-user AND per-IP. `period` MUST
 	// be 10 or 60 (Cloudflare constraint); we use 60 and surface it as the 429
 	// `Retry-After`. namespace_id is a unique string-integer per binding; dev
-	// (env.dev below) uses DISTINCT ids so dev/prod counters never share state.
+	// (env.dev below) uses a DISTINCT id so dev/prod counters never share state.
 	"ratelimits": [
 		{
 			// Run create/resume(publish)/apply-edits + topic-batch creation.
@@ -148,164 +153,13 @@
 	// (or `npm run deploy:dev`). It mirrors prod's bindings but points at a
 	// SEPARATE dev Supabase DB + Hyperdrive, and gets its OWN Durable Object
 	// namespaces + Workflows (names suffixed `-dev`) so dev run/collab/stream
-	// state never collides with prod.
+	// state never collides with prod. Same Cloudflare account as prod (above).
 	//
 	// Non-inheritable keys (vars, durable_objects, workflows, hyperdrive) MUST be
 	// repeated here — they are NOT inherited from the top level. `migrations`
 	// (top-level only) and `compatibility_*` / `main` / `observability` ARE
 	// inherited, so they are intentionally omitted.
-	//
-	// BEFORE first deploy, replace the two placeholders below (SUPABASE_URL +
-	// hyperdrive id) and set the dev secrets — see docs/dev-environment-runbook.md.
 	"env": {
-		// Alt account — a second deployment of this SAME backend on the separate
-		// franco.ma@bowtie.com.hk Cloudflare account (compute-only duplicate:
-		// shares prod's Supabase DB/auth, Gemini key, and WordPress). Deploy with
-		//   CLOUDFLARE_API_TOKEN=$CF_ALT_API_TOKEN CLOUDFLARE_ACCOUNT_ID=$CF_ALT_ACCOUNT_ID \
-		//     npx wrangler deploy --env alt
-		// Worker/Workflow/DO names match prod — no clash across accounts. The
-		// Hyperdrive id is account-scoped, so alt has its OWN config pointing at
-		// the SAME prod Supabase DB.
-		"alt": {
-			"name": "bowtie-content-tool-poc",
-			// The daily refresh-scan cron runs HERE (and is disabled on the fmc
-			// block above) — the accounts are independent mirrors, but exactly
-			// one may run the scan against the shared DB.
-			"triggers": {
-				"crons": [
-					"0 2 * * *"
-				]
-			},
-			"workflows": [
-				{
-					"name": "production",
-					"binding": "PRODUCTION",
-					"class_name": "ProductionWorkflow"
-				},
-				{
-					"name": "topic-expansion",
-					"binding": "TOPIC_EXPANSION",
-					"class_name": "TopicExpansionWorkflow"
-				},
-				{
-					"name": "refresh-scan",
-					"binding": "REFRESH_SCAN",
-					"class_name": "RefreshScanWorkflow"
-				}
-			],
-			"durable_objects": {
-				"bindings": [
-					{
-						"name": "RUN_STREAM",
-						"class_name": "RunStream"
-					},
-					{
-						"name": "GEMINI_PROXY",
-						"class_name": "GeminiProxy"
-					},
-					{
-						"name": "RUN_DOC",
-						"class_name": "RunDoc"
-					}
-				]
-			},
-			"vars": {
-				"GEMINI_MODEL": "gemini-3.1-pro-preview",
-				// Browser-direct SSE allow-origin: BOTH prod-tier frontend Workers
-				// (account-agnostic — the allowlist never changes on failover).
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev,https://bowtie-content-tool-web.fmc.workers.dev",
-				"PERSIST_THINKING": "on",
-				// Same PROD Supabase project (shared DB + auth).
-				"SUPABASE_URL": "https://gfpkqsiyeslscgsuehmj.supabase.co"
-			},
-			// Alt-account Hyperdrive → the SAME prod Supabase DB.
-			"hyperdrive": [
-				{
-					"binding": "HYPERDRIVE",
-					"id": "0875862f2f964a2cb7f1b69094f3818b"
-				}
-			],
-			// Separate account → counters can't collide with prod; ids local to alt.
-			"ratelimits": [
-				{
-					"name": "RATE_LIMITER_MUTATION",
-					"namespace_id": "2001",
-					"simple": {
-						"limit": 30,
-						"period": 60
-					}
-				}
-			]
-		},
-		// Alt account's DEV environment — same shape as env.dev (dev Supabase
-		// DB + auth), deployed to the franco.ma@bowtie.com.hk account. Deploy:
-		//   CLOUDFLARE_API_TOKEN=$CF_ALT_API_TOKEN CLOUDFLARE_ACCOUNT_ID=$CF_ALT_ACCOUNT_ID \
-		//     npx wrangler deploy --env alt-dev
-		"alt-dev": {
-			"name": "bowtie-content-tool-poc-dev",
-			"triggers": {
-				"crons": []
-			},
-			"workflows": [
-				{
-					"name": "production-dev",
-					"binding": "PRODUCTION",
-					"class_name": "ProductionWorkflow"
-				},
-				{
-					"name": "topic-expansion-dev",
-					"binding": "TOPIC_EXPANSION",
-					"class_name": "TopicExpansionWorkflow"
-				},
-				{
-					"name": "refresh-scan-dev",
-					"binding": "REFRESH_SCAN",
-					"class_name": "RefreshScanWorkflow"
-				}
-			],
-			"durable_objects": {
-				"bindings": [
-					{
-						"name": "RUN_STREAM",
-						"class_name": "RunStream"
-					},
-					{
-						"name": "GEMINI_PROXY",
-						"class_name": "GeminiProxy"
-					},
-					{
-						"name": "RUN_DOC",
-						"class_name": "RunDoc"
-					}
-				]
-			},
-			"vars": {
-				"GEMINI_MODEL": "gemini-3.1-pro-preview",
-				// Browser-direct SSE allow-origin: BOTH dev-tier frontend Workers
-				// (account-agnostic — the allowlist never changes on failover).
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.franco-ma.workers.dev,https://bowtie-content-tool-web-dev.fmc.workers.dev",
-				"PERSIST_THINKING": "on",
-				// Same DEV Supabase project as env.dev (shared dev DB + auth).
-				"SUPABASE_URL": "https://ovxvhxwmqeccjudhyfbh.supabase.co"
-			},
-			// Alt-account Hyperdrive → the SAME dev Supabase DB as env.dev.
-			"hyperdrive": [
-				{
-					"binding": "HYPERDRIVE",
-					"id": "230e538bb55d4385bca5ec9f9f3e2cc1"
-				}
-			],
-			"ratelimits": [
-				{
-					"name": "RATE_LIMITER_MUTATION",
-					"namespace_id": "3001",
-					"simple": {
-						"limit": 30,
-						"period": 60
-					}
-				}
-			]
-		},
 		"dev": {
 			"name": "bowtie-content-tool-poc-dev",
 			// Disable the daily refresh-scan cron in dev. `crons: []` disables it;
@@ -354,28 +208,24 @@
 			},
 			"vars": {
 				"GEMINI_MODEL": "gemini-3.1-pro-preview",
-				// Browser-direct SSE allow-origin: the DEV frontend Worker (+ the
-				// alt-account dev web mirror, which fronts this backend too).
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.fmc.workers.dev,https://bowtie-content-tool-web-dev.franco-ma.workers.dev",
+				// Browser-direct SSE allow-origin: the DEV frontend Worker.
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.franco-ma.workers.dev",
 				"PERSIST_THINKING": "on",
-				// REPLACE with the dev Supabase project URL (JWKS issuer for the dev
-				// GoTrue tokens). Must match NEXT_PUBLIC_SUPABASE_URL baked into the
-				// dev web build, or every dev request 401s.
+				// Dev Supabase project (JWKS issuer for the dev GoTrue tokens). Must
+				// match NEXT_PUBLIC_SUPABASE_URL baked into the dev web build, or
+				// every dev request 401s.
 				"SUPABASE_URL": "https://ovxvhxwmqeccjudhyfbh.supabase.co"
 			},
-			// REPLACE id with the dev Hyperdrive config (points at the dev Supabase
-			// DB). Create it once the dev DB exists:
-			//   wrangler hyperdrive create bowtie-poc-db-dev \
-			//     --connection-string "$DEV_POSTGRES_URL"
+			// Dev Hyperdrive config, pointing at the dev Supabase DB.
 			"hyperdrive": [
 				{
 					"binding": "HYPERDRIVE",
-					"id": "98015877c2cc48f4b047f340129df945"
+					"id": "230e538bb55d4385bca5ec9f9f3e2cc1"
 				}
 			],
 			// Rate Limiting (non-inheritable — repeated for dev). DISTINCT
-			// namespace_ids from prod (2001/2002) so dev abuse counters never
-			// share state with prod. Same generous caps + 60s period.
+			// namespace_id from prod so dev abuse counters never share state with
+			// prod. Same generous caps + 60s period.
 			"ratelimits": [
 				{
 					"name": "RATE_LIMITER_MUTATION",
