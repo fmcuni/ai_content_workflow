@@ -1,3 +1,4 @@
+import html
 import re
 from dataclasses import dataclass
 from uuid import UUID
@@ -16,6 +17,8 @@ _DEFAULT_SOURCES_HEADINGS = ("資訊來源", "资讯来源")
 
 @dataclass
 class RenderResult:
+    # seo_title/meta_description ship RAW to WordPress (post title / Yoast
+    # meta), which escapes them on output — never inline them into html_body.
     seo_title: str
     meta_description: str
     html_body: str
@@ -78,8 +81,10 @@ def _build_faq_html(items: list[tuple[str, str]]) -> str:
     for i, (q, a) in enumerate(items):
         active = " is--active" if i == 0 else ""
         body_style = ' style="display: block;"' if i == 0 else ""
+        # q/a are writer-controlled TEXT — escape before template interpolation
+        # (the JSON-LD builders keep the raw text; escaping is an HTML concern).
         head = (
-            f'      <div class="e-faq__head">{q}'
+            f'      <div class="e-faq__head">{html.escape(q)}'
             '<span class="e-faq__icon icon-add"></span></div>'
         )
         parts.extend(
@@ -87,7 +92,7 @@ def _build_faq_html(items: list[tuple[str, str]]) -> str:
                 f'    <div class="e-faq__list{active}">',
                 head,
                 f'      <div class="e-faq__body"{body_style}>',
-                f"        <p>{a}</p>",
+                f"        <p>{html.escape(a)}</p>",
                 "      </div>",
                 "    </div>",
             ]
@@ -219,8 +224,11 @@ def render_html(
             f"render: unhandled defterm marker survived stripping near: {snippet!r}"
         )
 
-    # Markdown → HTML (without FAQ block; we'll inject)
-    md = MarkdownIt("commonmark").enable(["table"])
+    # Markdown → HTML (without FAQ block; we'll inject). `html: False` overrides
+    # the commonmark preset's raw-HTML passthrough: writers produce markdown +
+    # %%shortcodes%% only, so any inline HTML is hostile and must render as
+    # inert escaped text (_check_no_raw_html stays as a tripwire, not the defence).
+    md = MarkdownIt("commonmark", {"html": False}).enable(["table"])
     body_html = md.render(rest)
 
     # Replace shortcodes (after MD rendering — they survive as raw text inside <p>).
@@ -256,7 +264,8 @@ def render_html(
 
     final = body_html
     if faq_html:
-        final += f"\n<h2>{resolved_faq_heading}</h2>\n" + faq_html + "\n"
+        # resolved_faq_heading may be the model's own captured heading — writer-controlled.
+        final += f"\n<h2>{html.escape(resolved_faq_heading)}</h2>\n" + faq_html + "\n"
     if sources_md:
         final += "\n" + md.render(sources_md)
 

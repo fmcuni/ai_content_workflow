@@ -8,6 +8,8 @@ import { loadPersona } from "./persona";
  * structured-data graph match what WordPress already ingests.
  */
 export interface RenderOutput {
+  // seoTitle/metaDescription ship RAW to WordPress (post title / Yoast meta),
+  // which escapes them on output — never inline them into htmlBody.
   seoTitle: string;
   metaDescription: string;
   htmlBody: string;
@@ -82,8 +84,22 @@ type QaPair = readonly [string, string];
 
 function newMarkdownIt(): MarkdownIt {
   // markdown-it-py used `MarkdownIt("commonmark").enable("table")`: commonmark
-  // preset plus the GFM table rule, no other plugins.
-  return new MarkdownIt("commonmark").enable(["table"]);
+  // preset plus the GFM table rule, no other plugins. `html: false` overrides
+  // the preset's raw-HTML passthrough: writers produce markdown + %%shortcodes%%
+  // only, so any inline HTML is hostile and must render as inert escaped text
+  // (the RAW_HTML_RE blocklist above stays as a tripwire, not the defence).
+  return new MarkdownIt("commonmark", { html: false }).enable(["table"]);
+}
+
+// Mirrors Python html.escape() byte-for-byte (incl. quotes) so the two
+// renderers stay parity-identical.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
 }
 
 function buildFaqHtml(items: readonly QaPair[]): string {
@@ -97,14 +113,16 @@ function buildFaqHtml(items: readonly QaPair[]): string {
   items.forEach(([q, a], i) => {
     const active = i === 0 ? " is--active" : "";
     const bodyStyle = i === 0 ? ' style="display: block;"' : "";
+    // q/a are writer-controlled TEXT — escape before template interpolation
+    // (the JSON-LD builders keep the raw text; escaping is an HTML concern).
     const head =
-      `      <div class="e-faq__head">${q}` +
+      `      <div class="e-faq__head">${escapeHtml(q)}` +
       '<span class="e-faq__icon icon-add"></span></div>';
     parts.push(
       `    <div class="e-faq__list${active}">`,
       head,
       `      <div class="e-faq__body"${bodyStyle}>`,
-      `        <p>${a}</p>`,
+      `        <p>${escapeHtml(a)}</p>`,
       "      </div>",
       "    </div>",
     );
@@ -282,7 +300,8 @@ export function renderHtml(markupRaw: string, opts: RenderOptions = {}): RenderO
 
   let final = bodyHtml;
   if (faqHtml) {
-    final += `\n<h2>${faqHeading}</h2>\n` + faqHtml + "\n";
+    // faqHeading may be the model's own captured heading — writer-controlled.
+    final += `\n<h2>${escapeHtml(faqHeading)}</h2>\n` + faqHtml + "\n";
   }
   if (sourcesMd) {
     final += "\n" + md.render(sourcesMd);

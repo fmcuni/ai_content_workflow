@@ -391,3 +391,102 @@ def test_orphan_defterm_end_marker_refuses_render():
 """
     with pytest.raises(ValueError, match="defterm"):
         render_html(bad)
+
+
+# --- Stored-XSS regression suite (bowtie-ins#14) ---------------------------
+# Raw HTML that slips past the blocklist tripwire must render as inert escaped
+# text, and FAQ text fields must be escaped before template interpolation.
+
+
+def _wrap(body: str) -> str:
+    return f"# Title\n%%meta desc=d%%\n\n{body}\n"
+
+
+def test_xss_body_raw_inline_html_is_escaped():
+    r = render_html(_wrap("<img src=x onerror=alert(1)> and <svg onload=alert(1)>"))
+    assert "<img" not in r.html_body
+    assert "<svg" not in r.html_body
+    assert "&lt;img src=x onerror=alert(1)&gt;" in r.html_body
+    assert "&lt;svg onload=alert(1)&gt;" in r.html_body
+
+
+def test_xss_body_javascript_anchor_is_neutralised():
+    r = render_html(_wrap('<a href="javascript:alert(1)">click</a>'))
+    assert 'href="javascript:' not in r.html_body
+    assert "&lt;a href=" in r.html_body
+
+
+def test_xss_markdown_javascript_link_refused():
+    r = render_html(_wrap("[click](javascript:alert(1))"))
+    assert 'href="javascript:' not in r.html_body
+
+
+def test_xss_faq_q_and_a_escaped_in_widget_html():
+    markup = "\n".join(
+        [
+            "# Title",
+            "%%meta desc=d%%",
+            "",
+            "Intro.",
+            "",
+            "## 常見問題",
+            "%%acf_faq type=q%%",
+            "<svg onload=alert(1)>Q?",
+            "%%acf_faq type=a%%",
+            '<img src=x onerror=alert(1)> A "quoted" answer',
+            "%%end%%",
+        ]
+    )
+    r = render_html(markup)
+    assert "<img" not in r.html_body
+    assert "<svg" not in r.html_body
+    assert '<div class="e-faq__head">&lt;svg onload=alert(1)&gt;Q?<span' in r.html_body
+    assert "<p>&lt;img src=x onerror=alert(1)&gt; A &quot;quoted&quot; answer</p>" in r.html_body
+    # JSON-LD keeps the raw text — escaping is an HTML concern only.
+    assert r.faq_schema_jsonld is not None
+    assert r.faq_schema_jsonld["mainEntity"][0]["name"] == "<svg onload=alert(1)>Q?"
+
+
+def test_xss_writer_controlled_faq_heading_escaped():
+    markup = "\n".join(
+        [
+            "# Title",
+            "%%meta desc=d%%",
+            "",
+            "## FAQ <svg onload=alert(1)>",
+            "%%acf_faq type=q%%",
+            "Q?",
+            "%%acf_faq type=a%%",
+            "A.",
+            "%%end%%",
+        ]
+    )
+    r = render_html(markup)
+    assert "<h2>FAQ &lt;svg onload=alert(1)&gt;</h2>" in r.html_body
+    assert "<svg" not in r.html_body
+
+
+def test_xss_blocklist_tripwire_still_hard_fails():
+    with pytest.raises(ValueError, match="sanitization"):
+        render_html(_wrap("<script>alert(1)</script>"))
+
+
+def test_escape_bare_ampersand_and_quote_exactly_once():
+    markup = "\n".join(
+        [
+            "# Title",
+            "%%meta desc=d%%",
+            "",
+            "## FAQ & more",
+            "%%acf_faq type=q%%",
+            "Q&A or 'quotes'?",
+            "%%acf_faq type=a%%",
+            "R&D & more",
+            "%%end%%",
+        ]
+    )
+    r = render_html(markup)
+    assert '<div class="e-faq__head">Q&amp;A or &#x27;quotes&#x27;?<span' in r.html_body
+    assert "<p>R&amp;D &amp; more</p>" in r.html_body
+    assert "<h2>FAQ &amp; more</h2>" in r.html_body
+    assert "&amp;amp;" not in r.html_body

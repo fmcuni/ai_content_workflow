@@ -327,4 +327,99 @@ describe("renderHtml", () => {
     expect(out.htmlBody).toContain("<table>");
     expect(out.htmlBody).toContain("<th>a</th>");
   });
+
+  // Stored-XSS regression suite (bowtie-ins#14): raw HTML that slips past the
+  // blocklist tripwire must render as inert escaped text, and FAQ text fields
+  // must be escaped before template interpolation.
+  describe("XSS hardening", () => {
+    const wrap = (body: string) => `# Title\n%%meta desc=d%%\n\n${body}\n`;
+
+    it("escapes raw inline HTML in the body instead of passing it through", () => {
+      const out = renderHtml(wrap('<img src=x onerror=alert(1)> and <svg onload=alert(1)>'));
+      expect(out.htmlBody).not.toMatch(/<img|<svg/i);
+      expect(out.htmlBody).toContain("&lt;img src=x onerror=alert(1)&gt;");
+      expect(out.htmlBody).toContain("&lt;svg onload=alert(1)&gt;");
+    });
+
+    it("neutralises a raw <a href=javascript:> anchor in the body", () => {
+      const out = renderHtml(wrap('<a href="javascript:alert(1)">click</a>'));
+      expect(out.htmlBody).not.toContain('href="javascript:');
+      expect(out.htmlBody).toContain("&lt;a href=");
+    });
+
+    it("refuses a javascript: URL written as a markdown link", () => {
+      const out = renderHtml(wrap("[click](javascript:alert(1))"));
+      expect(out.htmlBody).not.toContain('href="javascript:');
+    });
+
+    it("escapes FAQ question/answer text before pasting into the widget HTML", () => {
+      const markup = [
+        "# Title",
+        "%%meta desc=d%%",
+        "",
+        "Intro.",
+        "",
+        "## 常見問題",
+        "%%acf_faq type=q%%",
+        '<svg onload=alert(1)>Q?',
+        "%%acf_faq type=a%%",
+        '<img src=x onerror=alert(1)> A "quoted" answer',
+        "%%end%%",
+      ].join("\n");
+      const out = renderHtml(markup);
+      expect(out.htmlBody).not.toMatch(/<img|<svg/i);
+      expect(out.htmlBody).toContain(
+        '<div class="e-faq__head">&lt;svg onload=alert(1)&gt;Q?<span',
+      );
+      expect(out.htmlBody).toContain(
+        "<p>&lt;img src=x onerror=alert(1)&gt; A &quot;quoted&quot; answer</p>",
+      );
+      // JSON-LD keeps the raw text — escaping is an HTML concern only.
+      expect(out.faqSchemaJsonld).toMatchObject({
+        mainEntity: [{ name: "<svg onload=alert(1)>Q?" }],
+      });
+    });
+
+    it("escapes a writer-controlled FAQ heading in the injected <h2>", () => {
+      const markup = [
+        "# Title",
+        "%%meta desc=d%%",
+        "",
+        "## FAQ <svg onload=alert(1)>",
+        "%%acf_faq type=q%%",
+        "Q?",
+        "%%acf_faq type=a%%",
+        "A.",
+        "%%end%%",
+      ].join("\n");
+      const out = renderHtml(markup);
+      expect(out.htmlBody).toContain("<h2>FAQ &lt;svg onload=alert(1)&gt;</h2>");
+      expect(out.htmlBody).not.toMatch(/<svg/i);
+    });
+
+    it("still hard-fails the blocklist tripwire on <script>", () => {
+      expect(() => renderHtml(wrap("<script>alert(1)</script>"))).toThrow("sanitization");
+    });
+
+    it("escapes a bare ampersand and single quote exactly once (no double-escape)", () => {
+      const markup = [
+        "# Title",
+        "%%meta desc=d%%",
+        "",
+        "## FAQ & more",
+        "%%acf_faq type=q%%",
+        "Q&A or 'quotes'?",
+        "%%acf_faq type=a%%",
+        "R&D & more",
+        "%%end%%",
+      ].join("\n");
+      const out = renderHtml(markup);
+      expect(out.htmlBody).toContain(
+        '<div class="e-faq__head">Q&amp;A or &#x27;quotes&#x27;?<span',
+      );
+      expect(out.htmlBody).toContain("<p>R&amp;D &amp; more</p>");
+      expect(out.htmlBody).toContain("<h2>FAQ &amp; more</h2>");
+      expect(out.htmlBody).not.toContain("&amp;amp;");
+    });
+  });
 });
