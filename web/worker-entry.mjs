@@ -69,6 +69,7 @@ export default {
       isRscRequest: Boolean(request.headers.get("rsc")),
       prerenderedRoutes: PRERENDERED_ROUTES,
       apiBase: API_BASE,
+      search: url.search,
     });
 
     switch (decision.type) {

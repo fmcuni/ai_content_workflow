@@ -129,6 +129,8 @@ export interface ClassifyInput {
   isRscRequest: boolean;
   prerenderedRoutes: ReadonlySet<string>;
   apiBase: string;
+  /** Raw `url.search` (e.g. `"?run_id=abc"`, `""` when absent). */
+  search: string;
 }
 
 export type RouteDecision =
@@ -158,7 +160,7 @@ export function classifyRequest(input: ClassifyInput): RouteDecision {
 
   const apiTarget = mapApiTarget(input.pathname, input.apiBase);
   if (apiTarget) {
-    return { type: "api-proxy", target: apiTarget };
+    return { type: "api-proxy", target: apiTarget + input.search };
   }
 
   const isDocumentRequest =

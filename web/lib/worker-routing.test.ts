@@ -14,6 +14,7 @@ function baseInput(overrides: Partial<ClassifyInput> = {}): ClassifyInput {
     isRscRequest: false,
     prerenderedRoutes: PRERENDERED,
     apiBase: API_BASE,
+    search: "",
     ...overrides,
   };
 }
@@ -52,6 +53,51 @@ describe("classifyRequest", () => {
     expect(decision).toEqual({
       type: "api-proxy",
       target: `${API_BASE}/runs/123/resume`,
+    });
+  });
+
+  test("/api/* prefix proxy preserves the query string on the backend target", () => {
+    // Arrange
+    const input = baseInput({
+      pathname: "/api/wp-options/users",
+      search: "?run_id=abc&persona=vhis101-zh-hk",
+    });
+
+    // Act
+    const decision = classifyRequest(input);
+
+    // Assert
+    expect(decision).toEqual({
+      type: "api-proxy",
+      target: `${API_BASE}/wp-options/users?run_id=abc&persona=vhis101-zh-hk`,
+    });
+  });
+
+  test("/api/me exact-map proxy preserves the query string", () => {
+    // Arrange
+    const input = baseInput({ pathname: "/api/me", search: "?foo=bar" });
+
+    // Act
+    const decision = classifyRequest(input);
+
+    // Assert
+    expect(decision).toEqual({
+      type: "api-proxy",
+      target: `${API_BASE}/me?foo=bar`,
+    });
+  });
+
+  test("/api/auth-ticket path-preserving proxy preserves the query string", () => {
+    // Arrange
+    const input = baseInput({ pathname: "/api/auth-ticket", search: "?token=xyz" });
+
+    // Act
+    const decision = classifyRequest(input);
+
+    // Assert
+    expect(decision).toEqual({
+      type: "api-proxy",
+      target: `${API_BASE}/api/auth-ticket?token=xyz`,
     });
   });
 
