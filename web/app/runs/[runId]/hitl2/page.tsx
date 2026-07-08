@@ -132,6 +132,7 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
 
   const prefilledRef = useRef<ExistingPost | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
   // Captured when the confirm dialog opens so the description can show which
   // fields would be overwritten without reading the prefill ref during render.
   const [dirtyFields, setDirtyFields] = useState<("Author" | "Category" | "Slug")[]>([]);
@@ -323,9 +324,10 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
   const gateResolved = run.data != null && !atGate;
 
   // Target pin (issue #15): a refresh-mode run must confirm the exact CMS
-  // target the operator saw in the loaded WP-payload preview before approving.
+  // target the operator saw in a dry-publish preview before approving. The
+  // Approve button runs that dry-publish itself and confirms in a modal — the
+  // operator never needs to visit the payload tab.
   const isRefreshRun = run.data?.start_mode === "refresh";
-  const targetPreviewReady = !isRefreshRun || wpPayload.payload != null;
 
   const submit = useMutation({
     // Inline AI edits happen at the gate via "Request AI to edit"; the remaining
@@ -354,8 +356,21 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
       // Target pin 409 (issue #15): target changed since the preview — force a
       // fresh dry-publish before the operator can approve again.
       if (isRefreshRun) wpPayload.setPayload(null);
+      setApproveConfirmOpen(false);
       toast.error(apiErrorDetail(e));
     },
+  });
+
+  // Approve & push → dry-publish (verifies target_label server-side) → confirm
+  // modal → submit with the confirmed target. Same body as the real approve.
+  const prepareApprove = useMutation({
+    mutationFn: () =>
+      api.dryPublish(runId, buildDryRequest(collab ? flattenCollabDoc(collab.ydoc) : html, form)),
+    onSuccess: (data) => {
+      wpPayload.setPayload(data);
+      setApproveConfirmOpen(true);
+    },
+    onError: (e: Error) => toast.error(`Couldn't verify publish target — ${e.message}`),
   });
 
   // --- Autosave + version history -----------------------------------------
@@ -516,13 +531,11 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
           </>
         ) : (
           <>
-            {isRefreshRun && (
+            {isRefreshRun && wpPayload.payload && (
               <span className="mr-2 font-mono text-[11px] uppercase tracking-wider text-ink-faint">
-                {wpPayload.payload
-                  ? wpPayload.payload.target_post_id != null
-                    ? `Will UPDATE post #${wpPayload.payload.target_post_id} · ${wpPayload.payload.target_label}`
-                    : `Will CREATE a new post · ${wpPayload.payload.target_label}`
-                  : `Run publish preview first (${cmsKindAbbrev(cmsKind)} payload tab)`}
+                {wpPayload.payload.target_post_id != null
+                  ? `Will UPDATE post #${wpPayload.payload.target_post_id} · ${wpPayload.payload.target_label}`
+                  : `Will CREATE a new post · ${wpPayload.payload.target_label}`}
               </span>
             )}
             <RoleButton
@@ -539,12 +552,14 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               need="publish"
               deniedHint="Reviewer role required to approve and publish."
               variant="primary"
-              disabled={!renderReady || submit.isPending || !atGate || !targetPreviewReady}
-              onClick={() => submit.mutate("approve")}
+              disabled={!renderReady || submit.isPending || prepareApprove.isPending || !atGate}
+              onClick={() => prepareApprove.mutate()}
             >
-              {submit.isPending && submit.variables === "approve"
-                ? `↻ Pushing to ${cmsKindAbbrev(cmsKind)}…`
-                : `Approve & push to ${cmsKindAbbrev(cmsKind)} ↪`}
+              {prepareApprove.isPending
+                ? "↻ Checking target…"
+                : submit.isPending && submit.variables === "approve"
+                  ? `↻ Pushing to ${cmsKindAbbrev(cmsKind)}…`
+                  : `Approve & push to ${cmsKindAbbrev(cmsKind)} ↪`}
             </RoleButton>
           </>
         )
@@ -718,6 +733,55 @@ export default function Hitl2Page({ params }: { params: Promise<{ runId: string 
               }}
             >
               Overwrite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve confirm (issue #15) — shows the dry-publish target so the
+          operator verifies target_label without visiting the payload tab. */}
+      <Dialog open={approveConfirmOpen} onOpenChange={setApproveConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve &amp; push to {cmsKindName(cmsKind)}?</DialogTitle>
+            <DialogDescription>
+              {wpPayload.payload ? (
+                <>
+                  {wpPayload.payload.target_post_id != null ? (
+                    <>
+                      Will <strong>UPDATE</strong> post #{wpPayload.payload.target_post_id} on{" "}
+                    </>
+                  ) : (
+                    <>
+                      Will <strong>CREATE</strong> a new post on{" "}
+                    </>
+                  )}
+                  <span className="font-mono text-ink">{wpPayload.payload.target_label}</span>{" "}
+                  ({wpPayload.payload.target_base_url}) via{" "}
+                  <span className="font-mono text-ink">
+                    {wpPayload.payload.request_method} {wpPayload.payload.request_url}
+                  </span>
+                  .
+                </>
+              ) : (
+                "Preparing payload…"
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setApproveConfirmOpen(false)}
+              disabled={submit.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => submit.mutate("approve")}
+              disabled={submit.isPending || !wpPayload.payload}
+            >
+              {submit.isPending ? `↻ Pushing to ${cmsKindAbbrev(cmsKind)}…` : "Confirm & push"}
             </Button>
           </DialogFooter>
         </DialogContent>
