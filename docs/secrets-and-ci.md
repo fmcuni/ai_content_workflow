@@ -150,17 +150,32 @@ then generated and held entirely by Cloudflare, never a GitHub secret.
 1. **Prod** moves to the company-owned **Bowtie Enterprise Account**
    (`49e489ec5d8bc26e6ae71632052b1add` — already hosts other Bowtie internal
    tools like `bowtie-drop`). This needs a new Hyperdrive config (Hyperdrive is
-   account-scoped) and a full secret rotation (see below) on the new account.
+   account-scoped), a full secret rotation (see below) on the new account, and
+   **Workers Paid** enabled on that account — the Free plan's 10ms CPU cap
+   crash-looped the web Worker on 2026-07-06; Free is not viable for this app.
+   The new account also means a new `workers.dev` subdomain: update the
+   committed `web/env.prod.public` SSOT (`NEXT_PUBLIC_API_BASE` etc.) as part
+   of the cutover, or the web bundle will bake the old URLs.
 2. **Dev** stays on Franco's account for now (decided for speed) — revisit once
    prod migration is proven out.
 3. For each of the 4 Workers, connect it to this GitHub repo via **Settings →
-   Builds → Connect** in the Cloudflare dashboard, with a root directory of
-   `deploy/cloudflare-workers` (backend) or `web` (frontend), a deploy command
-   of `npx wrangler deploy` (or `npx wrangler deploy --env dev` for the dev
-   Worker), and the one build-time secret
-   (`NEXT_PUBLIC_SUPABASE_ANON_KEY[_DEV]`) set as a Cloudflare-side build
-   variable instead of a GitHub secret. Chain `node ../../scripts/smoke-check.mjs
-   <url>/login` onto the frontend deploy command (see `scripts/smoke-check.mjs`).
+   Builds → Connect** in the Cloudflare dashboard:
+   - **Backend** (`bowtie-content-tool-poc[-dev]`): root directory
+     `deploy/cloudflare-workers`, deploy command `npx wrangler deploy`
+     (`npx wrangler deploy --env dev` for the dev Worker).
+   - **Frontend** (`bowtie-content-tool-web[-dev]`): root directory `web`,
+     deploy command `node ../scripts/deploy-web.mjs prod && node
+     ../scripts/smoke-check.mjs <url>/login` (`deploy-web.mjs dev` for the dev
+     Worker). Do **not** use a bare `npx wrangler deploy` here — it would skip
+     the OpenNext build, the prerender materialization
+     (`web/scripts/materialize-prerender.mjs`), and the authoritative
+     `web/env.<target>.public` `NEXT_PUBLIC_*` baking, shipping a broken or
+     wrongly-configured bundle. `deploy-web.mjs` needs no Cloudflare token in
+     Builds (wrangler uses the Builds-injected credentials).
+
+   In both cases set the one build-time secret
+   (`NEXT_PUBLIC_SUPABASE_ANON_KEY[_DEV]`) as a Cloudflare-side build variable
+   instead of a GitHub secret.
 4. Once all 4 Workers build+deploy successfully via Workers Builds, **delete**
    `.github/workflows/deploy-workers.yml` and `deploy-workers-dev.yml`, and
    remove the (by-then-unused) `CF_ALT_*` / `CLOUDFLARE_*` / anon-key GH secrets.
