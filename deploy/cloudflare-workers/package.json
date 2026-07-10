@@ -36,5 +36,13 @@
     "typescript": "^5.7.0",
     "vitest": "^4.1.7",
     "wrangler": "^4.95.0"
+  },
+  "allowScripts": {
+    "@google/genai@2.7.0": true,
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "protobufjs@7.6.1": true,
+    "sharp@0.34.5": true,
+    "workerd@1.20260603.1": true
   }
 }
