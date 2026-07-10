@@ -127,7 +127,7 @@
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",
-			"id": "0875862f2f964a2cb7f1b69094f3818b"
+			"id": "fa5e038691164995acb76d50153d9d38"
 		}
 	],
 	// Rate Limiting bindings (Cloudflare native `ratelimit`). Abuse-prevention
