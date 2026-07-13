@@ -24,10 +24,11 @@ export const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  // The `fmc.workers.dev` account was deprecated 2026-07-07 and removed here.
-  // Add the Bowtie Enterprise Account's subdomain when prod migrates there —
-  // derive from the Worker's own origin instead if that's simpler at that point.
-  "connect-src 'self' https://*.supabase.co https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
+  // Prod backend is the Bowtie Enterprise Account at api.content.seo.bowtie.hk;
+  // the dev stack still runs on *.franco-ma.workers.dev. Both hosts are allowed
+  // (one shared CSP string across prod + dev). Keep in sync with
+  // web/lib/security-headers.ts.
+  "connect-src 'self' https://*.supabase.co https://api.content.seo.bowtie.hk wss://api.content.seo.bowtie.hk https://*.franco-ma.workers.dev wss://*.franco-ma.workers.dev",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
