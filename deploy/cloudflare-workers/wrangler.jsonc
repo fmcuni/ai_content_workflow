@@ -17,7 +17,7 @@
 	// Bowtie Enterprise Account is tracked as a separate follow-up (see
 	// docs/secrets-and-ci.md); dev stays on this account for now.
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "bowtie-content-tool-poc",
+	"name": "ai-content-workflow-backend",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-05-30",
 	"compatibility_flags": [

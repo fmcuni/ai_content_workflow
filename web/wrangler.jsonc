@@ -17,7 +17,7 @@
   // so it is NOT set here — pass it when building, e.g.
   //   NEXT_PUBLIC_API_BASE=https://bowtie-content-tool.<acct>.workers.dev npm run cf:deploy
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "bowtie-content-tool-web",
+  "name": "ai-content-workflow-frontend",
   // Custom fast-path entry in front of OpenNext's handler — see worker-entry.mjs
   // for why (every route is prerendered; most requests never need the full
   // Next server). Falls through to .open-next/worker.js (dynamic import) for
