@@ -28,7 +28,19 @@ Effort guide:
 - Sonnet: medium for building, low for scouting.
 - Opus: xhigh only for deep review.
 
+Delegation contract: every delegated task states scope (files/area), acceptance
+criteria, and which validation to run. Trivial single-file edits stay in the
+main thread — delegation overhead isn't free.
+
+Escalation, not overuse: start with the cheapest agent that can do the job.
+Escalate (scout→builder→opus-reviewer→Fable) only on failed validation,
+unclear root cause, or risk discovered mid-task — never just because a task is
+long. A builder that fails validation twice stops and reports instead of
+thrashing.
+
 Subagents should return concise findings: files inspected or changed, validation run, risks, and next steps. Do not dump huge logs unless requested.
+
+`/delegate <task>` runs the full plan → build → review → accept pipeline.
 
 # Project Instructions
 
@@ -96,24 +108,33 @@ scripts/             Cron entrypoints (e.g. refresh_scan)
 
 ## Deployment (production)
 
-Production runs the **Workers-native TypeScript port**, not the Python backend:
+Production runs the **Workers-native TypeScript port**, not the Python backend.
+
+**Prod is being cut over to the company-owned Bowtie Enterprise Cloudflare
+account** (`49e489ec…`, the account that hosts `bowtie-drop` etc.), where deploys
+are handled by **Cloudflare Workers Builds** (native git integration) that
+**auto-deploy on push to `main`** — no Cloudflare credential lives in GitHub
+Actions on this path. New prod domains:
 
 | Service | Source | URL |
 |---|---|---|
-| Backend | `deploy/cloudflare-workers/` (`bowtie-content-tool-poc`) | `https://bowtie-content-tool-poc.franco-ma.workers.dev` |
-| Frontend | `web/` via `@opennextjs/cloudflare` (`bowtie-content-tool-web`) | `https://bowtie-content-tool-web.franco-ma.workers.dev` |
+| Backend | `deploy/cloudflare-workers/` (`bowtie-content-tool-poc`) | `https://api.content.seo.bowtie.hk` |
+| Frontend | `web/` via `@opennextjs/cloudflare` (`bowtie-content-tool-web`) | `https://content.seo.bowtie.hk` |
 
-- CI: `.github/workflows/deploy-workers.yml` deploys both on push to `main`, to
-  Franco's personal Cloudflare account ("Bowtie Content SEO" in the dashboard,
-  franco-ma.workers.dev), via the `CF_ALT_API_TOKEN`/`CF_ALT_ACCOUNT_ID` secrets
-  (wrangler reads them as `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`). This
-  is an **interim state**: the account previously used for prod
-  (`fmc.workers.dev`) was deprecated by Franco on 2026-07-07 after he confirmed
-  franco-ma.workers.dev is the account the marketing team actually uses. See
-  `docs/secrets-and-ci.md`'s "Migration plan" for the move to Cloudflare
-  Workers Builds + the company-owned Bowtie Enterprise Account (tracked from
-  Slack thread `#CQE60PTQC`). Runtime secrets (`POSTGRES_URL`, `GEMINI_API_KEY`,
-  `WP_*`) are set once via `wrangler secret put` and preserved across deploys.
+- **Cutover status (as of 2026-07-10, in progress):** Enterprise Workers Builds +
+  the Enterprise Hyperdrive (PR #30) are being wired up by Bowtie infra (Martin).
+  The prod Supabase project is unchanged (`gfpkqsiyeslscgsuehmj`) — the new domain
+  was just added to its auth redirect allow-list. `content.seo.bowtie.hk` still
+  routes to the legacy `franco-ma.workers.dev` Worker until DNS is flipped
+  (planned next week). Tracked from Slack `#CQE60PTQC`; see `docs/secrets-and-ci.md`.
+- **CI:** prod is NO LONGER deployed from GitHub Actions. The legacy
+  `.github/workflows/deploy-workers.yml` (which deployed to Franco's personal
+  franco-ma.workers.dev account on push to `main`) is now **manual-only**
+  (`workflow_dispatch`), kept only as a transition fallback so Workers Builds and
+  Actions don't double-deploy prod. Delete it after the cutover is verified.
+- Runtime secrets (`POSTGRES_URL`, `GEMINI_API_KEY`, `WP_*`) are set once via
+  `wrangler secret put` (rotated onto the Enterprise account during cutover) and
+  preserved across deploys.
 - The Python backend (`content_tool/`) is **retained** — it runs the `evals/`
   suite and is used for local dev. It is no longer the production hosting path.
   (The old Worker+Containers stack — `deploy/cloudflare/`, `Dockerfile.cf-*` — and
@@ -123,17 +144,20 @@ Production runs the **Workers-native TypeScript port**, not the Python backend:
 
 ### Dev environment (Workers) — develop here first
 
-A parallel, isolated dev stack mirrors prod via wrangler named environments
-(`env.dev` in both `wrangler.jsonc`), on the **same** Cloudflare account as
-prod (above). **Prefer building + verifying in dev before touching prod.**
+A parallel, isolated dev stack runs on Franco's personal `franco-ma.workers.dev`
+account via wrangler named environments (`env.dev` in both `wrangler.jsonc`).
+Prod is moving to the Enterprise account (above); **dev stays on the personal
+account for now.** **Prefer building + verifying in dev before touching prod.**
 
 | Service | Dev Worker | Dev URL |
 |---|---|---|
 | Backend | `bowtie-content-tool-poc-dev` | `https://bowtie-content-tool-poc-dev.franco-ma.workers.dev` |
 | Frontend | `bowtie-content-tool-web-dev` | `https://bowtie-content-tool-web-dev.franco-ma.workers.dev` |
 
-- **Deploy dev (manual):** `npm run deploy:dev` (backend) / `npm run cf:deploy:dev`
-  (web, with `NEXT_PUBLIC_*` for dev). CI deploys **prod only**.
+- **Deploy dev:** push to a `dev`/`dev/**` branch → `.github/workflows/deploy-workers-dev.yml`
+  auto-deploys both dev Workers (or manually: `npm run deploy:dev` backend /
+  `npm run cf:deploy:dev` web). Prod deploys off `main` via Cloudflare Workers
+  Builds, so **keep dev iteration on dev branches** and promote to `main` only for prod.
 - **Isolated** dev Supabase DB (`ovxvhxwmqeccjudhyfbh`) + Hyperdrive + Workflows
   (`-dev`) + DO namespaces; refresh-scan cron disabled. **WordPress is shared with
   prod** — a dev publish hits the live CMS.

@@ -7,26 +7,30 @@ name: Deploy Workers (dev)
 # `npm run deploy:dev` / `npm run cf:deploy:dev` — it makes dev deploys
 # reproducible so dev stops drifting from main / from the operator's shell.
 #
-# MANUAL-ONLY (workflow_dispatch). Dev is a pre-prod verification stack you push
-# to deliberately before promoting to prod; it is not auto-deployed on every
-# main push (prod is — see deploy-workers.yml). Trigger it from the Actions tab
-# after merging, or to refresh dev to a specific commit.
+# TRIGGER: push to a dev branch (`dev` or `dev/**`), plus manual dispatch. Dev is
+# the pre-prod verification stack; deploying it off dev branches keeps prod
+# deploys (now Cloudflare Workers Builds on the Bowtie Enterprise account, on push
+# to `main`) cleanly separate from day-to-day dev iteration. Work on a
+# `dev/<feature>` branch to auto-refresh the dev Workers; promote to `main` only
+# when ready for prod.
+#
+# This dev stack stays on Franco's personal franco-ma.workers.dev account (via the
+# CF_ALT_* secrets) for now — only PROD is moving to the Enterprise account.
 #
 # Build-time NEXT_PUBLIC_* values come from the committed SSOT web/env.dev.public
 # (parsed by scripts/deploy-web.mjs) — never hand-typed. The one secret (the dev
 # Supabase anon key) is injected from the NEXT_PUBLIC_SUPABASE_ANON_KEY_DEV repo
-# secret. Cloudflare creds use the CF_ALT_* secrets (see deploy-workers.yml for
-# why — the fmc.workers.dev account was deprecated 2026-07-07).
+# secret.
 #
 # NOTE: dev runtime secrets on the -dev Worker (POSTGRES_URL, GEMINI_API_KEY,
 # SUPABASE_SERVICE_ROLE_KEY, WP_*) are set ONCE via `wrangler secret put --env
-# dev` and preserved across deploys — they are NOT synced here (same model as
-# prod).
-#
-# This workflow is a stop-gap — see deploy-workers.yml's header for the plan to
-# move to Cloudflare Workers Builds and retire GitHub-Actions-held secrets.
+# dev` and preserved across deploys — they are NOT synced here.
 
 on:
+  push:
+    branches:
+      - dev
+      - "dev/**"
   workflow_dispatch:
 
 concurrency:

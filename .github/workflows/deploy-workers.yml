@@ -1,39 +1,24 @@
 name: Deploy Workers
 
-# Deploys the Workers-native stack to Cloudflare on push to main.
+# LEGACY / TRANSITION FALLBACK — manual only. Does NOT auto-deploy on main.
 #
-# This replaces the retired "Worker + 2 Containers" stack (the old
-# deploy-cloudflare.yml + Dockerfile.cf-backend/.cf-frontend). The Python
-# backend in content_tool/ is NOT deployed here — it remains for the evals and
-# local dev. The production backend is now the TypeScript Worker in
-# deploy/cloudflare-workers/.
+# Production is being cut over to the company-owned Bowtie Enterprise Cloudflare
+# account, where deploys are handled by **Cloudflare Workers Builds** (native git
+# integration) that auto-deploy on push to `main`. No Cloudflare credential lives
+# in GitHub Actions on the new prod path. See docs/secrets-and-ci.md.
 #
-# Two Workers are deployed, both on Franco's "Bowtie Content SEO" Cloudflare
-# account (franco-ma.workers.dev):
+# Because Workers Builds now owns "deploy prod on push to main", this workflow no
+# longer triggers on `main` — otherwise every main push would DOUBLE-deploy prod
+# (once via Workers Builds to the Enterprise account, once here to Franco's
+# personal franco-ma.workers.dev account). It is retained as a MANUAL fallback
+# (workflow_dispatch) so the LEGACY franco-ma prod Workers can still be redeployed
+# during the transition week if the Enterprise cutover needs backing out.
+# DELETE this file once content.seo.bowtie.hk / api.content.seo.bowtie.hk are
+# confirmed served by the Enterprise Workers Builds.
+#
+# Targets (LEGACY franco-ma.workers.dev account, via CF_ALT_* secrets):
 #   - Backend  : bowtie-content-tool-poc  (deploy/cloudflare-workers/)
 #   - Frontend : bowtie-content-tool-web  (web/, OpenNext)
-#
-# INTERIM STATE (2026-07-07): this account was previously called "alt" in this
-# repo's history — it hosted a compute-only duplicate of prod while the real
-# prod lived on a separate personal account (fmc.workers.dev, CLOUDFLARE_*
-# secrets). Franco has confirmed franco-ma.workers.dev is the real production
-# the marketing team uses, and is deprecating the fmc account. This workflow
-# has been repointed to use the CF_ALT_* secrets (already provisioned — no new
-# secret needed) as the SOLE deploy target; the old fmc-targeting steps and the
-# separate "alt account" duplicate-deploy steps have been removed.
-#
-# This workflow (and deploy-workers-dev.yml) is a stop-gap. The end goal
-# (tracked in docs/secrets-and-ci.md) is to move deploys to Cloudflare Workers
-# Builds (native git integration), so no Cloudflare credential needs to live in
-# GitHub Actions at all — delete both workflow files once that is set up and
-# verified for all four Workers.
-#
-# Required repo secrets:
-#   CF_ALT_API_TOKEN       — token with Workers Scripts edit, on the
-#                            franco-ma.workers.dev account
-#   CF_ALT_ACCOUNT_ID      — that account's id
-#   NEXT_PUBLIC_SUPABASE_ANON_KEY — public client key, routed through a secret
-#                            for hygiene (frontend build-time var)
 # wrangler reads the CF_ALT_* pair via CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID
 # env vars set per-step below.
 #
@@ -42,14 +27,6 @@ name: Deploy Workers
 # across `wrangler deploy` runs.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "deploy/cloudflare-workers/**"
-      - "web/**"
-      - "config/**"
-      - "prompts/**"
-      - ".github/workflows/deploy-workers.yml"
   workflow_dispatch:
 
 concurrency:

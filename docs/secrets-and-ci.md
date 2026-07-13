@@ -83,8 +83,8 @@ secrets — everything is build-time `NEXT_PUBLIC_*`.
 | Workflow | Trigger | Does |
 |---|---|---|
 | `ci.yml` | PR / push to main (Python paths) | ruff + pyright (advisory) + pytest |
-| `deploy-workers.yml` | push to main | secret drift-guard → deploy **prod** backend + frontend |
-| `deploy-workers-dev.yml` | **manual** (`workflow_dispatch`) | secret drift-guard → deploy **dev** backend + frontend |
+| `deploy-workers.yml` | **manual** (`workflow_dispatch`) | LEGACY franco-ma prod fallback. Prod-on-`main` is now **Cloudflare Workers Builds** on the Enterprise account (no GH Actions). Delete after cutover |
+| `deploy-workers-dev.yml` | push to `dev`/`dev/**` + manual | secret drift-guard → deploy **dev** backend + frontend (franco-ma account) |
 | `nightly-evals.yml` | nightly cron + manual | LLM-judge evals against prod Supabase |
 | `collab-e2e.yml` | manual | live two-context collab e2e on a throwaway local DB |
 
@@ -112,11 +112,14 @@ the same change.
 
 ## Dev↔prod workflow
 
-1. Develop + verify on **dev** first (`deploy-workers-dev.yml` or the `:dev`
-   npm scripts). See `docs/dev-environment-runbook.md`.
+1. Develop + verify on **dev** first: push to a `dev`/`dev/**` branch to
+   auto-deploy the dev stack (`deploy-workers-dev.yml`), or use the `:dev` npm
+   scripts. See `docs/dev-environment-runbook.md`.
 2. Apply DB migrations to **both** (dev `supabase db push --db-url "$DEV_POSTGRES_URL"`,
    prod `supabase db push`).
-3. Merge to `main` → `deploy-workers.yml` auto-deploys prod.
+3. Merge to `main` → **Cloudflare Workers Builds** (Enterprise account)
+   auto-deploys prod. (During the cutover, `content.seo.bowtie.hk` may still route
+   to the legacy franco-ma Worker until DNS is flipped.)
 4. Runtime data (voices/prompts) is **not** auto-synced between dev and prod.
 
 ---
