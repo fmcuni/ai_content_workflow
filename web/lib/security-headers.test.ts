@@ -35,6 +35,10 @@ describe("security-headers", () => {
   it("CSP connect-src allows self, supabase, and the workers.dev SSE + WS origins", () => {
     expect(CONTENT_SECURITY_POLICY).toMatch(/connect-src[^;]*'self'/);
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.supabase.co");
+    // Prod backend (Bowtie Enterprise account).
+    expect(CONTENT_SECURITY_POLICY).toContain("https://api.content.seo.bowtie.hk");
+    expect(CONTENT_SECURITY_POLICY).toContain("wss://api.content.seo.bowtie.hk");
+    // Dev backend.
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.franco-ma.workers.dev");
     expect(CONTENT_SECURITY_POLICY).toContain("wss://*.franco-ma.workers.dev");
   });

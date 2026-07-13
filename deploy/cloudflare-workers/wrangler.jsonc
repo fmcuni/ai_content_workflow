@@ -112,7 +112,7 @@
 		// SSE CORS allow-origin: the deployed frontend Worker (browser-direct SSE to
 		// /runs/:id/events and /topic-batches/:id/events). REST goes via Next rewrites
 		// (server-side, no CORS). See src/http/cors.ts.
-		"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev",
+		"FRONTEND_ORIGIN": "https://content.seo.bowtie.hk",
 		// Verbose per-step event log: persist raw *.thinking events too. Default
 		// ON; set "0"/"false"/"off" to stream thinking live but skip persisting it
 		// to content_tool.run_event_logs. Read by the RunStream DO.
