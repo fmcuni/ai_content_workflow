@@ -22,8 +22,11 @@ export const STATE_FILE = path.join(OUT_DIR, "state.json");
 
 export const DEV_SUPABASE_REF = "ovxvhxwmqeccjudhyfbh";
 export const DEV_SUPABASE_URL = `https://${DEV_SUPABASE_REF}.supabase.co`;
-export const DEV_WEB_HOST = "bowtie-content-tool-web-dev.franco-ma.workers.dev";
-export const DEV_API_HOST = "bowtie-content-tool-poc-dev.franco-ma.workers.dev";
+// 2026-07-13: dev repurposed the old prod Worker names (the `-dev` URLs were
+// flagged "Suspected Phishing"; prod moved to the Enterprise account). These
+// hosts are still DEV-ONLY — the pin-to-dev guard semantics are unchanged.
+export const DEV_WEB_HOST = "bowtie-content-tool-web.franco-ma.workers.dev";
+export const DEV_API_HOST = "bowtie-content-tool-poc.franco-ma.workers.dev";
 export const DEV_WEB_URL = `https://${DEV_WEB_HOST}`;
 export const DEV_API_URL = `https://${DEV_API_HOST}`;
 

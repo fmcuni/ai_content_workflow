@@ -161,7 +161,10 @@
 	// inherited, so they are intentionally omitted.
 	"env": {
 		"dev": {
-			"name": "bowtie-content-tool-poc-dev",
+			// Repurposed old prod Worker name (2026-07-13): the `-dev`-suffixed
+			// workers.dev URLs got flagged "Suspected Phishing"; prod moved to the
+			// Enterprise account, freeing these clean-reputation names for dev.
+			"name": "bowtie-content-tool-poc",
 			// Disable the daily refresh-scan cron in dev. `crons: []` disables it;
 			// omitting the key would INHERIT the top-level "0 2 * * *" and run scans
 			// (Gemini spend + writes) against the dev DB on a schedule.
@@ -209,7 +212,7 @@
 			"vars": {
 				"GEMINI_MODEL": "gemini-3.1-pro-preview",
 				// Browser-direct SSE allow-origin: the DEV frontend Worker.
-				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web-dev.franco-ma.workers.dev",
+				"FRONTEND_ORIGIN": "https://bowtie-content-tool-web.franco-ma.workers.dev",
 				"PERSIST_THINKING": "on",
 				// Dev Supabase project (JWKS issuer for the dev GoTrue tokens). Must
 				// match NEXT_PUBLIC_SUPABASE_URL baked into the dev web build, or

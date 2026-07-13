@@ -71,12 +71,15 @@
   // Franco on 2026-07-07, so there is no `alt`/`alt-dev` split anymore.
   "env": {
     "dev": {
-      "name": "bowtie-content-tool-web-dev",
+      // Repurposed old prod Worker name (2026-07-13): the `-dev`-suffixed
+      // workers.dev URLs got flagged "Suspected Phishing"; prod moved to the
+      // Enterprise account, freeing these clean-reputation names for dev.
+      "name": "bowtie-content-tool-web",
       "workers_dev": true,
       "services": [
         {
           "binding": "API",
-          "service": "bowtie-content-tool-poc-dev"
+          "service": "bowtie-content-tool-poc"
         }
       ]
     }
