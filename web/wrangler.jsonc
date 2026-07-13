@@ -4,8 +4,11 @@
   // `npm run cf:deploy`. Free-plan, no Containers.
   //
   // Request model:
-  //   - REST: the app calls relative `/api/*` paths; Next `rewrites()`
-  //     (next.config.mjs) proxy them to the backend Worker (NEXT_PUBLIC_API_BASE).
+  //   - REST: the app calls relative `/api/*` paths; worker-entry.mjs proxies
+  //     them to the backend Worker over the `API` service binding (Worker→Worker,
+  //     never re-enters the public edge — so Cloudflare Access/WARP policies on
+  //     the API hostname don't block the hop). Next `rewrites()` (next.config.mjs)
+  //     remain as the local `next dev` fallback.
   //   - SSE:  the browser opens `${NEXT_PUBLIC_API_BASE}/runs/:id/events` and
   //     `/topic-batches/:id/events` DIRECTLY against the backend Worker, which
   //     now returns CORS headers (see deploy/cloudflare-workers/src/http/cors.ts).
@@ -24,13 +27,27 @@
   "compatibility_flags": [
     // Node.js APIs used by the Next.js server runtime under OpenNext.
     "nodejs_compat",
-    // Let `fetch()` reach public URLs (the backend Worker) rather than looping
-    // back internally — required for the `/api/*` rewrite proxy to egress.
+    // Let `fetch()` reach public URLs rather than looping back internally.
+    // The `/api/*` proxy now rides the `API` service binding, but this still
+    // covers the no-binding fallback in worker-entry.mjs and any public
+    // fetches from the OpenNext handler.
     "global_fetch_strictly_public"
   ],
   "observability": {
     "enabled": true
   },
+  // Backend Worker service binding — worker-entry.mjs dispatches the `/api/*`
+  // proxy through this instead of a public fetch (see "Request model" above).
+  // Non-inheritable: env.dev repeats it against the dev backend Worker.
+  "services": [
+    {
+      "binding": "API",
+      // The production backend Worker's ACTUAL deployed name (the Worker
+      // serving api.content.seo.bowtie.hk) — service bindings resolve by
+      // Worker name on the same account.
+      "service": "ai-content-workflow-backend"
+    }
+  ],
   // Static assets (Next build output) served by the Worker.
   "assets": {
     "directory": ".open-next/assets",
@@ -55,7 +72,13 @@
   "env": {
     "dev": {
       "name": "bowtie-content-tool-web-dev",
-      "workers_dev": true
+      "workers_dev": true,
+      "services": [
+        {
+          "binding": "API",
+          "service": "bowtie-content-tool-poc-dev"
+        }
+      ]
     }
   }
 }

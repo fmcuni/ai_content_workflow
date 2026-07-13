@@ -77,10 +77,20 @@ export default {
         return forbidden();
       case "static-miss-404":
         return staticMiss();
-      case "api-proxy":
+      case "api-proxy": {
         // redirect: "manual" — a reverse proxy must pass 3xx through to the
         // browser, not follow it inside the Worker.
-        return fetch(new Request(decision.target, request), { redirect: "manual" });
+        //
+        // Dispatched over the API service binding (Worker→Worker inside
+        // Cloudflare) rather than a public fetch: edge policies on the API's
+        // public hostname (Cloudflare Access / WARP) would block this
+        // server-side hop, which carries no WARP identity. Falls back to a
+        // public fetch only when the binding is absent (local `wrangler dev`
+        // without the backend Worker running).
+        const proxied = new Request(decision.target, request);
+        const upstream = env.API ?? { fetch };
+        return upstream.fetch(proxied, { redirect: "manual" });
+      }
       case "redirect-login":
         return redirectToLogin(request, decision.location);
       case "prerender-hit":
